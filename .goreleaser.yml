@@ -27,9 +27,7 @@ builds:
 
 archives:
   - id: foundry-archive
-    format_overrides:
-      - goos: windows
-        format: zip
+    format: tar.gz
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
       - LICENSE*
