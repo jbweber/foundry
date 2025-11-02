@@ -43,3 +43,5 @@ bin/
 .env
 .env.local
 .env.*.local
+
+/test-vm.yaml

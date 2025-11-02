@@ -427,11 +427,26 @@ old-vm     shut off  4      8 GiB   -
 
 ## Testing Strategy
 
+### Testing Philosophy
+
+**Focus on Interface Contracts**: Tests should validate behavior through public APIs rather than implementation details.
+
+**Pragmatic Coverage**: For methods that only return error/nil, test both paths. Add more specific tests only when there are meaningful behavioral variations.
+
+**Evolutionary Testing**: Start with focused tests covering the interface contract. If specific problems arise in production:
+1. Add targeted tests for those scenarios
+2. Improve abstractions to make issues more testable
+3. Refine interfaces based on real-world usage
+
+This keeps tests maintainable while providing confidence in the system.
+
 ### Unit Tests
 - MAC calculation from IP
 - YAML config parsing
 - Cloud-init template generation
 - XML domain generation
+- VM creation orchestration (using mocks)
+- Cleanup behavior (error paths and best-effort cleanup)
 
 ### Integration Tests
 - Requires libvirt running
