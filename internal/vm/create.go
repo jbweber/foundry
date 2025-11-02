@@ -8,10 +8,10 @@ import (
 
 	"github.com/digitalocean/go-libvirt"
 
-	"github.com/jbweber/plow/internal/cloudinit"
-	"github.com/jbweber/plow/internal/config"
-	"github.com/jbweber/plow/internal/disk"
-	plowlibvirt "github.com/jbweber/plow/internal/libvirt"
+	"github.com/jbweber/foundry/internal/cloudinit"
+	"github.com/jbweber/foundry/internal/config"
+	"github.com/jbweber/foundry/internal/disk"
+	foundrylibvirt "github.com/jbweber/foundry/internal/libvirt"
 )
 
 // Create creates a VM from a YAML configuration file.
@@ -44,7 +44,7 @@ func Create(ctx context.Context, configPath string) error {
 func CreateFromConfig(ctx context.Context, cfg *config.VMConfig) error {
 	// State tracking for cleanup
 	var (
-		libvirtClient  *plowlibvirt.Client
+		libvirtClient  *foundrylibvirt.Client
 		storageManager *disk.Manager
 		domainDefined  bool
 		storageCreated bool
@@ -60,7 +60,7 @@ func CreateFromConfig(ctx context.Context, cfg *config.VMConfig) error {
 
 	// Step 1: Connect to libvirt
 	log.Printf("Connecting to libvirt...")
-	libvirtClient, createErr = plowlibvirt.ConnectWithContext(ctx, "", 0)
+	libvirtClient, createErr = foundrylibvirt.ConnectWithContext(ctx, "", 0)
 	if createErr != nil {
 		return fmt.Errorf("failed to connect to libvirt: %w", createErr)
 	}
@@ -144,7 +144,7 @@ func CreateFromConfig(ctx context.Context, cfg *config.VMConfig) error {
 	// Step 11: Generate domain XML
 	log.Printf("Generating domain XML...")
 	var domainXML string
-	domainXML, createErr = plowlibvirt.GenerateDomainXML(cfg)
+	domainXML, createErr = foundrylibvirt.GenerateDomainXML(cfg)
 	if createErr != nil {
 		return fmt.Errorf("failed to generate domain XML: %w", createErr)
 	}
@@ -187,7 +187,7 @@ func CreateFromConfig(ctx context.Context, cfg *config.VMConfig) error {
 //   - domainDefined: Whether the domain was successfully defined
 //   - storageCreated: Whether any storage was created
 func cleanup(ctx context.Context, vmName string, storageManager *disk.Manager,
-	libvirtClient *plowlibvirt.Client, domainDefined, storageCreated bool) {
+	libvirtClient *foundrylibvirt.Client, domainDefined, storageCreated bool) {
 
 	log.Printf("Cleaning up after failed VM creation...")
 

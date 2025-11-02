@@ -1,8 +1,8 @@
-# Plow Design Document
+# Foundry Design Document
 
 ## Overview
 
-Plow is a Go-based CLI tool for managing libvirt VMs, replacing the Ansible-based workflow in the homestead project. It provides simple commands to create, destroy, and list VMs using YAML configuration files.
+Foundry is a Go-based CLI tool for managing libvirt VMs, replacing the Ansible-based workflow in the homestead project. It provides simple commands to create, destroy, and list VMs using YAML configuration files.
 
 ## Architecture
 
@@ -26,8 +26,8 @@ Plow is a Go-based CLI tool for managing libvirt VMs, replacing the Ansible-base
 ### Project Structure
 
 ```
-plow/
-├── cmd/plow/
+foundry/
+├── cmd/foundry/
 │   └── main.go              # CLI entrypoint with subcommands
 ├── internal/
 │   ├── config/
@@ -233,7 +233,7 @@ This ensures:
 **Storage structure:**
 ```
 /var/lib/libvirt/images/       # Hardcoded base path (configurable in future)
-├── fedora-42.qcow2            # Base images (not managed by plow)
+├── fedora-42.qcow2            # Base images (not managed by foundry)
 ├── ubuntu-24.04.qcow2
 ├── my-vm/                     # VM directory
 │   ├── boot.qcow2             # Boot disk (backing: ../fedora-42.qcow2)
@@ -345,19 +345,19 @@ Key elements:
 
 ```bash
 # Create VM from config
-plow create <config.yaml>
-plow create examples/simple-vm.yaml
+foundry create <config.yaml>
+foundry create examples/simple-vm.yaml
 
 # Destroy VM
-plow destroy <vm-name>
-plow destroy my-vm
+foundry destroy <vm-name>
+foundry destroy my-vm
 
 # List all VMs
-plow list
-plow list --all  # Include stopped VMs
+foundry list
+foundry list --all  # Include stopped VMs
 
 # Show VM details (future)
-plow show <vm-name>
+foundry show <vm-name>
 ```
 
 ### Exit Codes
@@ -465,7 +465,7 @@ old-vm     shut off  4      8 GiB   -
 ### Phase 2: Configuration & Validation Improvements
 1. **Configurable Storage Base Path**
    - CLI flag: `--storage-path /custom/path`
-   - Environment variable: `PLOW_STORAGE_PATH`
+   - Environment variable: `FOUNDRY_STORAGE_PATH`
    - Config file support
 
 2. **Bridge Verification**
@@ -526,14 +526,14 @@ old-vm     shut off  4      8 GiB   -
 - Can manage VMs created by Ansible
 
 ### Migration Path
-1. Install plow on hypervisor
-2. Export existing VM configs to plow YAML format
+1. Install foundry on hypervisor
+2. Export existing VM configs to foundry YAML format
 3. Test create/destroy on non-critical VMs
-4. Gradually replace Ansible playbook calls with plow
-5. Update justfile to call plow instead of ansible-playbook
+4. Gradually replace Ansible playbook calls with foundry
+5. Update justfile to call foundry instead of ansible-playbook
 
 ### Coexistence
-- Plow and Ansible can coexist
+- Foundry and Ansible can coexist
 - Both manage libvirt domains
 - No state file conflicts
 - Eventual goal: Replace Ansible for VM management

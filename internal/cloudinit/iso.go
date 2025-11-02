@@ -7,7 +7,7 @@ import (
 
 	"github.com/kdomanski/iso9660"
 
-	"github.com/jbweber/plow/internal/config"
+	"github.com/jbweber/foundry/internal/config"
 )
 
 // GenerateISO creates a cloud-init NoCloud ISO image from the VM configuration.

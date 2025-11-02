@@ -1,4 +1,4 @@
-module github.com/jbweber/plow
+module github.com/jbweber/foundry
 
 go 1.24.9
 

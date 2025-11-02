@@ -6,7 +6,7 @@ import (
 
 	"libvirt.org/go/libvirtxml"
 
-	"github.com/jbweber/plow/internal/config"
+	"github.com/jbweber/foundry/internal/config"
 )
 
 const (

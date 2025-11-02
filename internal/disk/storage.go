@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"syscall"
 
-	"github.com/jbweber/plow/internal/config"
+	"github.com/jbweber/foundry/internal/config"
 )
 
 // NOTE: This implementation uses qemu-img commands and direct filesystem operations

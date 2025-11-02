@@ -8,8 +8,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/jbweber/plow/internal/libvirt"
-	"github.com/jbweber/plow/internal/vm"
+	"github.com/jbweber/foundry/internal/libvirt"
+	"github.com/jbweber/foundry/internal/vm"
 )
 
 var (
@@ -25,9 +25,9 @@ func main() {
 }
 
 var rootCmd = &cobra.Command{
-	Use:   "plow",
-	Short: "Plow - Libvirt VM management tool",
-	Long: `Plow is a CLI tool for managing libvirt VMs with simple YAML configuration.
+	Use:   "foundry",
+	Short: "Foundry - Libvirt VM management tool",
+	Long: `Foundry is a CLI tool for managing libvirt VMs with simple YAML configuration.
 
 It provides commands to create, destroy, and list virtual machines using
 declarative configuration files.`,

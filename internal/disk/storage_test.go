@@ -9,7 +9,7 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/jbweber/plow/internal/config"
+	"github.com/jbweber/foundry/internal/config"
 )
 
 func TestNewManager(t *testing.T) {

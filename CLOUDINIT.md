@@ -2,11 +2,11 @@
 
 ## Overview
 
-Plow generates cloud-init configuration to provision VMs with network settings, SSH keys, hostnames, and user accounts. This document describes the cloud-init format specifications we follow and how we implement them.
+Foundry generates cloud-init configuration to provision VMs with network settings, SSH keys, hostnames, and user accounts. This document describes the cloud-init format specifications we follow and how we implement them.
 
 ## Official Documentation
 
-All cloud-init implementation in plow follows the official cloud-init documentation:
+All cloud-init implementation in foundry follows the official cloud-init documentation:
 
 - **Format Specification**: https://cloudinit.readthedocs.io/en/latest/explanation/format.html
 - **Network Config v2 (Netplan)**: https://cloudinit.readthedocs.io/en/latest/reference/network-config-format-v2.html
@@ -15,7 +15,7 @@ All cloud-init implementation in plow follows the official cloud-init documentat
 
 ## Cloud-Init Datasource: NoCloud
 
-Plow uses the **NoCloud** datasource, which reads configuration from an ISO image attached as a CDROM device.
+Foundry uses the **NoCloud** datasource, which reads configuration from an ISO image attached as a CDROM device.
 
 ### Requirements
 
@@ -141,7 +141,7 @@ ethernets:
 
 ### ISO Generation
 
-Plow creates the cloud-init ISO using the `github.com/kdomanski/iso9660` pure Go library:
+Foundry creates the cloud-init ISO using the `github.com/kdomanski/iso9660` pure Go library:
 
 1. Create an in-memory ISO9660 filesystem
 2. Add three files: `user-data`, `meta-data`, `network-config`
@@ -291,8 +291,8 @@ sudo reboot
 - **Netplan documentation**: https://netplan.io/reference
 - **NoCloud datasource**: https://cloudinit.readthedocs.io/en/latest/reference/datasources/nocloud.html
 - **ISO9660 Go library**: https://github.com/kdomanski/iso9660
-- **Plow design document**: [DESIGN.md](DESIGN.md)
+- **Foundry design document**: [DESIGN.md](DESIGN.md)
 
 ## Version History
 
-- **2025-11-02**: Initial documentation created, following cloud-init specs for plow implementation
+- **2025-11-02**: Initial documentation created, following cloud-init specs for foundry implementation

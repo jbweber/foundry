@@ -7,7 +7,7 @@ import (
 
 	"github.com/kdomanski/iso9660"
 
-	"github.com/jbweber/plow/internal/config"
+	"github.com/jbweber/foundry/internal/config"
 )
 
 func TestGenerateISO(t *testing.T) {

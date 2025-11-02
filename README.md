@@ -1,10 +1,10 @@
-# Plow
+# Foundry
 
 A Go-based CLI tool for managing libvirt VMs with simple YAML configuration.
 
 ## Overview
 
-Plow provides a straightforward way to create, manage, and destroy libvirt virtual machines using declarative YAML configuration files. It's designed to replace complex Ansible workflows with a simple, fast CLI tool.
+Foundry provides a straightforward way to create, manage, and destroy libvirt virtual machines using declarative YAML configuration files. It's designed to replace complex Ansible workflows with a simple, fast CLI tool.
 
 ## Features
 
@@ -28,8 +28,8 @@ Plow provides a straightforward way to create, manage, and destroy libvirt virtu
 
 ```bash
 # Clone the repository
-git clone https://github.com/jbweber/plow.git
-cd plow
+git clone https://github.com/jbweber/foundry.git
+cd foundry
 
 # Build
 make build
@@ -43,20 +43,20 @@ make install
 ### Create a VM
 
 ```bash
-plow create examples/simple-vm.yaml
+foundry create examples/simple-vm.yaml
 ```
 
 ### List VMs
 
 ```bash
-plow list
-plow list --all  # Include stopped VMs
+foundry list
+foundry list --all  # Include stopped VMs
 ```
 
 ### Destroy a VM
 
 ```bash
-plow destroy my-vm
+foundry destroy my-vm
 ```
 
 ## Configuration
@@ -117,8 +117,8 @@ make lint
 ### Project Structure
 
 ```
-plow/
-├── cmd/plow/           # CLI entry point
+foundry/
+├── cmd/foundry/        # CLI entry point
 ├── internal/
 │   ├── config/         # Configuration types, validation, and MAC calculation
 │   ├── cloudinit/      # Cloud-init ISO generation
@@ -132,4 +132,4 @@ plow/
 ## Documentation
 
 - [DESIGN.md](DESIGN.md) - Complete design specification
-- [PLAN_PLOW.md](../PLAN_PLOW.md) - Implementation plan and progress
+- [PLAN_FOUNDRY.md](../PLAN_FOUNDRY.md) - Implementation plan and progress

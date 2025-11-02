@@ -4,7 +4,7 @@
 .DEFAULT_GOAL := help
 
 # Binary name
-BINARY_NAME=plow
+BINARY_NAME=foundry
 BUILD_DIR=bin
 COVERAGE_DIR=coverage
 
@@ -23,7 +23,7 @@ LDFLAGS=-ldflags "-s -w"
 
 ## help: Display this help message
 help:
-	@echo "Plow - Libvirt VM Management Tool"
+	@echo "Foundry - Libvirt VM Management Tool"
 	@echo ""
 	@echo "Usage:"
 	@echo "  make <target>"
@@ -38,12 +38,12 @@ all: goimports fmt vet lint test build
 build:
 	@echo "Building $(BINARY_NAME)..."
 	@mkdir -p $(BUILD_DIR)
-	$(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/plow
+	$(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/foundry
 
 ## install: Install the binary to $GOPATH/bin
 install:
 	@echo "Installing $(BINARY_NAME)..."
-	$(GOCMD) install $(LDFLAGS) ./cmd/plow
+	$(GOCMD) install $(LDFLAGS) ./cmd/foundry
 
 ## test: Run all tests
 test:
@@ -78,7 +78,7 @@ lint:
 ## goimports: Run goimports to organize imports
 goimports:
 	@echo "Running goimports..."
-	$(GOCMD) tool goimports -w -local github.com/jbweber/plow .
+	$(GOCMD) tool goimports -w -local github.com/jbweber/foundry .
 
 ## fmt: Format all Go files
 fmt:
