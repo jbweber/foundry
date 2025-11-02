@@ -31,9 +31,7 @@ plow/
 │   └── main.go              # CLI entrypoint with subcommands
 ├── internal/
 │   ├── config/
-│   │   └── types.go         # VM configuration structs
-│   ├── network/
-│   │   └── mac.go           # MAC address calculation from IP
+│   │   └── types.go         # VM configuration structs + MAC calculation
 │   ├── disk/
 │   │   └── storage.go       # Disk creation via libvirt storage APIs
 │   ├── cloudinit/
@@ -62,7 +60,7 @@ plow/
 
 ```yaml
 # Required fields
-name: my-vm                   # VM name (used for hostname and domain name)
+name: my-vm                   # VM name (libvirt domain name, normalized to lowercase)
 vcpus: 4                      # Number of virtual CPUs
 memory_gib: 8                 # Memory in GiB
 
@@ -101,9 +99,7 @@ network_interfaces:
 
 # Optional: Cloud-init configuration
 cloud_init:
-  enabled: true               # Enable cloud-init ISO generation
-  hostname: my-vm             # Optional: Override hostname (default: name)
-  fqdn: my-vm.example.com     # Optional: FQDN (default: name)
+  fqdn: my-vm.example.com     # FQDN (hostname derived from this, normalized to lowercase)
   ssh_keys:                   # SSH public keys to inject
     - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFoo..."
     - "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC..."
@@ -123,12 +119,26 @@ autostart: true               # Auto-start VM on host boot (default: true)
 - `boot_disk.image` OR `boot_disk.empty: true`
 - At least one `network_interfaces` entry with `ip`, `gateway`, `bridge`
 
+**Normalization (automatic):**
+- `name` → lowercase
+- `cloud_init.fqdn` → lowercase (hostname derived from this)
+
 **Validation checks:**
+- `name` format: `^[a-z0-9][a-z0-9_-]*[a-z0-9]$` (after normalization)
+  - Must start and end with alphanumeric
+  - Can contain alphanumeric, hyphens, underscores
+- `cloud_init.fqdn` format: valid FQDN (hostname + domain with dots)
 - VCPUs > 0, memory_gib > 0, disk sizes > 0
 - IP addresses valid with CIDR notation
+- No duplicate device names in data disks
+- No duplicate IP addresses in network interfaces
+- SSH keys have valid format (ssh-rsa, ssh-ed25519, etc.)
+- Password hash starts with `$` (crypt format)
+
+**Runtime validation (during VM creation):**
+- VM name doesn't conflict with existing domain
 - Boot disk image exists (unless empty: true)
-- Bridge exists in libvirt
-- Name doesn't conflict with existing VM
+- Bridge exists on hypervisor (future: fuzzy match)
 
 ## Core Workflows
 
@@ -220,18 +230,26 @@ This ensures:
 - Data disks are standalone qcow2 volumes
 - Volumes managed via libvirt (no qemu-img needed)
 
-**Storage pool structure:**
+**Storage structure:**
 ```
-/var/lib/libvirt/images/
-├── base/
-│   └── fedora-42.qcow2      # Base images (not managed by plow)
-└── vms/
-    └── my-vm/
-        ├── boot.qcow2       # Boot disk (backing: base/fedora-42.qcow2)
-        ├── vdb.qcow2        # Data disk
-        ├── vdc.qcow2        # Data disk
-        └── cloudinit.iso    # Cloud-init config
+/var/lib/libvirt/images/       # Hardcoded base path (configurable in future)
+├── fedora-42.qcow2            # Base images (not managed by plow)
+├── ubuntu-24.04.qcow2
+├── my-vm/                     # VM directory
+│   ├── boot.qcow2             # Boot disk (backing: ../fedora-42.qcow2)
+│   ├── data-vdb.qcow2         # Data disk
+│   ├── data-vdc.qcow2         # Data disk
+│   └── cloudinit.iso          # Cloud-init config
+└── prod-web01/
+    ├── boot.qcow2
+    ├── data-vdb.qcow2
+    └── cloudinit.iso
 ```
+
+**File naming patterns:**
+- Boot disk: `<vm-name>/boot.qcow2`
+- Data disks: `<vm-name>/data-<device>.qcow2` (e.g., data-vdb, data-vdc)
+- Cloud-init ISO: `<vm-name>/cloudinit.iso`
 
 ### Cloud-init Generation
 
@@ -394,16 +412,18 @@ old-vm     shut off  4      8 GiB   -
 - ✅ UEFI boot
 - ✅ Serial console
 
-**Out of Scope (Future):**
+**Out of Scope (Future Phases):**
 - ❌ BGP/ethernet mode networking
 - ❌ Image management/downloading
 - ❌ Remote hypervisor support (SSH)
 - ❌ VNC configuration
 - ❌ Installation ISO attachment
-- ❌ CoreOS/Ignition support
+- ❌ CoreOS/Ignition support (provisioning format abstraction needed)
 - ❌ Image templates/catalog
 - ❌ Console autologin
 - ❌ Custom firmware config (fw_cfg)
+- ❌ Configurable storage base path (CLI flag, env var, config file)
+- ❌ Bridge verification before deployment (fuzzy match existing bridges)
 
 ## Testing Strategy
 
@@ -442,35 +462,56 @@ old-vm     shut off  4      8 GiB   -
 
 ## Future Enhancements (Phase 2+)
 
-1. **Remote Hypervisors**
+### Phase 2: Configuration & Validation Improvements
+1. **Configurable Storage Base Path**
+   - CLI flag: `--storage-path /custom/path`
+   - Environment variable: `PLOW_STORAGE_PATH`
+   - Config file support
+
+2. **Bridge Verification**
+   - Check bridge exists on hypervisor before deployment
+   - Fuzzy match bridge names
+   - Suggest available bridges on error
+
+3. **Provisioning Format Abstraction**
+   - Generic provisioning config (not cloud-init specific)
+   - Support cloud-init format (current)
+   - Support Ignition format (CoreOS/Fedora CoreOS)
+   - Adapter pattern for format conversion
+
+### Phase 3: Remote Hypervisors
+1. **Remote Connection Support**
    - Support `qemu+ssh://` URIs
    - Connection pooling
-   - Parallel operations
+   - Parallel operations across hosts
 
-2. **BGP Networking**
+### Phase 4: Advanced Networking
+1. **BGP Networking**
    - Ethernet mode interfaces
    - BIRD integration
    - Libvirt hook management
 
-3. **Image Management**
+### Phase 5: Image Management
+1. **Image Operations**
    - Download images from URLs
    - Verify checksums
    - Image catalog/templates
+   - Image versioning
 
-4. **Advanced Features**
+### Phase 6: Advanced Features
+1. **Console & Installation**
    - VNC console access
    - Installation ISO support
-   - CoreOS/Ignition
    - Custom CPU topology
    - NUMA configuration
 
-5. **Usability**
+2. **Usability**
    - Interactive VM creation wizard
    - VM templates
    - Bulk operations
    - VM migration between hosts
 
-6. **Observability**
+3. **Observability**
    - Detailed logging
    - Metrics export
    - Status monitoring

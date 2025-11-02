@@ -120,11 +120,10 @@ make lint
 plow/
 ├── cmd/plow/           # CLI entry point
 ├── internal/
-│   ├── config/         # Configuration types and parsing
+│   ├── config/         # Configuration types, validation, and MAC calculation
 │   ├── cloudinit/      # Cloud-init ISO generation
 │   ├── disk/           # Storage management
 │   ├── libvirt/        # Libvirt client and domain operations
-│   ├── network/        # Network utilities (MAC calculation)
 │   └── vm/             # VM creation, destruction, listing
 ├── examples/           # Example configurations
 └── DESIGN.md          # Detailed design document
