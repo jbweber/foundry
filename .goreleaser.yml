@@ -27,7 +27,9 @@ builds:
 
 archives:
   - id: foundry-archive
-    format: tar.gz
+    format_overrides:
+      - goos: windows
+        format: zip
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
       - LICENSE*
@@ -57,31 +59,25 @@ changelog:
     - title: Others
       order: 999
 
-dockers:
-  - id: foundry-amd64
-    image_templates:
-      - "ghcr.io/jbweber/foundry:{{ .Version }}-amd64"
-      - "ghcr.io/jbweber/foundry:latest-amd64"
-    use: buildx
+dockers_v2:
+  - id: foundry
     dockerfile: Dockerfile
-    build_flag_templates:
-      - "--platform=linux/amd64"
-      - "--label=org.opencontainers.image.title={{ .ProjectName }}"
-      - "--label=org.opencontainers.image.description=A Go-based CLI tool for managing libvirt VMs"
-      - "--label=org.opencontainers.image.url=https://github.com/jbweber/foundry"
-      - "--label=org.opencontainers.image.source=https://github.com/jbweber/foundry"
-      - "--label=org.opencontainers.image.version={{ .Version }}"
-      - "--label=org.opencontainers.image.created={{ .Date }}"
-      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
-      - "--label=org.opencontainers.image.licenses=MIT"
-
-docker_manifests:
-  - name_template: "ghcr.io/jbweber/foundry:{{ .Version }}"
-    image_templates:
-      - "ghcr.io/jbweber/foundry:{{ .Version }}-amd64"
-  - name_template: "ghcr.io/jbweber/foundry:latest"
-    image_templates:
-      - "ghcr.io/jbweber/foundry:latest-amd64"
+    images:
+      - "ghcr.io/jbweber/foundry"
+    tags:
+      - "{{ .Version }}"
+      - "latest"
+    platforms:
+      - linux/amd64
+    labels:
+      "org.opencontainers.image.title": "{{ .ProjectName }}"
+      "org.opencontainers.image.description": "A Go-based CLI tool for managing libvirt VMs"
+      "org.opencontainers.image.url": "https://github.com/jbweber/foundry"
+      "org.opencontainers.image.source": "https://github.com/jbweber/foundry"
+      "org.opencontainers.image.version": "{{ .Version }}"
+      "org.opencontainers.image.created": "{{ .Date }}"
+      "org.opencontainers.image.revision": "{{ .FullCommit }}"
+      "org.opencontainers.image.licenses": "MIT"
 
 release:
   github:
