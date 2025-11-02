@@ -15,31 +15,52 @@ type mockLibvirtClient struct {
 	mu sync.Mutex
 
 	// Configurable behavior
-	domainLookupByNameFunc  func(name string) (libvirt.Domain, error)
-	domainDefineXMLFunc     func(xml string) (libvirt.Domain, error)
-	domainSetAutostartFunc  func(dom libvirt.Domain, autostart int32) error
-	domainCreateFunc        func(dom libvirt.Domain) error
-	domainGetStateFunc      func(dom libvirt.Domain, flags uint32) (int32, int32, error)
-	domainShutdownFunc      func(dom libvirt.Domain) error
-	domainDestroyFunc       func(dom libvirt.Domain) error
-	domainUndefineFlagsFunc func(dom libvirt.Domain, flags libvirt.DomainUndefineFlagsValues) error
-	domainUndefineFunc      func(dom libvirt.Domain) error
+	connectListAllDomainsFunc func(needResults int32, flags libvirt.ConnectListAllDomainsFlags) ([]libvirt.Domain, uint32, error)
+	domainGetInfoFunc         func(dom libvirt.Domain) (uint8, uint64, uint64, uint16, uint64, error)
+	domainGetAutostartFunc    func(dom libvirt.Domain) (int32, error)
+	domainLookupByNameFunc    func(name string) (libvirt.Domain, error)
+	domainDefineXMLFunc       func(xml string) (libvirt.Domain, error)
+	domainSetAutostartFunc    func(dom libvirt.Domain, autostart int32) error
+	domainCreateFunc          func(dom libvirt.Domain) error
+	domainGetStateFunc        func(dom libvirt.Domain, flags uint32) (int32, int32, error)
+	domainShutdownFunc        func(dom libvirt.Domain) error
+	domainDestroyFunc         func(dom libvirt.Domain) error
+	domainUndefineFlagsFunc   func(dom libvirt.Domain, flags libvirt.DomainUndefineFlagsValues) error
+	domainUndefineFunc        func(dom libvirt.Domain) error
 
 	// Call tracking
-	domainLookupByNameCalls  []string
-	domainDefineXMLCalls     []string
-	domainSetAutostartCalls  []libvirt.Domain
-	domainCreateCalls        []libvirt.Domain
-	domainGetStateCalls      []libvirt.Domain
-	domainShutdownCalls      []libvirt.Domain
-	domainDestroyCalls       []libvirt.Domain
-	domainUndefineFlagsCalls []libvirt.Domain
-	domainUndefineCalls      []libvirt.Domain
+	connectListAllDomainsCalls int
+	domainGetInfoCalls         []libvirt.Domain
+	domainGetAutostartCalls    []libvirt.Domain
+	domainLookupByNameCalls    []string
+	domainDefineXMLCalls       []string
+	domainSetAutostartCalls    []libvirt.Domain
+	domainCreateCalls          []libvirt.Domain
+	domainGetStateCalls        []libvirt.Domain
+	domainShutdownCalls        []libvirt.Domain
+	domainDestroyCalls         []libvirt.Domain
+	domainUndefineFlagsCalls   []libvirt.Domain
+	domainUndefineCalls        []libvirt.Domain
 }
 
 // newMockLibvirtClient creates a new mock libvirt client with default behavior.
 func newMockLibvirtClient() *mockLibvirtClient {
 	m := &mockLibvirtClient{}
+
+	// Default: no domains
+	m.connectListAllDomainsFunc = func(needResults int32, flags libvirt.ConnectListAllDomainsFlags) ([]libvirt.Domain, uint32, error) {
+		return []libvirt.Domain{}, 0, nil
+	}
+
+	// Default: domain info (running, 2048 MiB, 2 CPUs)
+	m.domainGetInfoFunc = func(dom libvirt.Domain) (uint8, uint64, uint64, uint16, uint64, error) {
+		return 1, 2097152, 2097152, 2, 0, nil // state=running, maxMem=2GiB, mem=2GiB, CPUs=2
+	}
+
+	// Default: autostart enabled
+	m.domainGetAutostartFunc = func(dom libvirt.Domain) (int32, error) {
+		return 1, nil
+	}
 
 	// Default: VM does not exist on first call, but exists after define
 	// This simulates the real behavior where lookup fails initially, then succeeds after define
@@ -93,6 +114,27 @@ func newMockLibvirtClient() *mockLibvirtClient {
 	}
 
 	return m
+}
+
+func (m *mockLibvirtClient) ConnectListAllDomains(needResults int32, flags libvirt.ConnectListAllDomainsFlags) ([]libvirt.Domain, uint32, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.connectListAllDomainsCalls++
+	return m.connectListAllDomainsFunc(needResults, flags)
+}
+
+func (m *mockLibvirtClient) DomainGetInfo(dom libvirt.Domain) (uint8, uint64, uint64, uint16, uint64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.domainGetInfoCalls = append(m.domainGetInfoCalls, dom)
+	return m.domainGetInfoFunc(dom)
+}
+
+func (m *mockLibvirtClient) DomainGetAutostart(dom libvirt.Domain) (int32, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.domainGetAutostartCalls = append(m.domainGetAutostartCalls, dom)
+	return m.domainGetAutostartFunc(dom)
 }
 
 func (m *mockLibvirtClient) DomainLookupByName(name string) (libvirt.Domain, error) {

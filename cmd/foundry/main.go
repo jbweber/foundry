@@ -94,13 +94,18 @@ This will:
 
 var listCmd = &cobra.Command{
 	Use:   "list",
-	Short: "List VMs",
-	Long: `List all virtual machines managed by libvirt.
+	Short: "List all VMs",
+	Long: `List all virtual machines (both running and stopped).
 
-Shows VM name, state, resources, and IP addresses.`,
+Shows VM name, state, autostart status, CPUs, and memory.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Println("Listing VMs...")
-		fmt.Println("(Not yet implemented)")
+		ctx := context.Background()
+		vms, err := vm.List(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to list VMs: %w", err)
+		}
+
+		vm.PrintVMs(vms)
 		return nil
 	},
 }

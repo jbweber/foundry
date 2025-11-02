@@ -132,4 +132,3 @@ foundry/
 ## Documentation
 
 - [DESIGN.md](DESIGN.md) - Complete design specification
-- [PLAN_FOUNDRY.md](../PLAN_FOUNDRY.md) - Implementation plan and progress

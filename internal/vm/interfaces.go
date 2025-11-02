@@ -14,6 +14,15 @@ import (
 // In production, this is satisfied by *libvirt.Libvirt directly.
 // In tests, this is satisfied by mock implementations.
 type libvirtClient interface {
+	// ConnectListAllDomains lists all domains
+	ConnectListAllDomains(needResults int32, flags libvirt.ConnectListAllDomainsFlags) (domains []libvirt.Domain, ret uint32, err error)
+
+	// DomainGetInfo gets domain info (state, memory, CPUs)
+	DomainGetInfo(dom libvirt.Domain) (state uint8, maxMem uint64, memory uint64, nrVirtCPU uint16, cpuTime uint64, err error)
+
+	// DomainGetAutostart gets autostart status
+	DomainGetAutostart(dom libvirt.Domain) (autostart int32, err error)
+
 	// DomainLookupByName looks up a domain by name
 	DomainLookupByName(name string) (libvirt.Domain, error)
 
