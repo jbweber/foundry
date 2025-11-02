@@ -37,10 +37,11 @@ type DataDiskConfig struct {
 
 // NetworkInterface defines a network interface configuration.
 type NetworkInterface struct {
-	IP         string   `yaml:"ip"` // IP with CIDR, e.g., "10.20.30.40/24"
-	Gateway    string   `yaml:"gateway"`
-	DNSServers []string `yaml:"dns_servers"`
-	Bridge     string   `yaml:"bridge"`
+	IP           string   `yaml:"ip"` // IP with CIDR, e.g., "10.20.30.40/24"
+	Gateway      string   `yaml:"gateway"`
+	DNSServers   []string `yaml:"dns_servers"`
+	Bridge       string   `yaml:"bridge"`
+	DefaultRoute bool     `yaml:"default_route,omitempty"` // Set default route via this interface
 
 	// Derived fields (not in YAML, calculated from IP)
 	MACAddress string `yaml:"-"` // Will be calculated: be:ef:0a:14:1e:28
