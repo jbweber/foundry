@@ -473,10 +473,11 @@ func TestGenerateDomainXML_XMLFormat(t *testing.T) {
 		},
 		Network: []config.NetworkInterface{
 			{
-				IP:         "10.0.0.10/24",
-				Gateway:    "10.0.0.1",
-				Bridge:     "br0",
-				MACAddress: "be:ef:0a:00:00:0a",
+				IP:            "10.0.0.10/24",
+				Gateway:       "10.0.0.1",
+				Bridge:        "br0",
+				MACAddress:    "be:ef:0a:00:00:0a",
+				InterfaceName: "vm0a00000a",
 			},
 		},
 	}
@@ -510,6 +511,7 @@ func TestGenerateDomainXML_XMLFormat(t *testing.T) {
 		`<mac address="be:ef:0a:00:00:0a"`,
 		`<source bridge="br0"`,
 		`<model type="virtio"`,
+		`<target dev="vm0a00000a"`,
 		`<serial type="pty"`,
 		`<console type="pty"`,
 		`<memballoon model="virtio"`,

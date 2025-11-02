@@ -166,6 +166,9 @@ func GenerateDomainXML(cfg *config.VMConfig) (string, error) {
 			Model: &libvirtxml.DomainInterfaceModel{
 				Type: "virtio",
 			},
+			Target: &libvirtxml.DomainInterfaceTarget{
+				Dev: iface.InterfaceName,
+			},
 		}
 		domain.Devices.Interfaces = append(domain.Devices.Interfaces, netIface)
 	}

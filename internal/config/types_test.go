@@ -1264,3 +1264,249 @@ func TestNormalize_PreservesExplicitPools(t *testing.T) {
 		t.Errorf("Expected ImagePool 'custom-images', got %q", config.BootDisk.ImagePool)
 	}
 }
+
+func TestCalculateInterfaceNameFromIP(t *testing.T) {
+	tests := []struct {
+		name              string
+		ip                string
+		expectedInterface string
+		expectErr         bool
+	}{
+		{
+			name:              "simple IP with /24 CIDR",
+			ip:                "10.20.30.40/24",
+			expectedInterface: "vm0a141e28",
+		},
+		{
+			name:              "IP without CIDR",
+			ip:                "10.20.30.40",
+			expectedInterface: "vm0a141e28",
+		},
+		{
+			name:              "IP from Ansible example - 10.55.22.22",
+			ip:                "10.55.22.22/24",
+			expectedInterface: "vm0a371616",
+		},
+		{
+			name:              "IP with /32 CIDR",
+			ip:                "192.168.1.100/32",
+			expectedInterface: "vmc0a80164",
+		},
+		{
+			name:              "IP with /16 CIDR",
+			ip:                "172.16.0.1/16",
+			expectedInterface: "vmac100001",
+		},
+		{
+			name:              "all zeros",
+			ip:                "0.0.0.0/0",
+			expectedInterface: "vm00000000",
+		},
+		{
+			name:              "all 255s",
+			ip:                "255.255.255.255/32",
+			expectedInterface: "vmffffffff",
+		},
+		{
+			name:              "typical private IP - 192.168.1.50",
+			ip:                "192.168.1.50/24",
+			expectedInterface: "vmc0a80132",
+		},
+		{
+			name:              "10.250.250.10",
+			ip:                "10.250.250.10",
+			expectedInterface: "vm0afafa0a",
+		},
+		{
+			name:      "invalid IP format",
+			ip:        "not-an-ip",
+			expectErr: true,
+		},
+		{
+			name:      "invalid CIDR",
+			ip:        "10.0.0.1/99",
+			expectErr: true,
+		},
+		{
+			name:      "IPv6 address",
+			ip:        "2001:db8::1",
+			expectErr: true,
+		},
+		{
+			name:      "empty string",
+			ip:        "",
+			expectErr: true,
+		},
+		{
+			name:      "incomplete IP",
+			ip:        "10.0.0",
+			expectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			interfaceName, err := calculateInterfaceNameFromIP(tt.ip)
+
+			if tt.expectErr {
+				if err == nil {
+					t.Errorf("Expected error for input %q, got interface %q", tt.ip, interfaceName)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("Unexpected error for input %q: %v", tt.ip, err)
+				return
+			}
+
+			if interfaceName != tt.expectedInterface {
+				t.Errorf("For IP %q, expected interface %q, got %q", tt.ip, tt.expectedInterface, interfaceName)
+			}
+
+			// Verify length constraint (max 15 chars for Linux kernel)
+			if len(interfaceName) > 15 {
+				t.Errorf("Interface name too long: %d chars (max 15)", len(interfaceName))
+			}
+		})
+	}
+}
+
+// TestCalculateInterfaceNameFromIP_AnsibleCompatibility verifies that our implementation
+// matches the Ansible filter from homestead/roles/libvirt-create/filter_plugins/network_utils.py
+func TestCalculateInterfaceNameFromIP_AnsibleCompatibility(t *testing.T) {
+	testCases := []struct {
+		ip                string
+		expectedInterface string
+	}{
+		{ip: "10.55.22.22", expectedInterface: "vm0a371616"},
+		{ip: "10.20.30.40", expectedInterface: "vm0a141e28"},
+		{ip: "192.168.1.100", expectedInterface: "vmc0a80164"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.ip, func(t *testing.T) {
+			interfaceName, err := calculateInterfaceNameFromIP(tc.ip)
+			if err != nil {
+				t.Fatalf("Unexpected error: %v", err)
+			}
+			if interfaceName != tc.expectedInterface {
+				t.Errorf("Ansible compatibility check failed for IP %s: expected %s, got %s",
+					tc.ip, tc.expectedInterface, interfaceName)
+			}
+		})
+	}
+}
+
+// TestCalculateInterfaceNameFromIP_Uniqueness verifies that different IPs produce different interface names
+func TestCalculateInterfaceNameFromIP_Uniqueness(t *testing.T) {
+	ips := []string{
+		"10.0.0.1",
+		"10.0.0.2",
+		"10.0.1.1",
+		"10.1.0.1",
+		"11.0.0.1",
+		"192.168.1.1",
+		"172.16.0.1",
+	}
+
+	seen := make(map[string]string) // map[interfaceName]ip
+
+	for _, ip := range ips {
+		interfaceName, err := calculateInterfaceNameFromIP(ip)
+		if err != nil {
+			t.Fatalf("Failed to calculate interface name for %s: %v", ip, err)
+		}
+
+		if existingIP, exists := seen[interfaceName]; exists {
+			t.Errorf("Interface name collision: %s and %s both produce %s", existingIP, ip, interfaceName)
+		}
+		seen[interfaceName] = ip
+	}
+}
+
+// TestCalculateInterfaceNameFromIP_Deterministic verifies same IP always produces same interface name
+func TestCalculateInterfaceNameFromIP_Deterministic(t *testing.T) {
+	testIP := "10.55.22.22/24"
+	expectedInterface := "vm0a371616"
+
+	for i := 0; i < 100; i++ {
+		interfaceName, err := calculateInterfaceNameFromIP(testIP)
+		if err != nil {
+			t.Fatalf("Iteration %d: unexpected error: %v", i, err)
+		}
+		if interfaceName != expectedInterface {
+			t.Errorf("Iteration %d: expected %q, got %q", i, expectedInterface, interfaceName)
+		}
+	}
+}
+
+// TestCalculateInterfaceNameFromIP_CIDRIndependence verifies that CIDR doesn't affect interface name
+func TestCalculateInterfaceNameFromIP_CIDRIndependence(t *testing.T) {
+	baseIP := "10.20.30.40"
+	expectedInterface := "vm0a141e28"
+
+	cidrs := []string{
+		baseIP, // No CIDR
+		baseIP + "/8",
+		baseIP + "/16",
+		baseIP + "/24",
+		baseIP + "/32",
+	}
+
+	for _, ip := range cidrs {
+		interfaceName, err := calculateInterfaceNameFromIP(ip)
+		if err != nil {
+			t.Fatalf("Failed for %s: %v", ip, err)
+		}
+		if interfaceName != expectedInterface {
+			t.Errorf("For %s, expected %q, got %q", ip, expectedInterface, interfaceName)
+		}
+	}
+}
+
+// TestCalculateMACs_WithInterfaceNames verifies that CalculateMACs also sets interface names
+func TestCalculateMACs_WithInterfaceNames(t *testing.T) {
+	config := &VMConfig{
+		Name:      "test-vm",
+		VCPUs:     2,
+		MemoryGiB: 4,
+		BootDisk: BootDiskConfig{
+			SizeGB: 20,
+			Image:  "fedora-43",
+		},
+		Network: []NetworkInterface{
+			{
+				IP:      "10.55.22.22/24",
+				Gateway: "10.55.22.1",
+				Bridge:  "br0",
+			},
+			{
+				IP:      "10.250.250.10/24",
+				Gateway: "10.250.250.1",
+				Bridge:  "br1",
+			},
+		},
+	}
+
+	err := config.CalculateMACs()
+	if err != nil {
+		t.Fatalf("CalculateMACs failed: %v", err)
+	}
+
+	// Verify first interface
+	if config.Network[0].MACAddress != "be:ef:0a:37:16:16" {
+		t.Errorf("Expected MAC 'be:ef:0a:37:16:16', got %q", config.Network[0].MACAddress)
+	}
+	if config.Network[0].InterfaceName != "vm0a371616" {
+		t.Errorf("Expected interface name 'vm0a371616', got %q", config.Network[0].InterfaceName)
+	}
+
+	// Verify second interface
+	if config.Network[1].MACAddress != "be:ef:0a:fa:fa:0a" {
+		t.Errorf("Expected MAC 'be:ef:0a:fa:fa:0a', got %q", config.Network[1].MACAddress)
+	}
+	if config.Network[1].InterfaceName != "vm0afafa0a" {
+		t.Errorf("Expected interface name 'vm0afafa0a', got %q", config.Network[1].InterfaceName)
+	}
+}

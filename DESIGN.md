@@ -236,6 +236,53 @@ This ensures:
 - Unique MACs per VM
 - Compatible with existing homestead VMs
 
+### Network Interface Naming
+
+Foundry automatically generates tap interface names for all network interfaces based on their IP addresses.
+
+**Algorithm** (matching Ansible implementation):
+```
+IP: 10.55.22.22
+Convert to hex: 0a 37 16 16
+Interface name: vm0a371616
+```
+
+**Format**: `vm{hex octets}`
+- Prefix: `vm` (2 chars)
+- IP octets in hexadecimal (8 chars)
+- Total length: 10 characters (well within Linux kernel's 15-char limit)
+
+**Examples**:
+```
+IP: 10.55.22.22      → Interface: vm0a371616
+IP: 10.250.250.10    → Interface: vm0afafa0a
+IP: 192.168.1.100    → Interface: vmc0a80164
+```
+
+**Benefits**:
+- **Deterministic**: Same IP always produces same interface name
+- **Identifiable**: Can decode interface name back to IP address
+- **Battle-tested**: Matches existing Ansible homestead implementation
+- **Kernel-compliant**: 10 chars fits easily within 15-char Linux kernel limit
+
+**Usage in Libvirt**:
+- All interfaces (bridge and ethernet modes) include `<target dev="vm..."/>`
+- For bridge mode: Provides predictable interface name for monitoring/debugging
+- For ethernet mode: Required for manual bridge attachment and BGP routing
+
+**Limitations**:
+⚠️ **IP Uniqueness Required**: This approach assumes IP addresses are unique across all VMs. If two VMs use the same IP address (even on different networks/bridges), they will have interface name collisions.
+
+This is acceptable for the current use case where IPs are expected to be unique.
+
+**Future Enhancement**:
+When a database/state store is available, consider migrating to a better naming scheme such as:
+- VM name-based hashing (e.g., `vm-webserver-4a2b`)
+- Sequential allocation with persistent mapping
+- Database-backed lookups for efficient reverse mapping
+
+A database would enable collision-free name generation and efficient interface-to-VM lookups.
+
 ### Storage Management
 
 **Architecture**: Unified libvirt storage pool approach with separate pools for images and VMs.

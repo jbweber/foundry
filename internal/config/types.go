@@ -46,7 +46,8 @@ type NetworkInterface struct {
 	DefaultRoute bool     `yaml:"default_route,omitempty"` // Set default route via this interface
 
 	// Derived fields (not in YAML, calculated from IP)
-	MACAddress string `yaml:"-"` // Will be calculated: be:ef:0a:14:1e:28
+	MACAddress    string `yaml:"-"` // Will be calculated: be:ef:0a:14:1e:28
+	InterfaceName string `yaml:"-"` // Will be calculated: vm0a141e28
 }
 
 // CloudInitConfig contains cloud-init configuration.
@@ -375,15 +376,23 @@ func LoadFromFile(path string) (*VMConfig, error) {
 	return &config, nil
 }
 
-// CalculateMACs calculates and sets MAC addresses for all network interfaces
-// based on their IP addresses. This must be called after validation.
+// CalculateMACs calculates and sets MAC addresses and interface names for all
+// network interfaces based on their IP addresses. This must be called after validation.
 func (c *VMConfig) CalculateMACs() error {
 	for i := range c.Network {
+		// Calculate MAC address
 		mac, err := calculateMACFromIP(c.Network[i].IP)
 		if err != nil {
 			return fmt.Errorf("network_interfaces[%d]: %w", i, err)
 		}
 		c.Network[i].MACAddress = mac
+
+		// Calculate interface name
+		interfaceName, err := calculateInterfaceNameFromIP(c.Network[i].IP)
+		if err != nil {
+			return fmt.Errorf("network_interfaces[%d]: failed to calculate interface name: %w", i, err)
+		}
+		c.Network[i].InterfaceName = interfaceName
 	}
 	return nil
 }
@@ -425,4 +434,54 @@ func calculateMACFromIP(ipWithCIDR string) (string, error) {
 	mac := fmt.Sprintf("be:ef:%02x:%02x:%02x:%02x", ip[0], ip[1], ip[2], ip[3])
 
 	return mac, nil
+}
+
+// calculateInterfaceNameFromIP generates a tap interface name from an IP address.
+// Algorithm (matching Ansible implementation from homestead/roles/libvirt-create):
+//
+//	IP: 10.20.30.40 → Octets: [10, 20, 30, 40] → Hex: [0a, 14, 1e, 28]
+//	Interface Name: vm0a141e28
+//
+// This ensures:
+//   - Deterministic interface names from IP
+//   - Unique names per interface (as long as IPs are unique)
+//   - Compatibility with existing homestead VMs
+//   - Length: 10 characters (well within Linux kernel's 15-char limit)
+//
+// LIMITATIONS:
+//   - Assumes IP addresses are unique across all VMs. If two VMs share the same IP
+//     address (even on different networks), they will have interface name collisions.
+//   - This is acceptable for the current use case where IPs are expected to be unique.
+//
+// FUTURE ENHANCEMENT:
+//   - When a database/state store is available, migrate to a better naming scheme
+//     such as VM name-based hashing or sequential allocation with persistent mapping.
+//   - A database would allow efficient reverse lookups and collision-free name generation.
+func calculateInterfaceNameFromIP(ipWithCIDR string) (string, error) {
+	// Strip CIDR suffix if present
+	ipStr := ipWithCIDR
+	if strings.Contains(ipWithCIDR, "/") {
+		ip, _, err := net.ParseCIDR(ipWithCIDR)
+		if err != nil {
+			return "", fmt.Errorf("invalid IP/CIDR format: %w", err)
+		}
+		ipStr = ip.String()
+	}
+
+	// Parse IP address
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		return "", fmt.Errorf("invalid IP address: %s", ipStr)
+	}
+
+	// Convert to IPv4 (net.ParseIP returns 16-byte form for IPv4)
+	ip = ip.To4()
+	if ip == nil {
+		return "", fmt.Errorf("only IPv4 addresses are supported: %s", ipStr)
+	}
+
+	// Generate interface name: vm{hex octets}
+	interfaceName := fmt.Sprintf("vm%02x%02x%02x%02x", ip[0], ip[1], ip[2], ip[3])
+
+	return interfaceName, nil
 }
