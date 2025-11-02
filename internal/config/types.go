@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	"golang.org/x/crypto/ssh"
 	"gopkg.in/yaml.v3"
 )
 
@@ -208,21 +209,12 @@ func (c *CloudInitConfig) Validate() error {
 		}
 	}
 
-	// Validate SSH keys have reasonable format (basic check)
+	// Validate SSH keys using golang.org/x/crypto/ssh parser
 	for i, key := range c.SSHKeys {
-		if len(key) < 20 {
-			return fmt.Errorf("ssh_keys[%d] appears to be too short to be a valid SSH public key", i)
-		}
-		// Check for common SSH key prefixes
-		hasValidPrefix := false
-		for _, prefix := range []string{"ssh-rsa", "ssh-ed25519", "ssh-dss", "ecdsa-sha2-"} {
-			if len(key) >= len(prefix) && key[:len(prefix)] == prefix {
-				hasValidPrefix = true
-				break
-			}
-		}
-		if !hasValidPrefix {
-			return fmt.Errorf("ssh_keys[%d] does not start with a valid SSH key type prefix (ssh-rsa, ssh-ed25519, etc.)", i)
+		// ParseAuthorizedKey validates the key format and can parse all standard SSH key types
+		_, _, _, _, err := ssh.ParseAuthorizedKey([]byte(key))
+		if err != nil {
+			return fmt.Errorf("ssh_keys[%d] is not a valid SSH public key: %w", i, err)
 		}
 	}
 

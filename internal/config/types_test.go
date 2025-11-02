@@ -27,7 +27,7 @@ network_interfaces:
 cloud_init:
   fqdn: test-vm.example.com
   ssh_keys:
-    - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFooBarBazQuuxTestKey user@host
+    - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIbJKZscbOLzBsgY5y2QupKW4A2kSDjMBQGPb1dChr+S test@example.com
 `
 
 	if err := os.WriteFile(configPath, []byte(configYAML), 0644); err != nil {
@@ -313,14 +313,21 @@ func TestCloudInitValidate(t *testing.T) {
 			config: CloudInitConfig{
 				SSHKeys: []string{"short"},
 			},
-			expectErr: "ssh_keys[0] appears to be too short",
+			expectErr: "ssh_keys[0] is not a valid SSH public key",
 		},
 		{
 			name: "invalid SSH key - wrong prefix",
 			config: CloudInitConfig{
 				SSHKeys: []string{"not-a-valid-ssh-key-but-long-enough"},
 			},
-			expectErr: "ssh_keys[0] does not start with a valid SSH key type prefix",
+			expectErr: "ssh_keys[0] is not a valid SSH public key",
+		},
+		{
+			name: "invalid SSH key - invalid base64",
+			config: CloudInitConfig{
+				SSHKeys: []string{"ssh-ed25519 not-valid-base64!!!"},
+			},
+			expectErr: "ssh_keys[0] is not a valid SSH public key",
 		},
 		{
 			name: "invalid password hash",
@@ -383,11 +390,28 @@ func TestCloudInitValidate(t *testing.T) {
 			},
 		},
 		{
-			name: "valid config",
+			name: "valid config - ed25519 key",
 			config: CloudInitConfig{
 				FQDN:             "test-vm.example.com",
-				SSHKeys:          []string{"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFooBarBazQuuxTestKey user@host"},
+				SSHKeys:          []string{"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIbJKZscbOLzBsgY5y2QupKW4A2kSDjMBQGPb1dChr+S test@example.com"},
 				RootPasswordHash: "$6$rounds=4096$salt$hashedpassword",
+			},
+		},
+		{
+			name: "valid config - rsa key",
+			config: CloudInitConfig{
+				FQDN:    "web.example.com",
+				SSHKeys: []string{"ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCq7mGKPGMc36QAe7g1dJ8oGeDD1VnfBwdC3YAlp8zX3cQm8PEaaBUsKgVPigiFVWMwKTBpP2YWAjQaqyBIgFM7sneE8Ke3ouMS9GaOoFHMcorvX1N6oJtldL58D1vfGpHcBfwZiSFHxHZOZwG0Q0hCBJcoAiVtBUaubspLiXY/QgUZnw1JgbAsVuFdHxMsqSwi8NC6smVhg00T28TDubfgMZM02Uvd/qNZF6PzKxUhcCIY4zCHtsiMeN7njssKmjnuBLBlD51D19Rw6CbHsKOEskdpIHU+8o5debIwHk7c6Q0iOGTs/2lg/Rjzs+Us59NOTRB+jECEAbO0r19l//pr test-rsa@example.com"},
+			},
+		},
+		{
+			name: "valid config - multiple keys",
+			config: CloudInitConfig{
+				FQDN: "multi.example.com",
+				SSHKeys: []string{
+					"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIbJKZscbOLzBsgY5y2QupKW4A2kSDjMBQGPb1dChr+S test@example.com",
+					"ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCq7mGKPGMc36QAe7g1dJ8oGeDD1VnfBwdC3YAlp8zX3cQm8PEaaBUsKgVPigiFVWMwKTBpP2YWAjQaqyBIgFM7sneE8Ke3ouMS9GaOoFHMcorvX1N6oJtldL58D1vfGpHcBfwZiSFHxHZOZwG0Q0hCBJcoAiVtBUaubspLiXY/QgUZnw1JgbAsVuFdHxMsqSwi8NC6smVhg00T28TDubfgMZM02Uvd/qNZF6PzKxUhcCIY4zCHtsiMeN7njssKmjnuBLBlD51D19Rw6CbHsKOEskdpIHU+8o5debIwHk7c6Q0iOGTs/2lg/Rjzs+Us59NOTRB+jECEAbO0r19l//pr test-rsa@example.com",
+				},
 			},
 		},
 	}
