@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"time"
@@ -8,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/jbweber/plow/internal/libvirt"
+	"github.com/jbweber/plow/internal/vm"
 )
 
 var (
@@ -51,7 +53,13 @@ network settings, and cloud-init configuration.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		configPath := args[0]
 		fmt.Printf("Creating VM from config: %s\n", configPath)
-		fmt.Println("(Not yet implemented)")
+
+		ctx := context.Background()
+		if err := vm.Create(ctx, configPath); err != nil {
+			return fmt.Errorf("failed to create VM: %w", err)
+		}
+
+		fmt.Println("✓ VM created successfully!")
 		return nil
 	},
 }
