@@ -1,0 +1,87 @@
+run:
+  timeout: 5m
+  tests: true
+  modules-download-mode: readonly
+
+linters:
+  enable:
+    # Core linters (enabled by default)
+    - errcheck      # Check for unchecked errors
+    - gosimple      # Simplify code
+    - govet         # Reports suspicious constructs
+    - ineffassign   # Detect ineffectual assignments
+    - staticcheck   # Static analysis
+    - unused        # Check for unused constants, variables, functions and types
+
+    # Additional recommended linters
+    - gofmt         # Check if code is formatted with gofmt
+    - goimports     # Check import statements are formatted
+    - misspell      # Spell checker for strings and comments
+    - revive        # General purpose linter
+    - unconvert     # Remove unnecessary type conversions
+    - unparam       # Find unused function parameters
+    - gosec         # Security checker
+    - bodyclose     # Check HTTP response body is closed
+    - nilerr        # Check that errors from external packages are not ignored
+    - errorlint     # Find code that will cause problems with error wrapping
+    - gocyclo       # Cyclomatic complexity checker
+    - gocritic      # Comprehensive Go linter
+    - prealloc      # Find slice declarations that could be pre-allocated
+    - predeclared   # Find code that shadows predeclared identifiers
+    - whitespace    # Check for unnecessary whitespace
+
+linters-settings:
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
+
+  gocyclo:
+    min-complexity: 15
+
+  govet:
+    enable-all: true
+    disable:
+      - shadow  # Can be too strict for some cases
+
+  revive:
+    rules:
+      - name: exported
+        severity: warning
+        disabled: false
+      - name: package-comments
+        severity: warning
+        disabled: false
+      - name: var-naming
+        severity: warning
+        disabled: false
+
+  gosec:
+    excludes:
+      - G204  # Subprocess with variable - needed for some operations
+      - G304  # File path from variable - needed for file operations
+
+  misspell:
+    locale: US
+
+issues:
+  # Maximum issues count per one linter
+  max-issues-per-linter: 0
+  # Maximum count of issues with the same text
+  max-same-issues: 0
+
+  exclude-rules:
+    # Exclude some linters from running on test files
+    - path: _test\.go
+      linters:
+        - gocyclo
+        - errcheck
+        - gosec
+        - gocritic
+
+output:
+  formats:
+    - format: colored-line-number
+  print-issued-lines: true
+  print-linter-name: true
+  uniq-by-line: true
+  sort-results: true
