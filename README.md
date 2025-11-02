@@ -21,6 +21,8 @@ This project isn't suggested for general purpose use, and really exists because 
 - **Cloud-init Support**: Automatic SSH key injection and network configuration
 - **Bridge Networking**: Support for multiple network interfaces with bridge connectivity
 - **Storage Management**: QCOW2 boot disks with backing images, plus additional data disks
+- **Pool Management**: Create, list, and manage libvirt storage pools
+- **Image Management**: Import, list, and manage base OS images
 - **UEFI Boot**: Modern UEFI firmware support
 - **Deterministic MACs**: MAC addresses automatically calculated from IP addresses
 
@@ -78,13 +80,54 @@ foundry create examples/simple-vm.yaml
 
 ```bash
 foundry list
-foundry list --all  # Include stopped VMs
 ```
 
 ### Destroy a VM
 
 ```bash
 foundry destroy my-vm
+```
+
+### Manage Images
+
+```bash
+# Import a base image
+foundry image import /path/to/fedora-43.qcow2 fedora-43.qcow2
+
+# List images
+foundry image list
+
+# Show image details
+foundry image info fedora-43.qcow2
+
+# Delete image
+foundry image delete fedora-43.qcow2
+```
+
+### Manage Storage Pools
+
+```bash
+# List all storage pools
+foundry pool list
+
+# Show pool details
+foundry pool info foundry-images
+
+# Create a new pool
+foundry pool add my-pool dir /var/lib/libvirt/images/my-pool
+
+# Refresh pool (detect external changes)
+foundry pool refresh my-pool
+
+# Delete pool (use --force to delete with volumes)
+foundry pool delete my-pool
+```
+
+### View Storage Status
+
+```bash
+# Show overview of all storage pools
+foundry storage status
 ```
 
 ## Configuration

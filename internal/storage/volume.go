@@ -11,7 +11,7 @@ import (
 )
 
 // CreateVolume creates a new volume in the specified pool.
-func (m *Manager) CreateVolume(ctx context.Context, poolName string, spec VolumeSpec) error {
+func (m *Manager) CreateVolume(_ context.Context, poolName string, spec VolumeSpec) error {
 	// Validate the volume spec
 	if err := spec.Validate(); err != nil {
 		return fmt.Errorf("invalid volume spec: %w", err)
@@ -39,7 +39,7 @@ func (m *Manager) CreateVolume(ctx context.Context, poolName string, spec Volume
 }
 
 // DeleteVolume deletes a volume from the specified pool.
-func (m *Manager) DeleteVolume(ctx context.Context, poolName, volumeName string) error {
+func (m *Manager) DeleteVolume(_ context.Context, poolName, volumeName string) error {
 	// Look up the pool
 	pool, err := m.client.StoragePoolLookupByName(poolName)
 	if err != nil {
@@ -61,7 +61,7 @@ func (m *Manager) DeleteVolume(ctx context.Context, poolName, volumeName string)
 }
 
 // ListVolumes lists all volumes in the specified pool.
-func (m *Manager) ListVolumes(ctx context.Context, poolName string) ([]VolumeInfo, error) {
+func (m *Manager) ListVolumes(_ context.Context, poolName string) ([]VolumeInfo, error) {
 	// Look up the pool
 	pool, err := m.client.StoragePoolLookupByName(poolName)
 	if err != nil {
@@ -104,7 +104,7 @@ func (m *Manager) ListVolumes(ctx context.Context, poolName string) ([]VolumeInf
 }
 
 // GetVolumePath gets the full filesystem path for a volume.
-func (m *Manager) GetVolumePath(ctx context.Context, poolName, volumeName string) (string, error) {
+func (m *Manager) GetVolumePath(_ context.Context, poolName, volumeName string) (string, error) {
 	// Look up the pool
 	pool, err := m.client.StoragePoolLookupByName(poolName)
 	if err != nil {
@@ -127,7 +127,7 @@ func (m *Manager) GetVolumePath(ctx context.Context, poolName, volumeName string
 }
 
 // WriteVolumeData uploads data to a volume (used for cloud-init ISOs).
-func (m *Manager) WriteVolumeData(ctx context.Context, poolName, volumeName string, data []byte) error {
+func (m *Manager) WriteVolumeData(_ context.Context, poolName, volumeName string, data []byte) error {
 	// Look up the pool
 	pool, err := m.client.StoragePoolLookupByName(poolName)
 	if err != nil {
@@ -150,7 +150,7 @@ func (m *Manager) WriteVolumeData(ctx context.Context, poolName, volumeName stri
 }
 
 // VolumeExists checks if a volume exists in the specified pool.
-func (m *Manager) VolumeExists(ctx context.Context, poolName, volumeName string) (bool, error) {
+func (m *Manager) VolumeExists(_ context.Context, poolName, volumeName string) (bool, error) {
 	// Look up the pool
 	pool, err := m.client.StoragePoolLookupByName(poolName)
 	if err != nil {
@@ -168,7 +168,7 @@ func (m *Manager) VolumeExists(ctx context.Context, poolName, volumeName string)
 }
 
 // generateVolumeXML generates XML for a storage volume.
-func generateVolumeXML(poolName string, spec VolumeSpec, m *Manager) (string, error) {
+func generateVolumeXML(_ string, spec VolumeSpec, _ *Manager) (string, error) {
 	// Convert capacity from GB to bytes
 	capacityBytes := spec.CapacityGB * 1024 * 1024 * 1024
 

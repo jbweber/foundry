@@ -43,6 +43,8 @@ func init() {
 	rootCmd.AddCommand(listCmd)
 	rootCmd.AddCommand(testConnCmd)
 	rootCmd.AddCommand(imageCmd)
+	rootCmd.AddCommand(poolCmd)
+	rootCmd.AddCommand(storageCmd)
 }
 
 var createCmd = &cobra.Command{

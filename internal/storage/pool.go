@@ -190,11 +190,19 @@ func (m *Manager) GetPoolInfo(ctx context.Context, name string) (*PoolInfo, erro
 		stateStr = "inaccessible"
 	}
 
+	// Format UUID as string (8-4-4-4-12 hex format)
+	uuid := fmt.Sprintf("%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+		pool.UUID[0], pool.UUID[1], pool.UUID[2], pool.UUID[3],
+		pool.UUID[4], pool.UUID[5],
+		pool.UUID[6], pool.UUID[7],
+		pool.UUID[8], pool.UUID[9],
+		pool.UUID[10], pool.UUID[11], pool.UUID[12], pool.UUID[13], pool.UUID[14], pool.UUID[15])
+
 	return &PoolInfo{
 		Name:       pool.Name,
 		Type:       poolType,
 		Path:       poolPath,
-		UUID:       string(pool.UUID[:]),
+		UUID:       uuid,
 		State:      stateStr,
 		Capacity:   capacity,
 		Allocation: allocation,
