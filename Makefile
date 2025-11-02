@@ -90,8 +90,8 @@ vet:
 	@echo "Running go vet..."
 	$(GOVET) ./...
 
-## check: Run quick checks (goimports, fmt, vet, test)
-check: goimports fmt vet test
+## check: Run quick checks (goimports, fmt, vet, lint, test)
+check: goimports fmt vet lint test
 
 ## deps: Download dependencies
 deps:

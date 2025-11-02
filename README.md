@@ -1,5 +1,11 @@
 # Foundry
 
+[![CI](https://github.com/jbweber/foundry/workflows/CI/badge.svg)](https://github.com/jbweber/foundry/actions)
+[![Go Report Card](https://goreportcard.com/badge/github.com/jbweber/foundry)](https://goreportcard.com/report/github.com/jbweber/foundry)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/jbweber/foundry)](https://github.com/jbweber/foundry/blob/main/go.mod)
+[![License](https://img.shields.io/github/license/jbweber/foundry)](https://github.com/jbweber/foundry/blob/main/LICENSE)
+[![Release](https://img.shields.io/github/v/release/jbweber/foundry)](https://github.com/jbweber/foundry/releases)
+
 A Go-based CLI tool for managing libvirt VMs with simple YAML configuration.
 
 ## Overview
@@ -20,9 +26,29 @@ Foundry provides a straightforward way to create, manage, and destroy libvirt vi
 
 ### Prerequisites
 
-- Go 1.24 or later
 - libvirt/libvirtd running locally
 - QEMU/KVM installed
+
+### From GitHub Releases
+
+Download the latest release from the [releases page](https://github.com/jbweber/foundry/releases):
+
+```bash
+# Download and extract (replace VERSION with actual version, e.g., v0.1.0)
+wget https://github.com/jbweber/foundry/releases/download/VERSION/foundry_VERSION_linux_amd64.tar.gz
+tar -xzf foundry_VERSION_linux_amd64.tar.gz
+sudo mv foundry /usr/local/bin/
+```
+
+### Docker
+
+```bash
+# Pull the image
+docker pull ghcr.io/jbweber/foundry:latest
+
+# Run a command
+docker run --rm ghcr.io/jbweber/foundry:latest --help
+```
 
 ### Build from Source
 

@@ -1,0 +1,114 @@
+# GoReleaser configuration for Foundry
+# See: https://goreleaser.com for full documentation
+
+version: 2
+
+before:
+  hooks:
+    # Run all checks before building
+    - make check
+
+builds:
+  - id: foundry
+    binary: foundry
+    main: ./cmd/foundry
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+    ldflags:
+      # Inject version info at build time
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+archives:
+  - id: foundry-archive
+    format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE*
+      - README*
+      - DESIGN.md
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - "^chore:"
+      - "^typo"
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
+      order: 0
+    - title: Bug Fixes
+      regexp: '^.*?fix(\([[:word:]]+\))??!?:.+$'
+      order: 1
+    - title: Others
+      order: 999
+
+dockers:
+  - id: foundry-amd64
+    image_templates:
+      - "ghcr.io/jbweber/foundry:{{ .Version }}-amd64"
+      - "ghcr.io/jbweber/foundry:latest-amd64"
+    use: buildx
+    dockerfile: Dockerfile
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.title={{ .ProjectName }}"
+      - "--label=org.opencontainers.image.description=A Go-based CLI tool for managing libvirt VMs"
+      - "--label=org.opencontainers.image.url=https://github.com/jbweber/foundry"
+      - "--label=org.opencontainers.image.source=https://github.com/jbweber/foundry"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.created={{ .Date }}"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+      - "--label=org.opencontainers.image.licenses=MIT"
+
+docker_manifests:
+  - name_template: "ghcr.io/jbweber/foundry:{{ .Version }}"
+    image_templates:
+      - "ghcr.io/jbweber/foundry:{{ .Version }}-amd64"
+  - name_template: "ghcr.io/jbweber/foundry:latest"
+    image_templates:
+      - "ghcr.io/jbweber/foundry:latest-amd64"
+
+release:
+  github:
+    owner: jbweber
+    name: foundry
+  draft: false
+  prerelease: auto
+  mode: replace
+  header: |
+    ## Foundry {{ .Version }}
+
+    A Go-based CLI tool for managing libvirt VMs with simple YAML configuration.
+  footer: |
+    ## Installation
+
+    ### Binary
+    Download the appropriate binary for your platform from the assets below.
+
+    ```bash
+    tar -xzf foundry_{{ .Version }}_linux_amd64.tar.gz
+    sudo mv foundry /usr/local/bin/
+    ```
+
+    ### Docker
+    ```bash
+    docker pull ghcr.io/jbweber/foundry:{{ .Version }}
+    ```
+
+    ## What's Next?
+    Check out the [documentation](https://github.com/jbweber/foundry/blob/main/README.md) for usage examples.
