@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 // ImportImage imports a base image from a local file into the foundry-images pool.
@@ -19,32 +18,40 @@ func (m *Manager) ImportImage(ctx context.Context, filePath, imageName string) e
 	// Get file size in GB (rounded up)
 	sizeGB := uint64(info.Size()/(1024*1024*1024)) + 1
 
+	// Validate image name has required extension
+	ext := filepath.Ext(imageName)
+	if ext != ".qcow2" && ext != ".raw" {
+		return fmt.Errorf("image name must have .qcow2 or .raw extension (got: %q)", imageName)
+	}
+
+	// Detect actual format from file content
+	detectedFormat, err := DetectImageFormat(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to detect image format: %w", err)
+	}
+
+	// Determine expected format from image name extension
+	var expectedFormat VolumeFormat
+	if ext == ".qcow2" {
+		expectedFormat = VolumeFormatQCOW2
+	} else {
+		expectedFormat = VolumeFormatRaw
+	}
+
+	// Validate format matches extension
+	if detectedFormat != expectedFormat {
+		return fmt.Errorf("format mismatch: file is %q but image name %q expects %q",
+			detectedFormat, imageName, expectedFormat)
+	}
+
 	// Read the image file
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return fmt.Errorf("failed to read image file: %w", err)
 	}
 
-	// Determine format based on file extension
-	format := VolumeFormatQCOW2
-	ext := filepath.Ext(filePath)
-	if ext == ".raw" || ext == ".img" {
-		format = VolumeFormatRaw
-	}
-
-	// Ensure imageName has the correct extension matching the format
-	expectedExt := ".qcow2"
-	if format == VolumeFormatRaw {
-		expectedExt = ".raw"
-	}
-	if !strings.HasSuffix(imageName, expectedExt) {
-		// Remove any existing extension
-		if currentExt := filepath.Ext(imageName); currentExt != "" {
-			imageName = strings.TrimSuffix(imageName, currentExt)
-		}
-		// Add correct extension
-		imageName = imageName + expectedExt
-	}
+	// Use detected format for volume creation
+	format := detectedFormat
 
 	// Create a volume in the foundry-images pool
 	spec := VolumeSpec{

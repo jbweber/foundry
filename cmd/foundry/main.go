@@ -191,11 +191,28 @@ var imageImportCmd = &cobra.Command{
 	Short: "Import an image into the foundry-images pool",
 	Long: `Import a base OS image from a local file into the foundry-images pool.
 
-The image will be stored in the foundry-images pool and can be referenced
-by name when creating VMs.
+The image file must be in QCOW2 or bootable RAW format. The image name must
+include the correct file extension (.qcow2 or .raw) matching the actual format.
 
-Example:
-  foundry image import /path/to/fedora-43.qcow2 fedora-43`,
+The tool validates that:
+  - QCOW2 images have the correct magic bytes (QFI\xfb)
+  - RAW images have a valid boot sector signature (0x55aa)
+  - The file extension matches the detected format
+
+This ensures only valid, bootable OS images are imported.
+
+Examples:
+  # Import a QCOW2 image
+  foundry image import /path/to/fedora-43.qcow2 fedora-43.qcow2
+
+  # Import a bootable RAW image
+  foundry image import /path/to/ubuntu-24.04.raw ubuntu-24.04.raw
+
+  # This will fail - extension required
+  foundry image import /path/to/fedora.qcow2 fedora
+
+  # This will fail - format mismatch
+  foundry image import /path/to/fedora.qcow2 fedora.raw`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		sourcePath := args[0]

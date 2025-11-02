@@ -290,6 +290,31 @@ This ensures:
 3. **Config file** (`~/.config/foundry/config.yaml` or `/etc/foundry/config.yaml`)
 4. **Hard-coded defaults** (lowest priority): `foundry-vms`, `foundry-images`
 
+**Image Format Validation** (added v0.2.0):
+
+Foundry validates disk images on import to ensure they are bootable OS images:
+
+- **Pure Go detection** - No external commands, reads magic bytes directly
+- **QCOW2 format** - Checks for `QFI\xfb` (0x51 0x46 0x49 0xfb) at offset 0
+  - Reference: [QEMU QCOW2 specification](https://www.qemu.org/docs/master/interop/qcow2.html)
+- **RAW format** - Checks for MBR boot signature `0x55aa` at offset 510
+  - Works for both MBR and GPT disks (GPT has protective MBR)
+  - Reference: [UEFI GPT specification](https://uefi.org/specs/UEFI/2.10/05_GUID_Partition_Table_Format.html)
+- **Required extension** - Image names must have `.qcow2` or `.raw` extension matching actual format
+- **Format mismatch detection** - Rejects files where extension doesn't match detected format
+- **Non-bootable rejection** - RAW images without boot sector signature are rejected
+
+This prevents common issues like:
+- Importing non-bootable files that cause VM boot failures
+- Misnamed files (e.g., QCOW2 with `.raw` extension)
+- Arbitrary data files being imported as images
+
+**Future enhancements**:
+- Support for additional formats (VMDK, VDI, VHD) by adding their magic bytes
+- Optional format conversion on import (`qemu-img convert`)
+- Deep validation of image integrity (beyond magic bytes)
+- RAW-to-QCOW2 conversion workflow for production use (with sparsification)
+
 ### Cloud-init Generation
 
 **Three files in ISO:**

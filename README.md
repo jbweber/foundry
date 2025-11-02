@@ -12,6 +12,8 @@ A Go-based CLI tool for managing libvirt VMs with simple YAML configuration.
 
 Foundry provides a straightforward way to create, manage, and destroy libvirt virtual machines using declarative YAML configuration files. It's designed to replace complex Ansible workflows with a simple, fast CLI tool.
 
+This project isn't suggested for general purpose use, and really exists because of my desire to "roll my own" things. Generally I would suggest using Proxmox or KubeVirt instead of this. If you must though feel free to let me know!
+
 ## Features
 
 - **Simple Configuration**: Define VMs in easy-to-read YAML files

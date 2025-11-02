@@ -8,12 +8,44 @@ import (
 )
 
 func TestManager_ImportImage(t *testing.T) {
-	// Create a temporary image file for testing
 	tmpDir := t.TempDir()
-	imagePath := filepath.Join(tmpDir, "test-image.qcow2")
-	testData := []byte("fake qcow2 data")
-	if err := os.WriteFile(imagePath, testData, 0644); err != nil {
-		t.Fatalf("Failed to create test image: %v", err)
+
+	// Helper to create QCOW2 test file
+	createQCOW2 := func(path string) error {
+		data := []byte{0x51, 0x46, 0x49, 0xfb, 0x00, 0x00, 0x00, 0x03} // QCOW2 magic + version
+		data = append(data, make([]byte, 504)...)                      // Pad to 512 bytes
+		return os.WriteFile(path, data, 0644)
+	}
+
+	// Helper to create bootable RAW test file
+	createBootableRAW := func(path string) error {
+		data := make([]byte, 512)
+		data[510] = 0x55
+		data[511] = 0xaa
+		return os.WriteFile(path, data, 0644)
+	}
+
+	// Create test files
+	qcow2Path := filepath.Join(tmpDir, "test-image.qcow2")
+	if err := createQCOW2(qcow2Path); err != nil {
+		t.Fatalf("Failed to create QCOW2 test file: %v", err)
+	}
+
+	rawPath := filepath.Join(tmpDir, "test-image.raw")
+	if err := createBootableRAW(rawPath); err != nil {
+		t.Fatalf("Failed to create RAW test file: %v", err)
+	}
+
+	// Create misnamed file (QCOW2 with .raw extension)
+	misnamedPath := filepath.Join(tmpDir, "misnamed.raw")
+	if err := createQCOW2(misnamedPath); err != nil {
+		t.Fatalf("Failed to create misnamed test file: %v", err)
+	}
+
+	// Create non-bootable file
+	nonBootablePath := filepath.Join(tmpDir, "non-bootable.raw")
+	if err := os.WriteFile(nonBootablePath, make([]byte, 512), 0644); err != nil {
+		t.Fatalf("Failed to create non-bootable test file: %v", err)
 	}
 
 	tests := []struct {
@@ -22,15 +54,85 @@ func TestManager_ImportImage(t *testing.T) {
 		imageName string
 		setup     func(*mockLibvirtClient, *Manager)
 		wantErr   bool
+		errMsg    string // Expected error substring
 	}{
 		{
 			name:      "import qcow2 image",
-			filePath:  imagePath,
+			filePath:  qcow2Path,
 			imageName: "fedora-43.qcow2",
 			setup: func(m *mockLibvirtClient, mgr *Manager) {
 				_ = mgr.CreatePool(context.Background(), DefaultImagesPool, PoolTypeDir, DefaultImagesPath)
 			},
 			wantErr: false,
+		},
+		{
+			name:      "import bootable raw image",
+			filePath:  rawPath,
+			imageName: "ubuntu-24.04.raw",
+			setup: func(m *mockLibvirtClient, mgr *Manager) {
+				_ = mgr.CreatePool(context.Background(), DefaultImagesPool, PoolTypeDir, DefaultImagesPath)
+			},
+			wantErr: false,
+		},
+		{
+			name:      "reject image name without extension",
+			filePath:  qcow2Path,
+			imageName: "fedora-43",
+			setup: func(m *mockLibvirtClient, mgr *Manager) {
+				_ = mgr.CreatePool(context.Background(), DefaultImagesPool, PoolTypeDir, DefaultImagesPath)
+			},
+			wantErr: true,
+			errMsg:  "must have .qcow2 or .raw extension",
+		},
+		{
+			name:      "reject image name with wrong extension",
+			filePath:  qcow2Path,
+			imageName: "fedora-43.img",
+			setup: func(m *mockLibvirtClient, mgr *Manager) {
+				_ = mgr.CreatePool(context.Background(), DefaultImagesPool, PoolTypeDir, DefaultImagesPath)
+			},
+			wantErr: true,
+			errMsg:  "must have .qcow2 or .raw extension",
+		},
+		{
+			name:      "reject format mismatch (qcow2 file, raw name)",
+			filePath:  qcow2Path,
+			imageName: "fedora-43.raw",
+			setup: func(m *mockLibvirtClient, mgr *Manager) {
+				_ = mgr.CreatePool(context.Background(), DefaultImagesPool, PoolTypeDir, DefaultImagesPath)
+			},
+			wantErr: true,
+			errMsg:  "format mismatch",
+		},
+		{
+			name:      "reject format mismatch (raw file, qcow2 name)",
+			filePath:  rawPath,
+			imageName: "ubuntu-24.04.qcow2",
+			setup: func(m *mockLibvirtClient, mgr *Manager) {
+				_ = mgr.CreatePool(context.Background(), DefaultImagesPool, PoolTypeDir, DefaultImagesPath)
+			},
+			wantErr: true,
+			errMsg:  "format mismatch",
+		},
+		{
+			name:      "reject misnamed file",
+			filePath:  misnamedPath,
+			imageName: "misnamed.raw",
+			setup: func(m *mockLibvirtClient, mgr *Manager) {
+				_ = mgr.CreatePool(context.Background(), DefaultImagesPool, PoolTypeDir, DefaultImagesPath)
+			},
+			wantErr: true,
+			errMsg:  "format mismatch",
+		},
+		{
+			name:      "reject non-bootable raw file",
+			filePath:  nonBootablePath,
+			imageName: "non-bootable.raw",
+			setup: func(m *mockLibvirtClient, mgr *Manager) {
+				_ = mgr.CreatePool(context.Background(), DefaultImagesPool, PoolTypeDir, DefaultImagesPath)
+			},
+			wantErr: true,
+			errMsg:  "unsupported or invalid image",
 		},
 		{
 			name:      "import non-existent file",
@@ -43,7 +145,7 @@ func TestManager_ImportImage(t *testing.T) {
 		},
 		{
 			name:      "pool not found",
-			filePath:  imagePath,
+			filePath:  qcow2Path,
 			imageName: "fedora-43.qcow2",
 			setup:     func(m *mockLibvirtClient, mgr *Manager) {},
 			wantErr:   true,
@@ -59,6 +161,15 @@ func TestManager_ImportImage(t *testing.T) {
 			err := mgr.ImportImage(context.Background(), tt.filePath, tt.imageName)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ImportImage() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			// If error expected, verify error message contains expected substring
+			if tt.wantErr && tt.errMsg != "" {
+				if err == nil || !contains(err.Error(), tt.errMsg) {
+					t.Errorf("ImportImage() error = %v, want error containing %q", err, tt.errMsg)
+				}
+				return
 			}
 
 			// If successful, verify the image was created
@@ -70,12 +181,26 @@ func TestManager_ImportImage(t *testing.T) {
 
 				// Verify data was uploaded
 				vol := mockClient.volumes[DefaultImagesPool][tt.imageName]
-				if string(vol.data) != string(testData) {
-					t.Errorf("Image data mismatch: got %v, want %v", string(vol.data), string(testData))
+				if len(vol.data) == 0 {
+					t.Errorf("Image data not uploaded")
 				}
 			}
 		})
 	}
+}
+
+// Helper function to check if string contains substring
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) && findSubstring(s, substr))
+}
+
+func findSubstring(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }
 
 func TestManager_ListImages(t *testing.T) {
