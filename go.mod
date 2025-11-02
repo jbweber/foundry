@@ -4,6 +4,7 @@ go 1.24.9
 
 require (
 	github.com/digitalocean/go-libvirt v0.0.0-20251014225438-3d9fc6d90050
+	github.com/kdomanski/iso9660 v0.4.0
 	github.com/spf13/cobra v1.10.1
 	golang.org/x/crypto v0.43.0
 	gopkg.in/yaml.v3 v3.0.1
