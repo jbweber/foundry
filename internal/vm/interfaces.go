@@ -26,8 +26,17 @@ type libvirtClient interface {
 	// DomainCreate starts a domain
 	DomainCreate(dom libvirt.Domain) error
 
+	// DomainGetState gets the state of a domain
+	DomainGetState(dom libvirt.Domain, flags uint32) (state int32, reason int32, err error)
+
+	// DomainShutdown gracefully shuts down a domain
+	DomainShutdown(dom libvirt.Domain) error
+
 	// DomainDestroy force-stops a domain
 	DomainDestroy(dom libvirt.Domain) error
+
+	// DomainUndefineFlags undefines a domain with flags (e.g., NVRAM cleanup)
+	DomainUndefineFlags(dom libvirt.Domain, flags libvirt.DomainUndefineFlagsValues) error
 
 	// DomainUndefine undefines a domain
 	DomainUndefine(dom libvirt.Domain) error
@@ -59,4 +68,7 @@ type storageManager interface {
 
 	// WriteVolumeData writes data to a volume (for cloud-init ISOs)
 	WriteVolumeData(ctx context.Context, poolName, volumeName string, data []byte) error
+
+	// ListVolumes lists all volumes in a pool
+	ListVolumes(ctx context.Context, poolName string) ([]storage.VolumeInfo, error)
 }

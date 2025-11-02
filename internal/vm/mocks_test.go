@@ -15,20 +15,26 @@ type mockLibvirtClient struct {
 	mu sync.Mutex
 
 	// Configurable behavior
-	domainLookupByNameFunc func(name string) (libvirt.Domain, error)
-	domainDefineXMLFunc    func(xml string) (libvirt.Domain, error)
-	domainSetAutostartFunc func(dom libvirt.Domain, autostart int32) error
-	domainCreateFunc       func(dom libvirt.Domain) error
-	domainDestroyFunc      func(dom libvirt.Domain) error
-	domainUndefineFunc     func(dom libvirt.Domain) error
+	domainLookupByNameFunc  func(name string) (libvirt.Domain, error)
+	domainDefineXMLFunc     func(xml string) (libvirt.Domain, error)
+	domainSetAutostartFunc  func(dom libvirt.Domain, autostart int32) error
+	domainCreateFunc        func(dom libvirt.Domain) error
+	domainGetStateFunc      func(dom libvirt.Domain, flags uint32) (int32, int32, error)
+	domainShutdownFunc      func(dom libvirt.Domain) error
+	domainDestroyFunc       func(dom libvirt.Domain) error
+	domainUndefineFlagsFunc func(dom libvirt.Domain, flags libvirt.DomainUndefineFlagsValues) error
+	domainUndefineFunc      func(dom libvirt.Domain) error
 
 	// Call tracking
-	domainLookupByNameCalls []string
-	domainDefineXMLCalls    []string
-	domainSetAutostartCalls []libvirt.Domain
-	domainCreateCalls       []libvirt.Domain
-	domainDestroyCalls      []libvirt.Domain
-	domainUndefineCalls     []libvirt.Domain
+	domainLookupByNameCalls  []string
+	domainDefineXMLCalls     []string
+	domainSetAutostartCalls  []libvirt.Domain
+	domainCreateCalls        []libvirt.Domain
+	domainGetStateCalls      []libvirt.Domain
+	domainShutdownCalls      []libvirt.Domain
+	domainDestroyCalls       []libvirt.Domain
+	domainUndefineFlagsCalls []libvirt.Domain
+	domainUndefineCalls      []libvirt.Domain
 }
 
 // newMockLibvirtClient creates a new mock libvirt client with default behavior.
@@ -61,8 +67,23 @@ func newMockLibvirtClient() *mockLibvirtClient {
 		return nil
 	}
 
+	// Default: domain state is running
+	m.domainGetStateFunc = func(dom libvirt.Domain, flags uint32) (int32, int32, error) {
+		return 1, 0, nil // VIR_DOMAIN_RUNNING = 1
+	}
+
+	// Default: shutdown succeeds
+	m.domainShutdownFunc = func(dom libvirt.Domain) error {
+		return nil
+	}
+
 	// Default: destroy succeeds
 	m.domainDestroyFunc = func(dom libvirt.Domain) error {
+		return nil
+	}
+
+	// Default: undefine with flags succeeds
+	m.domainUndefineFlagsFunc = func(dom libvirt.Domain, flags libvirt.DomainUndefineFlagsValues) error {
 		return nil
 	}
 
@@ -102,11 +123,32 @@ func (m *mockLibvirtClient) DomainCreate(dom libvirt.Domain) error {
 	return m.domainCreateFunc(dom)
 }
 
+func (m *mockLibvirtClient) DomainGetState(dom libvirt.Domain, flags uint32) (int32, int32, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.domainGetStateCalls = append(m.domainGetStateCalls, dom)
+	return m.domainGetStateFunc(dom, flags)
+}
+
+func (m *mockLibvirtClient) DomainShutdown(dom libvirt.Domain) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.domainShutdownCalls = append(m.domainShutdownCalls, dom)
+	return m.domainShutdownFunc(dom)
+}
+
 func (m *mockLibvirtClient) DomainDestroy(dom libvirt.Domain) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.domainDestroyCalls = append(m.domainDestroyCalls, dom)
 	return m.domainDestroyFunc(dom)
+}
+
+func (m *mockLibvirtClient) DomainUndefineFlags(dom libvirt.Domain, flags libvirt.DomainUndefineFlagsValues) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.domainUndefineFlagsCalls = append(m.domainUndefineFlagsCalls, dom)
+	return m.domainUndefineFlagsFunc(dom, flags)
 }
 
 func (m *mockLibvirtClient) DomainUndefine(dom libvirt.Domain) error {
@@ -128,6 +170,7 @@ type mockStorageManager struct {
 	getImagePathFunc       func(ctx context.Context, imageName string) (string, error)
 	imageExistsFunc        func(ctx context.Context, imageName string) (bool, error)
 	writeVolumeDataFunc    func(ctx context.Context, poolName, volumeName string, data []byte) error
+	listVolumesFunc        func(ctx context.Context, poolName string) ([]storage.VolumeInfo, error)
 
 	// Call tracking
 	ensureDefaultPoolsCalls int
@@ -137,6 +180,7 @@ type mockStorageManager struct {
 	getImagePathCalls       []string
 	imageExistsCalls        []string
 	writeVolumeDataCalls    []string // format: "pool/volume"
+	listVolumesCalls        []string // pool names
 }
 
 // newMockStorageManager creates a new mock storage manager with default behavior.
@@ -169,6 +213,10 @@ func newMockStorageManager() *mockStorageManager {
 		// Default: write succeeds
 		writeVolumeDataFunc: func(ctx context.Context, poolName, volumeName string, data []byte) error {
 			return nil
+		},
+		// Default: no volumes
+		listVolumesFunc: func(ctx context.Context, poolName string) ([]storage.VolumeInfo, error) {
+			return []storage.VolumeInfo{}, nil
 		},
 	}
 }
@@ -220,4 +268,11 @@ func (m *mockStorageManager) WriteVolumeData(ctx context.Context, poolName, volu
 	defer m.mu.Unlock()
 	m.writeVolumeDataCalls = append(m.writeVolumeDataCalls, poolName+"/"+volumeName)
 	return m.writeVolumeDataFunc(ctx, poolName, volumeName, data)
+}
+
+func (m *mockStorageManager) ListVolumes(ctx context.Context, poolName string) ([]storage.VolumeInfo, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.listVolumesCalls = append(m.listVolumesCalls, poolName)
+	return m.listVolumesFunc(ctx, poolName)
 }

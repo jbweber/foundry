@@ -73,15 +73,21 @@ var destroyCmd = &cobra.Command{
 	Long: `Destroy a virtual machine by name.
 
 This will:
-- Stop the VM if running
-- Undefine the domain
-- Delete all storage volumes
-- Remove the VM directory`,
+- Gracefully shutdown the VM if running (5s timeout)
+- Force destroy if still running
+- Undefine the domain (with NVRAM cleanup)
+- Delete all storage volumes`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		vmName := args[0]
 		fmt.Printf("Destroying VM: %s\n", vmName)
-		fmt.Println("(Not yet implemented)")
+
+		ctx := context.Background()
+		if err := vm.Destroy(ctx, vmName); err != nil {
+			return fmt.Errorf("failed to destroy VM: %w", err)
+		}
+
+		fmt.Println("✓ VM destroyed successfully!")
 		return nil
 	},
 }
