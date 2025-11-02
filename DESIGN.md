@@ -28,12 +28,22 @@ Foundry is a Go-based CLI tool for managing libvirt VMs, replacing the Ansible-b
 ```
 foundry/
 ├── cmd/foundry/
-│   └── main.go              # CLI entrypoint with subcommands
+│   ├── main.go              # CLI entrypoint with subcommands
+│   ├── create.go            # VM create command
+│   ├── destroy.go           # VM destroy command
+│   ├── list.go              # VM list command
+│   ├── pool.go              # Pool management commands
+│   ├── image.go             # Image management commands
+│   └── storage.go           # Storage status command
 ├── internal/
 │   ├── config/
 │   │   └── types.go         # VM configuration structs + MAC calculation
-│   ├── disk/
-│   │   └── storage.go       # Disk creation via libvirt storage APIs
+│   ├── storage/
+│   │   ├── types.go         # Storage types (PoolType, VolumeSpec, etc.)
+│   │   ├── manager.go       # Storage manager coordinator
+│   │   ├── pool.go          # Pool operations (create, list, delete)
+│   │   ├── volume.go        # Volume operations (create, delete, upload)
+│   │   └── image.go         # Base image management (import, pull, list)
 │   ├── cloudinit/
 │   │   ├── generator.go     # Generate user-data, meta-data, network-config
 │   │   └── iso.go           # Create ISO using iso9660
@@ -43,14 +53,18 @@ foundry/
 │   └── vm/
 │       ├── create.go        # VM creation orchestration
 │       ├── destroy.go       # VM destruction logic
-│       └── list.go          # VM listing
+│       ├── list.go          # VM listing
+│       └── interfaces.go    # Interfaces for dependency injection
 ├── examples/
 │   ├── simple-vm.yaml       # Basic VM config example
 │   ├── multi-disk-vm.yaml   # VM with data disks
-│   └── no-cloudinit-vm.yaml # VM without cloud-init
+│   ├── custom-pool-vm.yaml  # VM using custom storage pool
+│   └── config.yaml          # Foundry configuration example
 ├── go.mod
 ├── go.sum
 ├── DESIGN.md                # This file
+├── CLOUDINIT.md             # Cloud-init implementation details
+├── PLAN_FOUNDRY.md          # Implementation plan and progress
 └── README.md                # User documentation
 ```
 
@@ -109,6 +123,7 @@ cloud_init:
 # Optional: Advanced settings
 cpu_mode: host-model          # CPU mode: host-model (default), host-passthrough
 autostart: true               # Auto-start VM on host boot (default: true)
+storage_pool: foundry-vms     # Storage pool to use (default: foundry-vms)
 ```
 
 ### Configuration Validation Rules
@@ -223,33 +238,57 @@ This ensures:
 
 ### Storage Management
 
-**Using libvirt storage APIs:**
-- Create storage pool at `/var/lib/libvirt/images/`
-- Each VM gets a subdirectory
-- Boot disk is qcow2 volume with backing file reference
-- Data disks are standalone qcow2 volumes
-- Volumes managed via libvirt (no qemu-img needed)
+**Architecture**: Unified libvirt storage pool approach with separate pools for images and VMs.
+
+**Two Default Pools** (auto-created on first use):
+- `foundry-images` - Base OS images at `/var/lib/libvirt/images/foundry/images/`
+  - Read-mostly, shared across VMs
+  - Small total size (few GB)
+- `foundry-vms` - VM disks at `/var/lib/libvirt/images/foundry/vms/`
+  - Read-write active disks
+  - Most I/O happens here
+  - Default pool for VM creation
+
+**Custom Pools** (user-managed):
+- Users can add pools for specific storage needs (SSD, bulk, network storage)
+- Support for different backends: dir, LVM, ZFS, NFS, Ceph
+- CLI commands for pool management
+
+**Volume Naming Convention** (flat namespace within pools):
+- Boot disk: `{vm-name}_boot`
+- Data disks: `{vm-name}_data-{device}` (e.g., `web-server_data-vdb`)
+- Cloud-init ISO: `{vm-name}_cloudinit`
+- Base images: `{os-name}-{version}` (e.g., `fedora-43`, `ubuntu-24.04`)
 
 **Storage structure:**
 ```
-/var/lib/libvirt/images/       # Hardcoded base path (configurable in future)
-├── fedora-42.qcow2            # Base images (not managed by foundry)
-├── ubuntu-24.04.qcow2
-├── my-vm/                     # VM directory
-│   ├── boot.qcow2             # Boot disk (backing: ../fedora-42.qcow2)
-│   ├── data-vdb.qcow2         # Data disk
-│   ├── data-vdc.qcow2         # Data disk
-│   └── cloudinit.iso          # Cloud-init config
-└── prod-web01/
-    ├── boot.qcow2
-    ├── data-vdb.qcow2
-    └── cloudinit.iso
+/var/lib/libvirt/images/foundry/
+├── images/                    # foundry-images pool
+│   ├── fedora-43              # Base image volume
+│   ├── ubuntu-24.04           # Base image volume
+│   └── debian-12              # Base image volume
+└── vms/                       # foundry-vms pool
+    ├── my-vm_boot             # Boot disk volume (qcow2 with backing: fedora-43)
+    ├── my-vm_data-vdb         # Data disk volume
+    ├── my-vm_data-vdc         # Data disk volume
+    ├── my-vm_cloudinit        # Cloud-init ISO volume
+    ├── prod-web01_boot        # Another VM's boot disk
+    └── prod-web01_cloudinit   # Another VM's cloud-init
 ```
 
-**File naming patterns:**
-- Boot disk: `<vm-name>/boot.qcow2`
-- Data disks: `<vm-name>/data-<device>.qcow2` (e.g., data-vdb, data-vdc)
-- Cloud-init ISO: `<vm-name>/cloudinit.iso`
+**Benefits:**
+- ✅ Libvirt-native (no shell commands, proper error handling)
+- ✅ Multiple storage backends (dir, LVM, ZFS, NFS, Ceph)
+- ✅ Clean separation (images vs VM disks in different pools)
+- ✅ Auto-management (permissions handled by libvirt)
+- ✅ Flexible storage (users can choose fast/slow/network per VM)
+- ✅ Future-proof (snapshots, cloning, migration supported)
+
+**Configuration Layers** (priority order):
+1. **CLI flags** (highest priority): `foundry create --pool foundry-ssd`
+2. **Environment variables**: `FOUNDRY_VM_POOL=my-pool`
+3. **Config file** (`~/.config/foundry/config.yaml` or `/etc/foundry/config.yaml`)
+4. **Hard-coded defaults** (lowest priority): `foundry-vms`, `foundry-images`
 
 ### Cloud-init Generation
 
@@ -301,7 +340,7 @@ ethernets:
 
 ### Libvirt Domain XML
 
-Key elements:
+Key elements (using volume-based disk sources):
 ```xml
 <domain type='kvm'>
   <name>my-vm</name>
@@ -314,16 +353,28 @@ Key elements:
     <boot dev='hd'/>
   </os>
   <devices>
+    <!-- Boot disk (qcow2 with backing image) -->
     <disk type='volume' device='disk'>
       <driver name='qemu' type='qcow2' cache='none'/>
-      <source pool='default' volume='my-vm/boot.qcow2'/>
+      <source pool='foundry-vms' volume='my-vm_boot'/>
       <target dev='vda' bus='virtio'/>
     </disk>
+
+    <!-- Data disks -->
+    <disk type='volume' device='disk'>
+      <driver name='qemu' type='qcow2'/>
+      <source pool='foundry-vms' volume='my-vm_data-vdb'/>
+      <target dev='vdb' bus='virtio'/>
+    </disk>
+
+    <!-- Cloud-init ISO -->
     <disk type='volume' device='cdrom'>
-      <source pool='default' volume='my-vm/cloudinit.iso'/>
+      <driver name='qemu' type='raw'/>
+      <source pool='foundry-vms' volume='my-vm_cloudinit'/>
       <target dev='sda' bus='sata'/>
       <readonly/>
     </disk>
+
     <interface type='bridge'>
       <mac address='be:ef:0a:37:16:16'/>
       <source bridge='br0'/>
@@ -343,10 +394,12 @@ Key elements:
 
 ### Commands
 
+**VM Management:**
 ```bash
 # Create VM from config
 foundry create <config.yaml>
 foundry create examples/simple-vm.yaml
+foundry create vm.yaml --pool foundry-ssd  # Use custom pool
 
 # Destroy VM
 foundry destroy <vm-name>
@@ -356,8 +409,50 @@ foundry destroy my-vm
 foundry list
 foundry list --all  # Include stopped VMs
 
-# Show VM details (future)
-foundry show <vm-name>
+# Show VM details
+foundry vm info <vm-name>
+```
+
+**Storage Pool Management:**
+```bash
+# List all pools
+foundry pool list
+
+# Show pool details (capacity, allocation, volumes)
+foundry pool info <pool-name>
+
+# Add custom pool
+foundry pool add <name> --type dir --path /mnt/ssd/foundry
+
+# Delete custom pool (prevents deleting foundry-images, foundry-vms)
+foundry pool delete <name> [--force]
+
+# Refresh pool state
+foundry pool refresh <name>
+```
+
+**Base Image Management:**
+```bash
+# List available base images
+foundry image list
+
+# Import local image file
+foundry image import <file-path> --name <image-name>
+
+# Download and import image from URL
+foundry image pull <url> --name <image-name> [--checksum sha256:...]
+
+# Delete base image (checks if in use)
+foundry image delete <image-name> [--force]
+
+# Show image details and usage
+foundry image info <image-name>
+```
+
+**Storage Overview:**
+```bash
+# Show storage status across all pools
+foundry storage status
 ```
 
 ### Exit Codes
@@ -412,17 +507,21 @@ old-vm     shut off  4      8 GiB   -
 - ✅ UEFI boot
 - ✅ Serial console
 
+**In Progress - Storage Architecture:**
+- 🔄 Storage pool management (foundry-images, foundry-vms pools)
+- 🔄 Base image management (import, pull, list, delete)
+- 🔄 Multi-pool support (custom pools on different storage backends)
+- 🔄 Volume-based disk management (libvirt native)
+
 **Out of Scope (Future Phases):**
 - ❌ BGP/ethernet mode networking
-- ❌ Image management/downloading
 - ❌ Remote hypervisor support (SSH)
 - ❌ VNC configuration
 - ❌ Installation ISO attachment
 - ❌ CoreOS/Ignition support (provisioning format abstraction needed)
-- ❌ Image templates/catalog
 - ❌ Console autologin
 - ❌ Custom firmware config (fw_cfg)
-- ❌ Configurable storage base path (CLI flag, env var, config file)
+- ❌ Config file support (~/.config/foundry/config.yaml)
 - ❌ Bridge verification before deployment (fuzzy match existing bridges)
 
 ## Testing Strategy
