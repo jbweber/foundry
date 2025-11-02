@@ -260,21 +260,21 @@ func (c *VMConfig) GetVMDirectory() string {
 }
 
 // GetBootVolumeName returns the volume name for the boot disk.
-// Format: <vm-name>_boot
+// Format: <vm-name>_boot.qcow2 (includes extension to indicate format)
 func (c *VMConfig) GetBootVolumeName() string {
-	return fmt.Sprintf("%s_boot", c.Name)
+	return fmt.Sprintf("%s_boot.qcow2", c.Name)
 }
 
 // GetDataVolumeName returns the volume name for a data disk.
-// Format: <vm-name>_data-<device> (e.g., "my-vm_data-vdb")
+// Format: <vm-name>_data-<device>.qcow2 (e.g., "my-vm_data-vdb.qcow2")
 func (c *VMConfig) GetDataVolumeName(device string) string {
-	return fmt.Sprintf("%s_data-%s", c.Name, device)
+	return fmt.Sprintf("%s_data-%s.qcow2", c.Name, device)
 }
 
 // GetCloudInitVolumeName returns the volume name for the cloud-init ISO.
-// Format: <vm-name>_cloudinit
+// Format: <vm-name>_cloudinit.iso (includes extension to indicate format)
 func (c *VMConfig) GetCloudInitVolumeName() string {
-	return fmt.Sprintf("%s_cloudinit", c.Name)
+	return fmt.Sprintf("%s_cloudinit.iso", c.Name)
 }
 
 // Normalize sanitizes user input to consistent formats.

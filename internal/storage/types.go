@@ -39,7 +39,7 @@ type VolumeSpec struct {
 	Type          VolumeType   // Volume type
 	Format        VolumeFormat // Disk format (qcow2, raw)
 	CapacityGB    uint64       // Capacity in GB
-	BackingVolume string       // Optional: backing volume name for qcow2 snapshots
+	BackingVolume string       // Optional: backing volume path for qcow2 snapshots (filesystem path, not pool:volume - required because backing images are typically in a different pool like foundry-images)
 }
 
 // Validate checks if the volume spec is valid.

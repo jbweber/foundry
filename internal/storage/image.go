@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // ImportImage imports a base image from a local file into the foundry-images pool.
@@ -29,6 +30,20 @@ func (m *Manager) ImportImage(ctx context.Context, filePath, imageName string) e
 	ext := filepath.Ext(filePath)
 	if ext == ".raw" || ext == ".img" {
 		format = VolumeFormatRaw
+	}
+
+	// Ensure imageName has the correct extension matching the format
+	expectedExt := ".qcow2"
+	if format == VolumeFormatRaw {
+		expectedExt = ".raw"
+	}
+	if !strings.HasSuffix(imageName, expectedExt) {
+		// Remove any existing extension
+		if currentExt := filepath.Ext(imageName); currentExt != "" {
+			imageName = strings.TrimSuffix(imageName, currentExt)
+		}
+		// Add correct extension
+		imageName = imageName + expectedExt
 	}
 
 	// Create a volume in the foundry-images pool

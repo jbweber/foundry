@@ -26,7 +26,7 @@ func TestManager_ImportImage(t *testing.T) {
 		{
 			name:      "import qcow2 image",
 			filePath:  imagePath,
-			imageName: "fedora-43",
+			imageName: "fedora-43.qcow2",
 			setup: func(m *mockLibvirtClient, mgr *Manager) {
 				_ = mgr.CreatePool(context.Background(), DefaultImagesPool, PoolTypeDir, DefaultImagesPath)
 			},
@@ -35,7 +35,7 @@ func TestManager_ImportImage(t *testing.T) {
 		{
 			name:      "import non-existent file",
 			filePath:  "/nonexistent/image.qcow2",
-			imageName: "fedora-43",
+			imageName: "fedora-43.qcow2",
 			setup: func(m *mockLibvirtClient, mgr *Manager) {
 				_ = mgr.CreatePool(context.Background(), DefaultImagesPool, PoolTypeDir, DefaultImagesPath)
 			},
@@ -44,7 +44,7 @@ func TestManager_ImportImage(t *testing.T) {
 		{
 			name:      "pool not found",
 			filePath:  imagePath,
-			imageName: "fedora-43",
+			imageName: "fedora-43.qcow2",
 			setup:     func(m *mockLibvirtClient, mgr *Manager) {},
 			wantErr:   true,
 		},

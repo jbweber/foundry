@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	libvirtxml "libvirt.org/go/libvirtxml"
@@ -192,16 +193,25 @@ func generateVolumeXML(poolName string, spec VolumeSpec, m *Manager) (string, er
 
 	// Add backing store if specified
 	if spec.BackingVolume != "" {
-		// Get the backing volume path
-		backingPath, err := m.GetVolumePath(context.Background(), poolName, spec.BackingVolume)
-		if err != nil {
-			return "", fmt.Errorf("failed to get backing volume path: %w", err)
+		// BackingVolume should be a filesystem path (not pool:volume reference).
+		// This is necessary because backing images are typically in a different pool
+		// (e.g., foundry-images) than the volume being created (e.g., foundry-vms).
+		// Libvirt's XML schema requires a filesystem path in the backing store element.
+		// The caller is responsible for resolving pool:volume references to paths.
+		//
+		// Determine the backing file format from the file extension.
+		// We enforce that all image files have .qcow2 or .raw extensions, so we can
+		// reliably determine the format from the path.
+		backingFormat := "qcow2" // default
+		ext := filepath.Ext(spec.BackingVolume)
+		if ext == ".raw" || ext == ".img" {
+			backingFormat = "raw"
 		}
 
 		vol.BackingStore = &libvirtxml.StorageVolumeBackingStore{
-			Path: backingPath,
+			Path: spec.BackingVolume,
 			Format: &libvirtxml.StorageVolumeTargetFormat{
-				Type: string(spec.Format),
+				Type: backingFormat,
 			},
 		}
 	}

@@ -1191,7 +1191,7 @@ func TestVolumeNameHelpers(t *testing.T) {
 	config := &VMConfig{Name: "test-vm"}
 
 	t.Run("GetBootVolumeName", func(t *testing.T) {
-		expected := "test-vm_boot"
+		expected := "test-vm_boot.qcow2"
 		result := config.GetBootVolumeName()
 		if result != expected {
 			t.Errorf("Expected %q, got %q", expected, result)
@@ -1199,7 +1199,7 @@ func TestVolumeNameHelpers(t *testing.T) {
 	})
 
 	t.Run("GetDataVolumeName", func(t *testing.T) {
-		expected := "test-vm_data-vdb"
+		expected := "test-vm_data-vdb.qcow2"
 		result := config.GetDataVolumeName("vdb")
 		if result != expected {
 			t.Errorf("Expected %q, got %q", expected, result)
@@ -1207,7 +1207,7 @@ func TestVolumeNameHelpers(t *testing.T) {
 	})
 
 	t.Run("GetCloudInitVolumeName", func(t *testing.T) {
-		expected := "test-vm_cloudinit"
+		expected := "test-vm_cloudinit.iso"
 		result := config.GetCloudInitVolumeName()
 		if result != expected {
 			t.Errorf("Expected %q, got %q", expected, result)
