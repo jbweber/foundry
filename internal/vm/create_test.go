@@ -10,6 +10,7 @@ import (
 	"github.com/digitalocean/go-libvirt"
 
 	"github.com/jbweber/foundry/internal/config"
+	"github.com/jbweber/foundry/internal/storage"
 )
 
 // testVMConfig creates a minimal valid VM config for testing
@@ -30,6 +31,7 @@ func testVMConfig() *config.VMConfig {
 			},
 		},
 	}
+	cfg.Normalize() // Set default storage pools
 	if err := cfg.Validate(); err != nil {
 		panic(fmt.Sprintf("invalid test config: %v", err))
 	}
@@ -91,8 +93,13 @@ func TestCreateFromConfigWithDeps_Success(t *testing.T) {
 			if len(lv.domainUndefineCalls) > 0 {
 				t.Error("unexpected cleanup: domain undefine called on success")
 			}
-			if len(sm.deleteVMCalls) > 0 {
+			if len(sm.deleteVolumeCalls) > 0 {
 				t.Error("unexpected cleanup: storage delete called on success")
+			}
+
+			// Verify volumes were created
+			if len(sm.createVolumeCalls) == 0 {
+				t.Error("expected at least boot volume to be created")
 			}
 		})
 	}
@@ -117,23 +124,23 @@ func TestCreateFromConfigWithDeps_PreflightChecksFail(t *testing.T) {
 			expectCleanup: false,
 		},
 		{
-			name: "insufficient disk space",
+			name: "boot volume already exists",
 			setupMock: func(lv *mockLibvirtClient, sm *mockStorageManager) {
-				sm.checkDiskSpaceFunc = func(cfg *config.VMConfig) error {
-					return errors.New("insufficient disk space")
-				}
-			},
-			expectError:   "disk space",
-			expectCleanup: false,
-		},
-		{
-			name: "directory already exists",
-			setupMock: func(lv *mockLibvirtClient, sm *mockStorageManager) {
-				sm.vmDirectoryExistsFunc = func(vmName string) (bool, error) {
+				sm.volumeExistsFunc = func(ctx context.Context, poolName, volumeName string) (bool, error) {
 					return true, nil
 				}
 			},
-			expectError:   "directory already exists",
+			expectError:   "boot volume already exists",
+			expectCleanup: false,
+		},
+		{
+			name: "backing image not found",
+			setupMock: func(lv *mockLibvirtClient, sm *mockStorageManager) {
+				sm.imageExistsFunc = func(ctx context.Context, imageName string) (bool, error) {
+					return false, nil
+				}
+			},
+			expectError:   "backing image not found",
 			expectCleanup: false,
 		},
 	}
@@ -142,6 +149,11 @@ func TestCreateFromConfigWithDeps_PreflightChecksFail(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
 			cfg := testVMConfig()
+			// For backing image test, we need an image reference
+			if tt.name == "backing image not found" {
+				cfg.BootDisk.Image = "fedora-43"
+				cfg.BootDisk.Empty = false
+			}
 			lv := newMockLibvirtClient()
 			sm := newMockStorageManager()
 			tt.setupMock(lv, sm)
@@ -156,9 +168,9 @@ func TestCreateFromConfigWithDeps_PreflightChecksFail(t *testing.T) {
 				t.Errorf("expected error containing %q, got: %v", tt.expectError, err)
 			}
 
-			// Verify no storage was created (preflight checks fail early)
-			if len(sm.createVMDirectoryCalls) > 0 {
-				t.Error("unexpected storage creation on preflight failure")
+			// Verify no volumes were created (preflight checks fail early)
+			if len(sm.createVolumeCalls) > 0 {
+				t.Error("unexpected volume creation on preflight failure")
 			}
 		})
 	}
@@ -168,47 +180,30 @@ func TestCreateFromConfigWithDeps_PreflightChecksFail(t *testing.T) {
 func TestCreateFromConfigWithDeps_StorageFailures(t *testing.T) {
 	tests := []struct {
 		name          string
+		cfg           *config.VMConfig
 		setupMock     func(*mockStorageManager)
 		expectCleanup bool
 	}{
 		{
-			name: "create directory fails",
+			name: "create boot volume fails",
+			cfg:  testVMConfig(),
 			setupMock: func(sm *mockStorageManager) {
-				sm.createVMDirectoryFunc = func(vmName string) error {
-					return errors.New("permission denied")
+				sm.createVolumeFunc = func(ctx context.Context, poolName string, spec storage.VolumeSpec) error {
+					return errors.New("libvirt create volume failed")
 				}
 			},
 			expectCleanup: false, // storageCreated flag not set yet
-		},
-		{
-			name: "create boot disk fails",
-			setupMock: func(sm *mockStorageManager) {
-				sm.createBootDiskFunc = func(cfg *config.VMConfig) error {
-					return errors.New("qemu-img failed")
-				}
-			},
-			expectCleanup: true, // storageCreated flag was set
-		},
-		{
-			name: "write cloud-init ISO fails",
-			setupMock: func(sm *mockStorageManager) {
-				sm.writeCloudInitISOFunc = func(cfg *config.VMConfig, isoData []byte) error {
-					return errors.New("disk full")
-				}
-			},
-			expectCleanup: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
-			cfg := testVMConfigWithCloudInit() // Use cloud-init to test ISO path
 			lv := newMockLibvirtClient()
 			sm := newMockStorageManager()
 			tt.setupMock(sm)
 
-			err := createFromConfigWithDeps(ctx, cfg, lv, sm)
+			err := createFromConfigWithDeps(ctx, tt.cfg, lv, sm)
 
 			if err == nil {
 				t.Fatal("expected error, got nil")
@@ -216,11 +211,11 @@ func TestCreateFromConfigWithDeps_StorageFailures(t *testing.T) {
 
 			// Verify cleanup behavior
 			if tt.expectCleanup {
-				if len(sm.deleteVMCalls) != 1 {
-					t.Errorf("expected storage cleanup, got %d calls", len(sm.deleteVMCalls))
+				if len(sm.deleteVolumeCalls) == 0 {
+					t.Error("expected storage cleanup")
 				}
 			} else {
-				if len(sm.deleteVMCalls) > 0 {
+				if len(sm.deleteVolumeCalls) > 0 {
 					t.Error("unexpected storage cleanup")
 				}
 			}
@@ -283,9 +278,9 @@ func TestCreateFromConfigWithDeps_LibvirtFailures(t *testing.T) {
 				t.Fatal("expected error, got nil")
 			}
 
-			// Verify storage cleanup always happens
-			if len(sm.deleteVMCalls) != 1 {
-				t.Errorf("expected storage cleanup, got %d calls", len(sm.deleteVMCalls))
+			// Verify storage cleanup always happens (at least boot volume)
+			if len(sm.deleteVolumeCalls) == 0 {
+				t.Error("expected storage cleanup")
 			}
 
 			// Verify domain cleanup only happens if domain was defined
@@ -344,6 +339,7 @@ func TestCleanupWithDeps(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
+			cfg := testVMConfig()
 			lv := newMockLibvirtClient()
 			sm := newMockStorageManager()
 
@@ -354,7 +350,7 @@ func TestCleanupWithDeps(t *testing.T) {
 				}
 			}
 
-			cleanupWithDeps(ctx, "test-vm", sm, lv, tt.domainDefined, tt.storageCreated)
+			cleanupWithDeps(ctx, cfg, sm, lv, tt.domainDefined, tt.storageCreated)
 
 			// Verify cleanup behavior
 			if tt.expectDomainCleanup {
@@ -368,11 +364,12 @@ func TestCleanupWithDeps(t *testing.T) {
 			}
 
 			if tt.expectStorageCleanup {
-				if len(sm.deleteVMCalls) != 1 {
-					t.Errorf("expected storage cleanup, got %d calls", len(sm.deleteVMCalls))
+				// Should delete at least boot volume
+				if len(sm.deleteVolumeCalls) == 0 {
+					t.Error("expected storage cleanup")
 				}
 			} else {
-				if len(sm.deleteVMCalls) > 0 {
+				if len(sm.deleteVolumeCalls) > 0 {
 					t.Error("unexpected storage cleanup")
 				}
 			}
@@ -383,6 +380,7 @@ func TestCleanupWithDeps(t *testing.T) {
 // TestCleanupWithDeps_ContinuesOnError tests that cleanup continues even if operations fail
 func TestCleanupWithDeps_ContinuesOnError(t *testing.T) {
 	ctx := context.Background()
+	cfg := testVMConfig()
 	lv := newMockLibvirtClient()
 	sm := newMockStorageManager()
 
@@ -390,18 +388,18 @@ func TestCleanupWithDeps_ContinuesOnError(t *testing.T) {
 	lv.domainLookupByNameFunc = func(name string) (libvirt.Domain, error) {
 		return libvirt.Domain{}, errors.New("lookup failed")
 	}
-	sm.deleteVMFunc = func(vmName string) error {
+	sm.deleteVolumeFunc = func(ctx context.Context, poolName, volumeName string) error {
 		return errors.New("delete failed")
 	}
 
 	// Should not panic
-	cleanupWithDeps(ctx, "test-vm", sm, lv, true, true)
+	cleanupWithDeps(ctx, cfg, sm, lv, true, true)
 
 	// Verify attempts were made despite failures
 	if len(lv.domainLookupByNameCalls) != 1 {
 		t.Error("expected domain cleanup attempt")
 	}
-	if len(sm.deleteVMCalls) != 1 {
+	if len(sm.deleteVolumeCalls) == 0 {
 		t.Error("expected storage cleanup attempt")
 	}
 }

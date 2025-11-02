@@ -1,12 +1,13 @@
 package vm
 
 import (
+	"context"
 	"fmt"
 	"sync"
 
 	"github.com/digitalocean/go-libvirt"
 
-	"github.com/jbweber/foundry/internal/config"
+	"github.com/jbweber/foundry/internal/storage"
 )
 
 // mockLibvirtClient is a mock implementation of the libvirtClient interface for testing.
@@ -120,112 +121,103 @@ type mockStorageManager struct {
 	mu sync.Mutex
 
 	// Configurable behavior
-	checkDiskSpaceFunc    func(cfg *config.VMConfig) error
-	vmDirectoryExistsFunc func(vmName string) (bool, error)
-	getVMDirectoryFunc    func(vmName string) string
-	createVMDirectoryFunc func(vmName string) error
-	createBootDiskFunc    func(cfg *config.VMConfig) error
-	createDataDiskFunc    func(vmName string, disk config.DataDiskConfig) error
-	writeCloudInitISOFunc func(cfg *config.VMConfig, isoData []byte) error
-	deleteVMFunc          func(vmName string) error
+	ensureDefaultPoolsFunc func(ctx context.Context) error
+	volumeExistsFunc       func(ctx context.Context, poolName, volumeName string) (bool, error)
+	createVolumeFunc       func(ctx context.Context, poolName string, spec storage.VolumeSpec) error
+	deleteVolumeFunc       func(ctx context.Context, poolName, volumeName string) error
+	getImagePathFunc       func(ctx context.Context, imageName string) (string, error)
+	imageExistsFunc        func(ctx context.Context, imageName string) (bool, error)
+	writeVolumeDataFunc    func(ctx context.Context, poolName, volumeName string, data []byte) error
 
 	// Call tracking
-	checkDiskSpaceCalls    []*config.VMConfig
-	vmDirectoryExistsCalls []string
-	getVMDirectoryCalls    []string
-	createVMDirectoryCalls []string
-	createBootDiskCalls    []*config.VMConfig
-	createDataDiskCalls    []config.DataDiskConfig
-	writeCloudInitISOCalls []*config.VMConfig
-	deleteVMCalls          []string
+	ensureDefaultPoolsCalls int
+	volumeExistsCalls       []string // format: "pool/volume"
+	createVolumeCalls       []storage.VolumeSpec
+	deleteVolumeCalls       []string // format: "pool/volume"
+	getImagePathCalls       []string
+	imageExistsCalls        []string
+	writeVolumeDataCalls    []string // format: "pool/volume"
 }
 
 // newMockStorageManager creates a new mock storage manager with default behavior.
 func newMockStorageManager() *mockStorageManager {
 	return &mockStorageManager{
-		// Default: disk space is sufficient
-		checkDiskSpaceFunc: func(cfg *config.VMConfig) error {
+		// Default: pools exist
+		ensureDefaultPoolsFunc: func(ctx context.Context) error {
 			return nil
 		},
-		// Default: VM directory does not exist
-		vmDirectoryExistsFunc: func(vmName string) (bool, error) {
+		// Default: volumes don't exist
+		volumeExistsFunc: func(ctx context.Context, poolName, volumeName string) (bool, error) {
 			return false, nil
 		},
-		// Default: return path
-		getVMDirectoryFunc: func(vmName string) string {
-			return "/var/lib/libvirt/images/" + vmName
-		},
-		// Default: all operations succeed
-		createVMDirectoryFunc: func(vmName string) error {
+		// Default: create succeeds
+		createVolumeFunc: func(ctx context.Context, poolName string, spec storage.VolumeSpec) error {
 			return nil
 		},
-		createBootDiskFunc: func(cfg *config.VMConfig) error {
+		// Default: delete succeeds
+		deleteVolumeFunc: func(ctx context.Context, poolName, volumeName string) error {
 			return nil
 		},
-		createDataDiskFunc: func(vmName string, disk config.DataDiskConfig) error {
-			return nil
+		// Default: image exists with path
+		getImagePathFunc: func(ctx context.Context, imageName string) (string, error) {
+			return "/var/lib/libvirt/images/foundry/foundry-images/" + imageName, nil
 		},
-		writeCloudInitISOFunc: func(cfg *config.VMConfig, isoData []byte) error {
-			return nil
+		// Default: image exists
+		imageExistsFunc: func(ctx context.Context, imageName string) (bool, error) {
+			return true, nil
 		},
-		deleteVMFunc: func(vmName string) error {
+		// Default: write succeeds
+		writeVolumeDataFunc: func(ctx context.Context, poolName, volumeName string, data []byte) error {
 			return nil
 		},
 	}
 }
 
-func (m *mockStorageManager) CheckDiskSpace(cfg *config.VMConfig) error {
+func (m *mockStorageManager) EnsureDefaultPools(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.checkDiskSpaceCalls = append(m.checkDiskSpaceCalls, cfg)
-	return m.checkDiskSpaceFunc(cfg)
+	m.ensureDefaultPoolsCalls++
+	return m.ensureDefaultPoolsFunc(ctx)
 }
 
-func (m *mockStorageManager) VMDirectoryExists(vmName string) (bool, error) {
+func (m *mockStorageManager) VolumeExists(ctx context.Context, poolName, volumeName string) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.vmDirectoryExistsCalls = append(m.vmDirectoryExistsCalls, vmName)
-	return m.vmDirectoryExistsFunc(vmName)
+	m.volumeExistsCalls = append(m.volumeExistsCalls, poolName+"/"+volumeName)
+	return m.volumeExistsFunc(ctx, poolName, volumeName)
 }
 
-func (m *mockStorageManager) GetVMDirectory(vmName string) string {
+func (m *mockStorageManager) CreateVolume(ctx context.Context, poolName string, spec storage.VolumeSpec) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.getVMDirectoryCalls = append(m.getVMDirectoryCalls, vmName)
-	return m.getVMDirectoryFunc(vmName)
+	m.createVolumeCalls = append(m.createVolumeCalls, spec)
+	return m.createVolumeFunc(ctx, poolName, spec)
 }
 
-func (m *mockStorageManager) CreateVMDirectory(vmName string) error {
+func (m *mockStorageManager) DeleteVolume(ctx context.Context, poolName, volumeName string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.createVMDirectoryCalls = append(m.createVMDirectoryCalls, vmName)
-	return m.createVMDirectoryFunc(vmName)
+	m.deleteVolumeCalls = append(m.deleteVolumeCalls, poolName+"/"+volumeName)
+	return m.deleteVolumeFunc(ctx, poolName, volumeName)
 }
 
-func (m *mockStorageManager) CreateBootDisk(cfg *config.VMConfig) error {
+func (m *mockStorageManager) GetImagePath(ctx context.Context, imageName string) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.createBootDiskCalls = append(m.createBootDiskCalls, cfg)
-	return m.createBootDiskFunc(cfg)
+	m.getImagePathCalls = append(m.getImagePathCalls, imageName)
+	return m.getImagePathFunc(ctx, imageName)
 }
 
-func (m *mockStorageManager) CreateDataDisk(vmName string, disk config.DataDiskConfig) error {
+func (m *mockStorageManager) ImageExists(ctx context.Context, imageName string) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.createDataDiskCalls = append(m.createDataDiskCalls, disk)
-	return m.createDataDiskFunc(vmName, disk)
+	m.imageExistsCalls = append(m.imageExistsCalls, imageName)
+	return m.imageExistsFunc(ctx, imageName)
 }
 
-func (m *mockStorageManager) WriteCloudInitISO(cfg *config.VMConfig, isoData []byte) error {
+func (m *mockStorageManager) WriteVolumeData(ctx context.Context, poolName, volumeName string, data []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.writeCloudInitISOCalls = append(m.writeCloudInitISOCalls, cfg)
-	return m.writeCloudInitISOFunc(cfg, isoData)
-}
-
-func (m *mockStorageManager) DeleteVM(vmName string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.deleteVMCalls = append(m.deleteVMCalls, vmName)
-	return m.deleteVMFunc(vmName)
+	m.writeVolumeDataCalls = append(m.writeVolumeDataCalls, poolName+"/"+volumeName)
+	return m.writeVolumeDataFunc(ctx, poolName, volumeName, data)
 }

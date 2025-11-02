@@ -10,8 +10,8 @@ import (
 
 	"github.com/jbweber/foundry/internal/cloudinit"
 	"github.com/jbweber/foundry/internal/config"
-	"github.com/jbweber/foundry/internal/disk"
 	foundrylibvirt "github.com/jbweber/foundry/internal/libvirt"
+	"github.com/jbweber/foundry/internal/storage"
 )
 
 // Create creates a VM from a YAML configuration file.
@@ -56,9 +56,12 @@ func CreateFromConfig(ctx context.Context, cfg *config.VMConfig) error {
 
 	// Create storage manager
 	log.Printf("Initializing storage manager...")
-	storageMgr, err := disk.NewManager()
-	if err != nil {
-		return fmt.Errorf("failed to create storage manager: %w", err)
+	storageMgr := storage.NewManager(libvirtClient.Libvirt())
+
+	// Ensure default pools exist
+	log.Printf("Ensuring default storage pools exist...")
+	if err := storageMgr.EnsureDefaultPools(ctx); err != nil {
+		return fmt.Errorf("failed to ensure default pools: %w", err)
 	}
 
 	// Delegate to internal function with dependencies
@@ -78,7 +81,7 @@ func createFromConfigWithDeps(ctx context.Context, cfg *config.VMConfig, lv libv
 	var createErr error
 	defer func() {
 		if createErr != nil {
-			cleanupWithDeps(ctx, cfg.Name, sm, lv, domainDefined, storageCreated)
+			cleanupWithDeps(ctx, cfg, sm, lv, domainDefined, storageCreated)
 		}
 	}()
 
@@ -91,45 +94,81 @@ func createFromConfigWithDeps(ctx context.Context, cfg *config.VMConfig, lv libv
 	}
 	// Note: DomainLookupByName returns error if not found (which is what we want)
 
-	// Step 2: Check disk space
-	log.Printf("Checking disk space availability...")
-	if createErr = sm.CheckDiskSpace(cfg); createErr != nil {
-		return fmt.Errorf("disk space check failed: %w", createErr)
-	}
-
-	// Step 3: Check if VM directory already exists (should not)
-	log.Printf("Checking if VM directory already exists...")
-	exists, createErr := sm.VMDirectoryExists(cfg.Name)
+	// Step 2: Check if boot volume already exists (pre-flight check)
+	log.Printf("Checking if boot volume already exists...")
+	exists, createErr := sm.VolumeExists(ctx, cfg.GetStoragePool(), cfg.GetBootVolumeName())
 	if createErr != nil {
-		return fmt.Errorf("failed to check VM directory: %w", createErr)
+		return fmt.Errorf("failed to check boot volume: %w", createErr)
 	}
 	if exists {
-		createErr = fmt.Errorf("VM directory already exists: %s", sm.GetVMDirectory(cfg.Name))
+		createErr = fmt.Errorf("boot volume already exists: %s/%s", cfg.GetStoragePool(), cfg.GetBootVolumeName())
 		return createErr
 	}
 
-	// Step 4: Create VM directory
-	log.Printf("Creating VM directory...")
-	if createErr = sm.CreateVMDirectory(cfg.Name); createErr != nil {
-		return fmt.Errorf("failed to create VM directory: %w", createErr)
-	}
-	storageCreated = true
+	// Step 3: Parse image reference and get backing image path (if specified)
+	var backingVolume string
+	if cfg.BootDisk.Image != "" && !cfg.BootDisk.Empty {
+		imagePool, imageName, isFilePath, parseErr := cfg.BootDisk.ParseImageReference()
+		if parseErr != nil {
+			createErr = parseErr
+			return fmt.Errorf("failed to parse image reference: %w", createErr)
+		}
 
-	// Step 5: Create boot disk
-	log.Printf("Creating boot disk (%dGB)...", cfg.BootDisk.SizeGB)
-	if createErr = sm.CreateBootDisk(cfg); createErr != nil {
-		return fmt.Errorf("failed to create boot disk: %w", createErr)
-	}
+		if isFilePath {
+			// File path - use as-is for backward compatibility
+			backingVolume = cfg.BootDisk.Image
+			log.Printf("Using backing image (file): %s", backingVolume)
+		} else {
+			// Pool-based image - verify it exists and get path
+			log.Printf("Checking if backing image exists: %s:%s", imagePool, imageName)
+			imageExists, checkErr := sm.ImageExists(ctx, imageName)
+			if checkErr != nil {
+				createErr = checkErr
+				return fmt.Errorf("failed to check if image exists: %w", createErr)
+			}
+			if !imageExists {
+				createErr = fmt.Errorf("backing image not found: %s (pool: %s). Import it with 'foundry image import'", imageName, imagePool)
+				return createErr
+			}
 
-	// Step 6: Create data disks
-	for _, dataDisk := range cfg.DataDisks {
-		log.Printf("Creating data disk %s (%dGB)...", dataDisk.Device, dataDisk.SizeGB)
-		if createErr = sm.CreateDataDisk(cfg.Name, dataDisk); createErr != nil {
-			return fmt.Errorf("failed to create data disk %s: %w", dataDisk.Device, createErr)
+			// Get the filesystem path to the image volume
+			backingVolume, createErr = sm.GetImagePath(ctx, imageName)
+			if createErr != nil {
+				return fmt.Errorf("failed to get image path: %w", createErr)
+			}
+			log.Printf("Using backing image (volume): %s", backingVolume)
 		}
 	}
 
-	// Step 7-8: Generate and write cloud-init ISO (if configured)
+	// Step 4: Create boot disk volume
+	log.Printf("Creating boot disk volume (%dGB)...", cfg.BootDisk.SizeGB)
+	bootSpec := storage.VolumeSpec{
+		Name:          cfg.GetBootVolumeName(),
+		Type:          storage.VolumeTypeBoot,
+		Format:        storage.VolumeFormatQCOW2,
+		CapacityGB:    uint64(cfg.BootDisk.SizeGB),
+		BackingVolume: backingVolume,
+	}
+	if createErr = sm.CreateVolume(ctx, cfg.GetStoragePool(), bootSpec); createErr != nil {
+		return fmt.Errorf("failed to create boot volume: %w", createErr)
+	}
+	storageCreated = true
+
+	// Step 5: Create data disk volumes
+	for _, dataDisk := range cfg.DataDisks {
+		log.Printf("Creating data disk volume %s (%dGB)...", dataDisk.Device, dataDisk.SizeGB)
+		dataSpec := storage.VolumeSpec{
+			Name:       cfg.GetDataVolumeName(dataDisk.Device),
+			Type:       storage.VolumeTypeData,
+			Format:     storage.VolumeFormatQCOW2,
+			CapacityGB: uint64(dataDisk.SizeGB),
+		}
+		if createErr = sm.CreateVolume(ctx, cfg.GetStoragePool(), dataSpec); createErr != nil {
+			return fmt.Errorf("failed to create data volume %s: %w", dataDisk.Device, createErr)
+		}
+	}
+
+	// Step 6: Generate and create cloud-init ISO volume (if configured)
 	if cfg.CloudInit != nil {
 		log.Printf("Generating cloud-init ISO...")
 		var isoData []byte
@@ -138,9 +177,28 @@ func createFromConfigWithDeps(ctx context.Context, cfg *config.VMConfig, lv libv
 			return fmt.Errorf("failed to generate cloud-init ISO: %w", createErr)
 		}
 
-		log.Printf("Writing cloud-init ISO...")
-		if createErr = sm.WriteCloudInitISO(cfg, isoData); createErr != nil {
-			return fmt.Errorf("failed to write cloud-init ISO: %w", createErr)
+		log.Printf("Creating cloud-init ISO volume...")
+		// Calculate ISO size in bytes and round up to nearest MB for capacity
+		isoSizeBytes := uint64(len(isoData))
+		isoSizeMB := (isoSizeBytes + 1024*1024 - 1) / (1024 * 1024) // Round up
+		isoSizeGB := (isoSizeMB + 1024 - 1) / 1024                  // Round up to nearest GB
+		if isoSizeGB == 0 {
+			isoSizeGB = 1 // Minimum 1 GB for small ISOs
+		}
+
+		cloudInitSpec := storage.VolumeSpec{
+			Name:       cfg.GetCloudInitVolumeName(),
+			Type:       storage.VolumeTypeCloudInit,
+			Format:     storage.VolumeFormatRaw,
+			CapacityGB: isoSizeGB,
+		}
+		if createErr = sm.CreateVolume(ctx, cfg.GetStoragePool(), cloudInitSpec); createErr != nil {
+			return fmt.Errorf("failed to create cloud-init volume: %w", createErr)
+		}
+
+		log.Printf("Writing cloud-init data to volume...")
+		if createErr = sm.WriteVolumeData(ctx, cfg.GetStoragePool(), cfg.GetCloudInitVolumeName(), isoData); createErr != nil {
+			return fmt.Errorf("failed to write cloud-init data: %w", createErr)
 		}
 	} else {
 		log.Printf("Skipping cloud-init (not configured)")
@@ -184,13 +242,13 @@ func createFromConfigWithDeps(ctx context.Context, cfg *config.VMConfig, lv libv
 //
 // This is best-effort: it logs errors but continues trying to clean up
 // as much as possible. It never returns an error.
-func cleanupWithDeps(_ context.Context, vmName string, sm storageManager, lv libvirtClient, domainDefined, storageCreated bool) {
+func cleanupWithDeps(ctx context.Context, cfg *config.VMConfig, sm storageManager, lv libvirtClient, domainDefined, storageCreated bool) {
 	log.Printf("Cleaning up after failed VM creation...")
 
 	// Clean up libvirt domain if it was defined
 	if domainDefined && lv != nil {
-		log.Printf("Undefining domain '%s'...", vmName)
-		domain, err := lv.DomainLookupByName(vmName)
+		log.Printf("Undefining domain '%s'...", cfg.Name)
+		domain, err := lv.DomainLookupByName(cfg.Name)
 		if err != nil {
 			log.Printf("Warning: failed to lookup domain for cleanup: %v", err)
 		} else {
@@ -209,14 +267,30 @@ func cleanupWithDeps(_ context.Context, vmName string, sm storageManager, lv lib
 		}
 	}
 
-	// Clean up storage if any was created
+	// Clean up storage volumes if any were created
 	if storageCreated && sm != nil {
-		log.Printf("Removing VM storage...")
-		if err := sm.DeleteVM(vmName); err != nil {
-			log.Printf("Warning: failed to delete VM storage: %v", err)
-		} else {
-			log.Printf("Storage removed successfully")
+		log.Printf("Removing VM storage volumes...")
+
+		// Delete boot volume
+		if err := sm.DeleteVolume(ctx, cfg.GetStoragePool(), cfg.GetBootVolumeName()); err != nil {
+			log.Printf("Warning: failed to delete boot volume: %v", err)
 		}
+
+		// Delete data volumes
+		for _, dataDisk := range cfg.DataDisks {
+			if err := sm.DeleteVolume(ctx, cfg.GetStoragePool(), cfg.GetDataVolumeName(dataDisk.Device)); err != nil {
+				log.Printf("Warning: failed to delete data volume %s: %v", dataDisk.Device, err)
+			}
+		}
+
+		// Delete cloud-init ISO volume
+		if cfg.CloudInit != nil {
+			if err := sm.DeleteVolume(ctx, cfg.GetStoragePool(), cfg.GetCloudInitVolumeName()); err != nil {
+				log.Printf("Warning: failed to delete cloud-init volume: %v", err)
+			}
+		}
+
+		log.Printf("Storage cleanup complete")
 	}
 
 	log.Printf("Cleanup complete")

@@ -1,9 +1,11 @@
 package vm
 
 import (
+	"context"
+
 	"github.com/digitalocean/go-libvirt"
 
-	"github.com/jbweber/foundry/internal/config"
+	"github.com/jbweber/foundry/internal/storage"
 )
 
 // libvirtClient defines the libvirt operations needed for VM management.
@@ -34,30 +36,27 @@ type libvirtClient interface {
 // storageManager defines the storage operations needed for VM management.
 // This allows for dependency injection and testing.
 //
-// In production, this is satisfied by *disk.Manager.
+// In production, this is satisfied by *storage.Manager.
 // In tests, this is satisfied by mock implementations.
 type storageManager interface {
-	// CheckDiskSpace verifies that sufficient disk space is available
-	CheckDiskSpace(cfg *config.VMConfig) error
+	// EnsureDefaultPools ensures the default foundry-images and foundry-vms pools exist
+	EnsureDefaultPools(ctx context.Context) error
 
-	// VMDirectoryExists checks if the VM directory already exists
-	VMDirectoryExists(vmName string) (bool, error)
+	// VolumeExists checks if a volume exists in a pool
+	VolumeExists(ctx context.Context, poolName, volumeName string) (bool, error)
 
-	// GetVMDirectory returns the full path to the VM's storage directory
-	GetVMDirectory(vmName string) string
+	// CreateVolume creates a new volume in a pool
+	CreateVolume(ctx context.Context, poolName string, spec storage.VolumeSpec) error
 
-	// CreateVMDirectory creates the VM storage directory with proper permissions
-	CreateVMDirectory(vmName string) error
+	// DeleteVolume deletes a volume from a pool
+	DeleteVolume(ctx context.Context, poolName, volumeName string) error
 
-	// CreateBootDisk creates a boot disk using qemu-img
-	CreateBootDisk(cfg *config.VMConfig) error
+	// GetImagePath returns the filesystem path to an image volume
+	GetImagePath(ctx context.Context, imageName string) (string, error)
 
-	// CreateDataDisk creates a data disk using qemu-img
-	CreateDataDisk(vmName string, disk config.DataDiskConfig) error
+	// ImageExists checks if an image exists in the foundry-images pool
+	ImageExists(ctx context.Context, imageName string) (bool, error)
 
-	// WriteCloudInitISO writes the cloud-init ISO to disk
-	WriteCloudInitISO(cfg *config.VMConfig, isoData []byte) error
-
-	// DeleteVM removes the entire VM directory and all its contents
-	DeleteVM(vmName string) error
+	// WriteVolumeData writes data to a volume (for cloud-init ISOs)
+	WriteVolumeData(ctx context.Context, poolName, volumeName string, data []byte) error
 }

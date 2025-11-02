@@ -2,7 +2,6 @@ package libvirt
 
 import (
 	"fmt"
-	"path/filepath"
 
 	"libvirt.org/go/libvirtxml"
 
@@ -83,8 +82,7 @@ func GenerateDomainXML(cfg *config.VMConfig) (string, error) {
 		},
 	}
 
-	// Add boot disk
-	bootDiskPath := filepath.Join(BaseStoragePath, cfg.GetBootDiskPath())
+	// Add boot disk (volume-based)
 	bootDisk := libvirtxml.DomainDisk{
 		Device: "disk",
 		Driver: &libvirtxml.DomainDiskDriver{
@@ -93,8 +91,9 @@ func GenerateDomainXML(cfg *config.VMConfig) (string, error) {
 			Cache: "none",
 		},
 		Source: &libvirtxml.DomainDiskSource{
-			File: &libvirtxml.DomainDiskSourceFile{
-				File: bootDiskPath,
+			Volume: &libvirtxml.DomainDiskSourceVolume{
+				Pool:   cfg.GetStoragePool(),
+				Volume: cfg.GetBootVolumeName(),
 			},
 		},
 		Target: &libvirtxml.DomainDiskTarget{
@@ -107,9 +106,8 @@ func GenerateDomainXML(cfg *config.VMConfig) (string, error) {
 	}
 	domain.Devices.Disks = append(domain.Devices.Disks, bootDisk)
 
-	// Add data disks
+	// Add data disks (volume-based)
 	for _, dataDisk := range cfg.DataDisks {
-		diskPath := filepath.Join(BaseStoragePath, cfg.GetDataDiskPath(dataDisk.Device))
 		disk := libvirtxml.DomainDisk{
 			Device: "disk",
 			Driver: &libvirtxml.DomainDiskDriver{
@@ -118,8 +116,9 @@ func GenerateDomainXML(cfg *config.VMConfig) (string, error) {
 				Cache: "none",
 			},
 			Source: &libvirtxml.DomainDiskSource{
-				File: &libvirtxml.DomainDiskSourceFile{
-					File: diskPath,
+				Volume: &libvirtxml.DomainDiskSourceVolume{
+					Pool:   cfg.GetStoragePool(),
+					Volume: cfg.GetDataVolumeName(dataDisk.Device),
 				},
 			},
 			Target: &libvirtxml.DomainDiskTarget{
@@ -130,9 +129,8 @@ func GenerateDomainXML(cfg *config.VMConfig) (string, error) {
 		domain.Devices.Disks = append(domain.Devices.Disks, disk)
 	}
 
-	// Add cloud-init ISO if configured
+	// Add cloud-init ISO if configured (volume-based)
 	if cfg.CloudInit != nil {
-		cloudInitPath := filepath.Join(BaseStoragePath, cfg.GetCloudInitISOPath())
 		cdrom := libvirtxml.DomainDisk{
 			Device: "cdrom",
 			Driver: &libvirtxml.DomainDiskDriver{
@@ -140,8 +138,9 @@ func GenerateDomainXML(cfg *config.VMConfig) (string, error) {
 				Type: "raw",
 			},
 			Source: &libvirtxml.DomainDiskSource{
-				File: &libvirtxml.DomainDiskSourceFile{
-					File: cloudInitPath,
+				Volume: &libvirtxml.DomainDiskSourceVolume{
+					Pool:   cfg.GetStoragePool(),
+					Volume: cfg.GetCloudInitVolumeName(),
 				},
 			},
 			Target: &libvirtxml.DomainDiskTarget{

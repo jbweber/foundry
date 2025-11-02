@@ -1012,3 +1012,255 @@ func TestVMNameValidation(t *testing.T) {
 		})
 	}
 }
+
+func TestParseImageReference(t *testing.T) {
+	tests := []struct {
+		name           string
+		image          string
+		imagePool      string
+		expectPool     string
+		expectVolume   string
+		expectFilePath bool
+		expectErr      bool
+	}{
+		{
+			name:           "volume name only - uses default pool",
+			image:          "fedora-43",
+			imagePool:      "",
+			expectPool:     "foundry-images",
+			expectVolume:   "fedora-43",
+			expectFilePath: false,
+			expectErr:      false,
+		},
+		{
+			name:           "volume name only - uses specified pool",
+			image:          "ubuntu-24.04",
+			imagePool:      "custom-images",
+			expectPool:     "custom-images",
+			expectVolume:   "ubuntu-24.04",
+			expectFilePath: false,
+			expectErr:      false,
+		},
+		{
+			name:           "pool:volume format",
+			image:          "custom-pool:debian-12",
+			imagePool:      "foundry-images",
+			expectPool:     "custom-pool",
+			expectVolume:   "debian-12",
+			expectFilePath: false,
+			expectErr:      false,
+		},
+		{
+			name:           "pool:volume format with spaces",
+			image:          " my-pool : my-volume ",
+			imagePool:      "",
+			expectPool:     "my-pool",
+			expectVolume:   "my-volume",
+			expectFilePath: false,
+			expectErr:      false,
+		},
+		{
+			name:           "absolute file path",
+			image:          "/var/lib/libvirt/images/fedora.qcow2",
+			imagePool:      "",
+			expectPool:     "",
+			expectVolume:   "",
+			expectFilePath: true,
+			expectErr:      false,
+		},
+		{
+			name:           "relative file path",
+			image:          "./images/ubuntu.qcow2",
+			imagePool:      "",
+			expectPool:     "",
+			expectVolume:   "",
+			expectFilePath: true,
+			expectErr:      false,
+		},
+		{
+			name:           "relative path with parent",
+			image:          "../base/fedora.qcow2",
+			imagePool:      "",
+			expectPool:     "",
+			expectVolume:   "",
+			expectFilePath: true,
+			expectErr:      false,
+		},
+		{
+			name:           "empty image",
+			image:          "",
+			imagePool:      "",
+			expectPool:     "",
+			expectVolume:   "",
+			expectFilePath: false,
+			expectErr:      false,
+		},
+		{
+			name:           "invalid pool:volume - empty pool",
+			image:          ":volume",
+			imagePool:      "",
+			expectPool:     "",
+			expectVolume:   "",
+			expectFilePath: false,
+			expectErr:      true,
+		},
+		{
+			name:           "invalid pool:volume - empty volume",
+			image:          "pool:",
+			imagePool:      "",
+			expectPool:     "",
+			expectVolume:   "",
+			expectFilePath: false,
+			expectErr:      true,
+		},
+		{
+			name:           "invalid pool:volume - spaces only",
+			image:          "  :  ",
+			imagePool:      "",
+			expectPool:     "",
+			expectVolume:   "",
+			expectFilePath: false,
+			expectErr:      true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			bootDisk := BootDiskConfig{
+				Image:     tt.image,
+				ImagePool: tt.imagePool,
+			}
+
+			pool, volume, isFilePath, err := bootDisk.ParseImageReference()
+
+			if tt.expectErr {
+				if err == nil {
+					t.Errorf("Expected error, got nil")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("Unexpected error: %v", err)
+				return
+			}
+
+			if pool != tt.expectPool {
+				t.Errorf("Expected pool %q, got %q", tt.expectPool, pool)
+			}
+			if volume != tt.expectVolume {
+				t.Errorf("Expected volume %q, got %q", tt.expectVolume, volume)
+			}
+			if isFilePath != tt.expectFilePath {
+				t.Errorf("Expected isFilePath %v, got %v", tt.expectFilePath, isFilePath)
+			}
+		})
+	}
+}
+
+func TestGetStoragePool(t *testing.T) {
+	tests := []struct {
+		name        string
+		storagePool string
+		expected    string
+	}{
+		{
+			name:        "default when empty",
+			storagePool: "",
+			expected:    "foundry-vms",
+		},
+		{
+			name:        "custom pool",
+			storagePool: "my-custom-pool",
+			expected:    "my-custom-pool",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := &VMConfig{StoragePool: tt.storagePool}
+			result := config.GetStoragePool()
+			if result != tt.expected {
+				t.Errorf("Expected %q, got %q", tt.expected, result)
+			}
+		})
+	}
+}
+
+func TestVolumeNameHelpers(t *testing.T) {
+	config := &VMConfig{Name: "test-vm"}
+
+	t.Run("GetBootVolumeName", func(t *testing.T) {
+		expected := "test-vm_boot"
+		result := config.GetBootVolumeName()
+		if result != expected {
+			t.Errorf("Expected %q, got %q", expected, result)
+		}
+	})
+
+	t.Run("GetDataVolumeName", func(t *testing.T) {
+		expected := "test-vm_data-vdb"
+		result := config.GetDataVolumeName("vdb")
+		if result != expected {
+			t.Errorf("Expected %q, got %q", expected, result)
+		}
+	})
+
+	t.Run("GetCloudInitVolumeName", func(t *testing.T) {
+		expected := "test-vm_cloudinit"
+		result := config.GetCloudInitVolumeName()
+		if result != expected {
+			t.Errorf("Expected %q, got %q", expected, result)
+		}
+	})
+}
+
+func TestNormalize_SetsDefaults(t *testing.T) {
+	config := &VMConfig{
+		Name:      "Test-VM",
+		BootDisk:  BootDiskConfig{},
+		CloudInit: &CloudInitConfig{FQDN: "Test.Example.Com"},
+	}
+
+	config.Normalize()
+
+	// Check name normalization
+	if config.Name != "test-vm" {
+		t.Errorf("Expected name 'test-vm', got %q", config.Name)
+	}
+
+	// Check FQDN normalization
+	if config.CloudInit.FQDN != "test.example.com" {
+		t.Errorf("Expected FQDN 'test.example.com', got %q", config.CloudInit.FQDN)
+	}
+
+	// Check storage pool default
+	if config.StoragePool != "foundry-vms" {
+		t.Errorf("Expected StoragePool 'foundry-vms', got %q", config.StoragePool)
+	}
+
+	// Check image pool default
+	if config.BootDisk.ImagePool != "foundry-images" {
+		t.Errorf("Expected ImagePool 'foundry-images', got %q", config.BootDisk.ImagePool)
+	}
+}
+
+func TestNormalize_PreservesExplicitPools(t *testing.T) {
+	config := &VMConfig{
+		Name:        "test-vm",
+		StoragePool: "custom-vms",
+		BootDisk: BootDiskConfig{
+			ImagePool: "custom-images",
+		},
+	}
+
+	config.Normalize()
+
+	// Check custom pools are preserved
+	if config.StoragePool != "custom-vms" {
+		t.Errorf("Expected StoragePool 'custom-vms', got %q", config.StoragePool)
+	}
+	if config.BootDisk.ImagePool != "custom-images" {
+		t.Errorf("Expected ImagePool 'custom-images', got %q", config.BootDisk.ImagePool)
+	}
+}

@@ -13,20 +13,22 @@ import (
 
 // VMConfig represents the complete VM configuration.
 type VMConfig struct {
-	Name      string             `yaml:"name"`
-	VCPUs     int                `yaml:"vcpus"`
-	MemoryGiB int                `yaml:"memory_gib"`
-	BootDisk  BootDiskConfig     `yaml:"boot_disk"`
-	DataDisks []DataDiskConfig   `yaml:"data_disks,omitempty"`
-	Network   []NetworkInterface `yaml:"network_interfaces"`
-	CloudInit *CloudInitConfig   `yaml:"cloud_init,omitempty"`
+	Name        string             `yaml:"name"`
+	VCPUs       int                `yaml:"vcpus"`
+	MemoryGiB   int                `yaml:"memory_gib"`
+	BootDisk    BootDiskConfig     `yaml:"boot_disk"`
+	DataDisks   []DataDiskConfig   `yaml:"data_disks,omitempty"`
+	Network     []NetworkInterface `yaml:"network_interfaces"`
+	CloudInit   *CloudInitConfig   `yaml:"cloud_init,omitempty"`
+	StoragePool string             `yaml:"storage_pool,omitempty"` // Libvirt storage pool for VM volumes (default: "foundry-vms")
 }
 
 // BootDiskConfig defines the boot disk configuration.
 type BootDiskConfig struct {
-	SizeGB int    `yaml:"size_gb"`
-	Image  string `yaml:"image,omitempty"` // Path to base image
-	Empty  bool   `yaml:"empty,omitempty"` // Create empty disk instead
+	SizeGB    int    `yaml:"size_gb"`
+	Image     string `yaml:"image,omitempty"`      // Image reference (volume name, pool:volume, or file path)
+	ImagePool string `yaml:"image_pool,omitempty"` // Pool for base images (default: "foundry-images")
+	Empty     bool   `yaml:"empty,omitempty"`      // Create empty disk instead
 }
 
 // DataDiskConfig defines an additional data disk.
@@ -257,6 +259,24 @@ func (c *VMConfig) GetVMDirectory() string {
 	return c.Name
 }
 
+// GetBootVolumeName returns the volume name for the boot disk.
+// Format: <vm-name>_boot
+func (c *VMConfig) GetBootVolumeName() string {
+	return fmt.Sprintf("%s_boot", c.Name)
+}
+
+// GetDataVolumeName returns the volume name for a data disk.
+// Format: <vm-name>_data-<device> (e.g., "my-vm_data-vdb")
+func (c *VMConfig) GetDataVolumeName(device string) string {
+	return fmt.Sprintf("%s_data-%s", c.Name, device)
+}
+
+// GetCloudInitVolumeName returns the volume name for the cloud-init ISO.
+// Format: <vm-name>_cloudinit
+func (c *VMConfig) GetCloudInitVolumeName() string {
+	return fmt.Sprintf("%s_cloudinit", c.Name)
+}
+
 // Normalize sanitizes user input to consistent formats.
 // This is called automatically by LoadFromFile before validation.
 func (c *VMConfig) Normalize() {
@@ -269,6 +289,63 @@ func (c *VMConfig) Normalize() {
 	}
 
 	// Note: Bridge names are NOT normalized - they must match hypervisor config exactly
+
+	// Set default storage pool if not specified
+	if c.StoragePool == "" {
+		c.StoragePool = "foundry-vms"
+	}
+
+	// Set default image pool if not specified
+	if c.BootDisk.ImagePool == "" {
+		c.BootDisk.ImagePool = "foundry-images"
+	}
+}
+
+// GetStoragePool returns the storage pool name for VM volumes, using default if not set.
+func (c *VMConfig) GetStoragePool() string {
+	if c.StoragePool == "" {
+		return "foundry-vms"
+	}
+	return c.StoragePool
+}
+
+// ParseImageReference parses an image reference and returns the pool and volume names.
+// Supports three formats:
+//   - Volume name only: "fedora-43" -> uses ImagePool (or "foundry-images" default)
+//   - Pool:volume format: "foundry-images:fedora-43" -> explicit pool and volume
+//   - File path: "/var/lib/libvirt/images/fedora.qcow2" -> returns empty strings (backward compat)
+//
+// Returns: (poolName, volumeName, isFilePath, error)
+func (b *BootDiskConfig) ParseImageReference() (string, string, bool, error) {
+	if b.Image == "" {
+		return "", "", false, nil
+	}
+
+	// Check if it's a file path (contains / or starts with .)
+	if strings.Contains(b.Image, "/") || strings.HasPrefix(b.Image, ".") {
+		return "", "", true, nil
+	}
+
+	// Check for pool:volume format
+	if strings.Contains(b.Image, ":") {
+		parts := strings.SplitN(b.Image, ":", 2)
+		if len(parts) != 2 {
+			return "", "", false, fmt.Errorf("invalid pool:volume format: %q", b.Image)
+		}
+		poolName := strings.TrimSpace(parts[0])
+		volumeName := strings.TrimSpace(parts[1])
+		if poolName == "" || volumeName == "" {
+			return "", "", false, fmt.Errorf("invalid pool:volume format: pool and volume cannot be empty")
+		}
+		return poolName, volumeName, false, nil
+	}
+
+	// Just a volume name - use ImagePool (or default)
+	imagePool := b.ImagePool
+	if imagePool == "" {
+		imagePool = "foundry-images"
+	}
+	return imagePool, b.Image, false, nil
 }
 
 // LoadFromFile loads a VM configuration from a YAML file.

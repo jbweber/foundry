@@ -121,6 +121,9 @@ func TestGenerateDomainXML(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Normalize config to set default storage pools
+			tt.vmCfg.Normalize()
+
 			xml, err := GenerateDomainXML(tt.vmCfg)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("GenerateDomainXML() error = %v, wantErr %v", err, tt.wantErr)
@@ -288,12 +291,16 @@ func validateDomainStructure(t *testing.T, domain *libvirtxml.Domain, cfg *confi
 		if bootDisk.Boot == nil || bootDisk.Boot.Order != 1 {
 			t.Error("boot disk should have boot order 1")
 		}
-		if bootDisk.Source == nil || bootDisk.Source.File == nil {
-			t.Error("boot disk source file is nil")
+		if bootDisk.Source == nil || bootDisk.Source.Volume == nil {
+			t.Error("boot disk source volume is nil")
 		} else {
-			expectedPath := "/var/lib/libvirt/images/" + cfg.Name + "/boot.qcow2"
-			if bootDisk.Source.File.File != expectedPath {
-				t.Errorf("boot disk path = %v, want %v", bootDisk.Source.File.File, expectedPath)
+			expectedPool := cfg.GetStoragePool()
+			expectedVolume := cfg.GetBootVolumeName()
+			if bootDisk.Source.Volume.Pool != expectedPool {
+				t.Errorf("boot disk pool = %v, want %v", bootDisk.Source.Volume.Pool, expectedPool)
+			}
+			if bootDisk.Source.Volume.Volume != expectedVolume {
+				t.Errorf("boot disk volume = %v, want %v", bootDisk.Source.Volume.Volume, expectedVolume)
 			}
 		}
 	}
@@ -312,12 +319,16 @@ func validateDomainStructure(t *testing.T, domain *libvirtxml.Domain, cfg *confi
 		if disk.Target == nil || disk.Target.Dev != dataDiskCfg.Device {
 			t.Errorf("data disk target = %v, want %v", disk.Target.Dev, dataDiskCfg.Device)
 		}
-		if disk.Source == nil || disk.Source.File == nil {
-			t.Errorf("data disk %v source is nil", dataDiskCfg.Device)
+		if disk.Source == nil || disk.Source.Volume == nil {
+			t.Errorf("data disk %v source volume is nil", dataDiskCfg.Device)
 		} else {
-			expectedPath := "/var/lib/libvirt/images/" + cfg.Name + "/data-" + dataDiskCfg.Device + ".qcow2"
-			if disk.Source.File.File != expectedPath {
-				t.Errorf("data disk path = %v, want %v", disk.Source.File.File, expectedPath)
+			expectedPool := cfg.GetStoragePool()
+			expectedVolume := cfg.GetDataVolumeName(dataDiskCfg.Device)
+			if disk.Source.Volume.Pool != expectedPool {
+				t.Errorf("data disk pool = %v, want %v", disk.Source.Volume.Pool, expectedPool)
+			}
+			if disk.Source.Volume.Volume != expectedVolume {
+				t.Errorf("data disk volume = %v, want %v", disk.Source.Volume.Volume, expectedVolume)
 			}
 		}
 	}
@@ -344,12 +355,17 @@ func validateDomainStructure(t *testing.T, domain *libvirtxml.Domain, cfg *confi
 			if cdrom.ReadOnly == nil {
 				t.Error("cloud-init should be readonly")
 			}
-			if cdrom.Source == nil || cdrom.Source.File == nil {
+			// Cloud-init is now volume-based, not file-based
+			if cdrom.Source == nil || cdrom.Source.Volume == nil {
 				t.Error("cloud-init source is nil")
 			} else {
-				expectedPath := "/var/lib/libvirt/images/" + cfg.Name + "/cloudinit.iso"
-				if cdrom.Source.File.File != expectedPath {
-					t.Errorf("cloud-init path = %v, want %v", cdrom.Source.File.File, expectedPath)
+				expectedPool := cfg.GetStoragePool()
+				expectedVolume := cfg.GetCloudInitVolumeName()
+				if cdrom.Source.Volume.Pool != expectedPool {
+					t.Errorf("cloud-init pool = %v, want %v", cdrom.Source.Volume.Pool, expectedPool)
+				}
+				if cdrom.Source.Volume.Volume != expectedVolume {
+					t.Errorf("cloud-init volume = %v, want %v", cdrom.Source.Volume.Volume, expectedVolume)
 				}
 			}
 		}
