@@ -6,7 +6,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/jbweber/foundry/internal/config"
+	"github.com/jbweber/foundry/api/v1alpha1"
 )
 
 // Test SSH keys (valid keys generated for testing)
@@ -18,19 +18,21 @@ const (
 func TestGenerateUserData(t *testing.T) {
 	tests := []struct {
 		name         string
-		cfg          *config.VMConfig
+		vm           *v1alpha1.VirtualMachine
 		expectErr    bool
 		checkContent func(t *testing.T, content string)
 	}{
 		{
 			name:      "nil config",
-			cfg:       nil,
+			vm:        nil,
 			expectErr: true,
 		},
 		{
 			name: "minimal config - no cloud-init",
-			cfg: &config.VMConfig{
-				Name: "test-vm",
+			vm: &v1alpha1.VirtualMachine{
+				ObjectMeta: v1alpha1.ObjectMeta{
+					Name: "test-vm",
+				},
 			},
 			checkContent: func(t *testing.T, content string) {
 				// Must start with #cloud-config
@@ -61,10 +63,14 @@ func TestGenerateUserData(t *testing.T) {
 		},
 		{
 			name: "with FQDN - hostname extraction",
-			cfg: &config.VMConfig{
-				Name: "test-vm",
-				CloudInit: &config.CloudInitConfig{
-					FQDN: "web01.prod.example.com",
+			vm: &v1alpha1.VirtualMachine{
+				ObjectMeta: v1alpha1.ObjectMeta{
+					Name: "test-vm",
+				},
+				Spec: v1alpha1.VirtualMachineSpec{
+					CloudInit: &v1alpha1.CloudInitSpec{
+						FQDN: "web01.prod.example.com",
+					},
 				},
 			},
 			checkContent: func(t *testing.T, content string) {
@@ -84,10 +90,14 @@ func TestGenerateUserData(t *testing.T) {
 		},
 		{
 			name: "with SSH keys",
-			cfg: &config.VMConfig{
-				Name: "test-vm",
-				CloudInit: &config.CloudInitConfig{
-					SSHKeys: []string{testSSHKeyEd25519, testSSHKeyRSA},
+			vm: &v1alpha1.VirtualMachine{
+				ObjectMeta: v1alpha1.ObjectMeta{
+					Name: "test-vm",
+				},
+				Spec: v1alpha1.VirtualMachineSpec{
+					CloudInit: &v1alpha1.CloudInitSpec{
+						SSHAuthorizedKeys: []string{testSSHKeyEd25519, testSSHKeyRSA},
+					},
 				},
 			},
 			checkContent: func(t *testing.T, content string) {
@@ -109,10 +119,14 @@ func TestGenerateUserData(t *testing.T) {
 		},
 		{
 			name: "with root password hash",
-			cfg: &config.VMConfig{
-				Name: "test-vm",
-				CloudInit: &config.CloudInitConfig{
-					RootPasswordHash: "$6$rounds=4096$salt$hashedpassword",
+			vm: &v1alpha1.VirtualMachine{
+				ObjectMeta: v1alpha1.ObjectMeta{
+					Name: "test-vm",
+				},
+				Spec: v1alpha1.VirtualMachineSpec{
+					CloudInit: &v1alpha1.CloudInitSpec{
+						PasswordHash: "$6$rounds=4096$salt$hashedpassword",
+					},
 				},
 			},
 			checkContent: func(t *testing.T, content string) {
@@ -135,10 +149,14 @@ func TestGenerateUserData(t *testing.T) {
 		},
 		{
 			name: "ssh_pwauth enabled",
-			cfg: &config.VMConfig{
-				Name: "test-vm",
-				CloudInit: &config.CloudInitConfig{
-					SSHPwAuth: boolPtr(true),
+			vm: &v1alpha1.VirtualMachine{
+				ObjectMeta: v1alpha1.ObjectMeta{
+					Name: "test-vm",
+				},
+				Spec: v1alpha1.VirtualMachineSpec{
+					CloudInit: &v1alpha1.CloudInitSpec{
+						SSHPasswordAuth: true,
+					},
 				},
 			},
 			checkContent: func(t *testing.T, content string) {
@@ -154,10 +172,14 @@ func TestGenerateUserData(t *testing.T) {
 		},
 		{
 			name: "ssh_pwauth explicitly disabled",
-			cfg: &config.VMConfig{
-				Name: "test-vm",
-				CloudInit: &config.CloudInitConfig{
-					SSHPwAuth: boolPtr(false),
+			vm: &v1alpha1.VirtualMachine{
+				ObjectMeta: v1alpha1.ObjectMeta{
+					Name: "test-vm",
+				},
+				Spec: v1alpha1.VirtualMachineSpec{
+					CloudInit: &v1alpha1.CloudInitSpec{
+						SSHPasswordAuth: false,
+					},
 				},
 			},
 			checkContent: func(t *testing.T, content string) {
@@ -173,13 +195,17 @@ func TestGenerateUserData(t *testing.T) {
 		},
 		{
 			name: "complete config",
-			cfg: &config.VMConfig{
-				Name: "test-vm",
-				CloudInit: &config.CloudInitConfig{
-					FQDN:             "test-vm.example.com",
-					SSHKeys:          []string{testSSHKeyEd25519},
-					RootPasswordHash: "$6$rounds=4096$salt$hashedpassword",
-					SSHPwAuth:        boolPtr(false),
+			vm: &v1alpha1.VirtualMachine{
+				ObjectMeta: v1alpha1.ObjectMeta{
+					Name: "test-vm",
+				},
+				Spec: v1alpha1.VirtualMachineSpec{
+					CloudInit: &v1alpha1.CloudInitSpec{
+						FQDN:              "test-vm.example.com",
+						SSHAuthorizedKeys: []string{testSSHKeyEd25519},
+						PasswordHash:      "$6$rounds=4096$salt$hashedpassword",
+						SSHPasswordAuth:   false,
+					},
 				},
 			},
 			checkContent: func(t *testing.T, content string) {
@@ -206,7 +232,7 @@ func TestGenerateUserData(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			content, err := GenerateUserData(tt.cfg)
+			content, err := GenerateUserData(tt.vm)
 			if tt.expectErr {
 				if err == nil {
 					t.Fatal("Expected error, got nil")
@@ -228,19 +254,21 @@ func TestGenerateUserData(t *testing.T) {
 func TestGenerateMetaData(t *testing.T) {
 	tests := []struct {
 		name         string
-		cfg          *config.VMConfig
+		vm           *v1alpha1.VirtualMachine
 		expectErr    bool
 		checkContent func(t *testing.T, content string, vmName string)
 	}{
 		{
 			name:      "nil config",
-			cfg:       nil,
+			vm:        nil,
 			expectErr: true,
 		},
 		{
 			name: "valid config",
-			cfg: &config.VMConfig{
-				Name: "test-vm",
+			vm: &v1alpha1.VirtualMachine{
+				ObjectMeta: v1alpha1.ObjectMeta{
+					Name: "test-vm",
+				},
 			},
 			checkContent: func(t *testing.T, content string, vmName string) {
 				var metaData MetaData
@@ -260,8 +288,10 @@ func TestGenerateMetaData(t *testing.T) {
 		},
 		{
 			name: "different VM name",
-			cfg: &config.VMConfig{
-				Name: "prod-web01",
+			vm: &v1alpha1.VirtualMachine{
+				ObjectMeta: v1alpha1.ObjectMeta{
+					Name: "prod-web01",
+				},
 			},
 			checkContent: func(t *testing.T, content string, vmName string) {
 				var metaData MetaData
@@ -278,7 +308,7 @@ func TestGenerateMetaData(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			content, err := GenerateMetaData(tt.cfg)
+			content, err := GenerateMetaData(tt.vm)
 			if tt.expectErr {
 				if err == nil {
 					t.Fatal("Expected error, got nil")
@@ -291,7 +321,7 @@ func TestGenerateMetaData(t *testing.T) {
 			}
 
 			if tt.checkContent != nil {
-				tt.checkContent(t, content, tt.cfg.Name)
+				tt.checkContent(t, content, tt.vm.Name)
 			}
 		})
 	}
@@ -300,34 +330,41 @@ func TestGenerateMetaData(t *testing.T) {
 func TestGenerateNetworkConfig(t *testing.T) {
 	tests := []struct {
 		name         string
-		cfg          *config.VMConfig
+		vm           *v1alpha1.VirtualMachine
 		expectErr    bool
 		checkContent func(t *testing.T, content string)
 	}{
 		{
 			name:      "nil config",
-			cfg:       nil,
+			vm:        nil,
 			expectErr: true,
 		},
 		{
 			name: "empty network interfaces",
-			cfg: &config.VMConfig{
-				Name:    "test-vm",
-				Network: []config.NetworkInterface{},
+			vm: &v1alpha1.VirtualMachine{
+				ObjectMeta: v1alpha1.ObjectMeta{
+					Name: "test-vm",
+				},
+				Spec: v1alpha1.VirtualMachineSpec{
+					NetworkInterfaces: []v1alpha1.NetworkInterfaceSpec{},
+				},
 			},
 			expectErr: true,
 		},
 		{
 			name: "single interface with default route",
-			cfg: &config.VMConfig{
-				Name: "test-vm",
-				Network: []config.NetworkInterface{
-					{
-						IP:           "10.20.30.40/24",
-						Gateway:      "10.20.30.1",
-						DNSServers:   []string{"8.8.8.8", "1.1.1.1"},
-						MACAddress:   "be:ef:0a:14:1e:28",
-						DefaultRoute: true,
+			vm: &v1alpha1.VirtualMachine{
+				ObjectMeta: v1alpha1.ObjectMeta{
+					Name: "test-vm",
+				},
+				Spec: v1alpha1.VirtualMachineSpec{
+					NetworkInterfaces: []v1alpha1.NetworkInterfaceSpec{
+						{
+							IP:           "10.20.30.40/24",
+							Gateway:      "10.20.30.1",
+							DNSServers:   []string{"8.8.8.8", "1.1.1.1"},
+							DefaultRoute: true,
+						},
 					},
 				},
 			},
@@ -371,14 +408,17 @@ func TestGenerateNetworkConfig(t *testing.T) {
 		},
 		{
 			name: "single interface without default route",
-			cfg: &config.VMConfig{
-				Name: "test-vm",
-				Network: []config.NetworkInterface{
-					{
-						IP:           "10.20.30.40/24",
-						Gateway:      "10.20.30.1",
-						MACAddress:   "be:ef:0a:14:1e:28",
-						DefaultRoute: false,
+			vm: &v1alpha1.VirtualMachine{
+				ObjectMeta: v1alpha1.ObjectMeta{
+					Name: "test-vm",
+				},
+				Spec: v1alpha1.VirtualMachineSpec{
+					NetworkInterfaces: []v1alpha1.NetworkInterfaceSpec{
+						{
+							IP:           "10.20.30.40/24",
+							Gateway:      "10.20.30.1",
+							DefaultRoute: false,
+						},
 					},
 				},
 			},
@@ -396,14 +436,17 @@ func TestGenerateNetworkConfig(t *testing.T) {
 		},
 		{
 			name: "interface without DNS servers",
-			cfg: &config.VMConfig{
-				Name: "test-vm",
-				Network: []config.NetworkInterface{
-					{
-						IP:           "10.20.30.40/24",
-						Gateway:      "10.20.30.1",
-						MACAddress:   "be:ef:0a:14:1e:28",
-						DefaultRoute: true,
+			vm: &v1alpha1.VirtualMachine{
+				ObjectMeta: v1alpha1.ObjectMeta{
+					Name: "test-vm",
+				},
+				Spec: v1alpha1.VirtualMachineSpec{
+					NetworkInterfaces: []v1alpha1.NetworkInterfaceSpec{
+						{
+							IP:           "10.20.30.40/24",
+							Gateway:      "10.20.30.1",
+							DefaultRoute: true,
+						},
 					},
 				},
 			},
@@ -421,22 +464,24 @@ func TestGenerateNetworkConfig(t *testing.T) {
 		},
 		{
 			name: "multiple interfaces",
-			cfg: &config.VMConfig{
-				Name: "test-vm",
-				Network: []config.NetworkInterface{
-					{
-						IP:           "10.20.30.40/24",
-						Gateway:      "10.20.30.1",
-						DNSServers:   []string{"8.8.8.8"},
-						MACAddress:   "be:ef:0a:14:1e:28",
-						DefaultRoute: true,
-					},
-					{
-						IP:           "192.168.1.50/24",
-						Gateway:      "192.168.1.1",
-						DNSServers:   []string{"192.168.1.1"},
-						MACAddress:   "be:ef:c0:a8:01:32",
-						DefaultRoute: false,
+			vm: &v1alpha1.VirtualMachine{
+				ObjectMeta: v1alpha1.ObjectMeta{
+					Name: "test-vm",
+				},
+				Spec: v1alpha1.VirtualMachineSpec{
+					NetworkInterfaces: []v1alpha1.NetworkInterfaceSpec{
+						{
+							IP:           "10.20.30.40/24",
+							Gateway:      "10.20.30.1",
+							DNSServers:   []string{"8.8.8.8"},
+							DefaultRoute: true,
+						},
+						{
+							IP:           "192.168.1.50/24",
+							Gateway:      "192.168.1.1",
+							DNSServers:   []string{"192.168.1.1"},
+							DefaultRoute: false,
+						},
 					},
 				},
 			},
@@ -476,7 +521,7 @@ func TestGenerateNetworkConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			content, err := GenerateNetworkConfig(tt.cfg)
+			content, err := GenerateNetworkConfig(tt.vm)
 			if tt.expectErr {
 				if err == nil {
 					t.Fatal("Expected error, got nil")
@@ -497,39 +542,42 @@ func TestGenerateNetworkConfig(t *testing.T) {
 
 // TestGenerateAll tests generating all three cloud-init files from the same config
 func TestGenerateAll(t *testing.T) {
-	cfg := &config.VMConfig{
-		Name:      "integration-test",
-		VCPUs:     4,
-		MemoryGiB: 8,
-		Network: []config.NetworkInterface{
-			{
-				IP:           "10.55.22.22/24",
-				Gateway:      "10.55.22.1",
-				DNSServers:   []string{"8.8.8.8", "1.1.1.1"},
-				MACAddress:   "be:ef:0a:37:16:16",
-				DefaultRoute: true,
-			},
+	vm := &v1alpha1.VirtualMachine{
+		ObjectMeta: v1alpha1.ObjectMeta{
+			Name: "integration-test",
 		},
-		CloudInit: &config.CloudInitConfig{
-			FQDN:             "integration-test.example.com",
-			SSHKeys:          []string{testSSHKeyEd25519},
-			RootPasswordHash: "$6$rounds=4096$salt$hashedpassword",
-			SSHPwAuth:        boolPtr(false),
+		Spec: v1alpha1.VirtualMachineSpec{
+			VCPUs:     4,
+			MemoryGiB: 8,
+			NetworkInterfaces: []v1alpha1.NetworkInterfaceSpec{
+				{
+					IP:           "10.55.22.22/24",
+					Gateway:      "10.55.22.1",
+					DNSServers:   []string{"8.8.8.8", "1.1.1.1"},
+					DefaultRoute: true,
+				},
+			},
+			CloudInit: &v1alpha1.CloudInitSpec{
+				FQDN:              "integration-test.example.com",
+				SSHAuthorizedKeys: []string{testSSHKeyEd25519},
+				PasswordHash:      "$6$rounds=4096$salt$hashedpassword",
+				SSHPasswordAuth:   false,
+			},
 		},
 	}
 
 	// Generate all three files
-	userData, err := GenerateUserData(cfg)
+	userData, err := GenerateUserData(vm)
 	if err != nil {
 		t.Fatalf("GenerateUserData failed: %v", err)
 	}
 
-	metaData, err := GenerateMetaData(cfg)
+	metaData, err := GenerateMetaData(vm)
 	if err != nil {
 		t.Fatalf("GenerateMetaData failed: %v", err)
 	}
 
-	networkConfig, err := GenerateNetworkConfig(cfg)
+	networkConfig, err := GenerateNetworkConfig(vm)
 	if err != nil {
 		t.Fatalf("GenerateNetworkConfig failed: %v", err)
 	}
@@ -579,9 +627,4 @@ func TestGenerateAll(t *testing.T) {
 	if eth0.Match.MACAddress != "be:ef:0a:37:16:16" {
 		t.Errorf("network-config MAC mismatch: got %q", eth0.Match.MACAddress)
 	}
-}
-
-// boolPtr is a helper to create a pointer to a bool value
-func boolPtr(b bool) *bool {
-	return &b
 }

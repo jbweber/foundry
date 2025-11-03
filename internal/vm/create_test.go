@@ -3,75 +3,71 @@ package vm
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/digitalocean/go-libvirt"
 
-	"github.com/jbweber/foundry/internal/config"
+	"github.com/jbweber/foundry/api/v1alpha1"
 	"github.com/jbweber/foundry/internal/storage"
 )
 
 // testVMConfig creates a minimal valid VM config for testing
-func testVMConfig() *config.VMConfig {
-	cfg := &config.VMConfig{
-		Name:      "test-vm",
-		MemoryGiB: 2,
-		VCPUs:     2,
-		BootDisk: config.BootDiskConfig{
-			SizeGB: 20,
-			Empty:  true, // Create empty disk for testing
+func testVMConfig() *v1alpha1.VirtualMachine {
+	vm := &v1alpha1.VirtualMachine{
+		ObjectMeta: v1alpha1.ObjectMeta{
+			Name: "test-vm",
 		},
-		Network: []config.NetworkInterface{
-			{
-				Bridge:  "br0",
-				IP:      "10.0.0.10/24",
-				Gateway: "10.0.0.1",
+		Spec: v1alpha1.VirtualMachineSpec{
+			MemoryGiB:   2,
+			VCPUs:       2,
+			StoragePool: "foundry-vms", // Set explicitly for tests
+			BootDisk: v1alpha1.BootDiskSpec{
+				SizeGB:    20,
+				Empty:     true, // Create empty disk for testing
+				ImagePool: "foundry-images",
+			},
+			NetworkInterfaces: []v1alpha1.NetworkInterfaceSpec{
+				{
+					Bridge:       "br0",
+					IP:           "10.0.0.10/24",
+					Gateway:      "10.0.0.1",
+					DefaultRoute: true,
+				},
 			},
 		},
 	}
-	cfg.Normalize() // Set default storage pools
-	if err := cfg.Validate(); err != nil {
-		panic(fmt.Sprintf("invalid test config: %v", err))
-	}
-	return cfg
+	return vm
 }
 
 // testVMConfigWithCloudInit creates a config with cloud-init for testing
-func testVMConfigWithCloudInit() *config.VMConfig {
-	cfg := testVMConfig()
-	cfg.CloudInit = &config.CloudInitConfig{
+func testVMConfigWithCloudInit() *v1alpha1.VirtualMachine {
+	vm := testVMConfig()
+	vm.Spec.CloudInit = &v1alpha1.CloudInitSpec{
 		FQDN: "test-vm.example.com",
-		SSHKeys: []string{
+		SSHAuthorizedKeys: []string{
 			"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIbJKZscbOLzBsgY5y2QupKW4A2kSDjMBQGPb1dChr+S test@example.com",
 		},
-		RootPasswordHash: "$6$rounds=656000$test",
+		PasswordHash: "$6$rounds=656000$test",
 	}
-	if err := cfg.Validate(); err != nil {
-		panic(fmt.Sprintf("invalid test config: %v", err))
-	}
-	return cfg
+	return vm
 }
 
 // testVMConfigWithDataDisks creates a config with data disks for testing
-func testVMConfigWithDataDisks() *config.VMConfig {
-	cfg := testVMConfig()
-	cfg.DataDisks = []config.DataDiskConfig{
+func testVMConfigWithDataDisks() *v1alpha1.VirtualMachine {
+	vm := testVMConfig()
+	vm.Spec.DataDisks = []v1alpha1.DataDiskSpec{
 		{Device: "vdb", SizeGB: 50},
 		{Device: "vdc", SizeGB: 100},
 	}
-	if err := cfg.Validate(); err != nil {
-		panic(fmt.Sprintf("invalid test config: %v", err))
-	}
-	return cfg
+	return vm
 }
 
 // TestCreateFromConfigWithDeps_Success tests the happy path
 func TestCreateFromConfigWithDeps_Success(t *testing.T) {
 	tests := []struct {
 		name string
-		cfg  *config.VMConfig
+		vm   *v1alpha1.VirtualMachine
 	}{
 		{"minimal config", testVMConfig()},
 		{"with cloud-init", testVMConfigWithCloudInit()},
@@ -84,7 +80,7 @@ func TestCreateFromConfigWithDeps_Success(t *testing.T) {
 			lv := newMockLibvirtClient()
 			sm := newMockStorageManager()
 
-			err := createFromConfigWithDeps(ctx, tt.cfg, lv, sm)
+			err := createFromConfigWithDeps(ctx, tt.vm, lv, sm)
 			if err != nil {
 				t.Fatalf("expected success, got error: %v", err)
 			}
@@ -148,17 +144,17 @@ func TestCreateFromConfigWithDeps_PreflightChecksFail(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
-			cfg := testVMConfig()
+			vm := testVMConfig()
 			// For backing image test, we need an image reference
 			if tt.name == "backing image not found" {
-				cfg.BootDisk.Image = "fedora-43"
-				cfg.BootDisk.Empty = false
+				vm.Spec.BootDisk.Image = "fedora-43"
+				vm.Spec.BootDisk.Empty = false
 			}
 			lv := newMockLibvirtClient()
 			sm := newMockStorageManager()
 			tt.setupMock(lv, sm)
 
-			err := createFromConfigWithDeps(ctx, cfg, lv, sm)
+			err := createFromConfigWithDeps(ctx, vm, lv, sm)
 
 			// Verify error occurred
 			if err == nil {
@@ -180,13 +176,13 @@ func TestCreateFromConfigWithDeps_PreflightChecksFail(t *testing.T) {
 func TestCreateFromConfigWithDeps_StorageFailures(t *testing.T) {
 	tests := []struct {
 		name          string
-		cfg           *config.VMConfig
+		vm            *v1alpha1.VirtualMachine
 		setupMock     func(*mockStorageManager)
 		expectCleanup bool
 	}{
 		{
 			name: "create boot volume fails",
-			cfg:  testVMConfig(),
+			vm:   testVMConfig(),
 			setupMock: func(sm *mockStorageManager) {
 				sm.createVolumeFunc = func(ctx context.Context, poolName string, spec storage.VolumeSpec) error {
 					return errors.New("libvirt create volume failed")
@@ -203,7 +199,7 @@ func TestCreateFromConfigWithDeps_StorageFailures(t *testing.T) {
 			sm := newMockStorageManager()
 			tt.setupMock(sm)
 
-			err := createFromConfigWithDeps(ctx, tt.cfg, lv, sm)
+			err := createFromConfigWithDeps(ctx, tt.vm, lv, sm)
 
 			if err == nil {
 				t.Fatal("expected error, got nil")
@@ -267,12 +263,12 @@ func TestCreateFromConfigWithDeps_LibvirtFailures(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
-			cfg := testVMConfig()
+			vm := testVMConfig()
 			lv := newMockLibvirtClient()
 			sm := newMockStorageManager()
 			tt.setupMock(lv)
 
-			err := createFromConfigWithDeps(ctx, cfg, lv, sm)
+			err := createFromConfigWithDeps(ctx, vm, lv, sm)
 
 			if err == nil {
 				t.Fatal("expected error, got nil")
@@ -339,7 +335,7 @@ func TestCleanupWithDeps(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
-			cfg := testVMConfig()
+			vm := testVMConfig()
 			lv := newMockLibvirtClient()
 			sm := newMockStorageManager()
 
@@ -350,7 +346,7 @@ func TestCleanupWithDeps(t *testing.T) {
 				}
 			}
 
-			cleanupWithDeps(ctx, cfg, sm, lv, tt.domainDefined, tt.storageCreated)
+			cleanupWithDeps(ctx, vm, sm, lv, tt.domainDefined, tt.storageCreated)
 
 			// Verify cleanup behavior
 			if tt.expectDomainCleanup {
@@ -380,7 +376,7 @@ func TestCleanupWithDeps(t *testing.T) {
 // TestCleanupWithDeps_ContinuesOnError tests that cleanup continues even if operations fail
 func TestCleanupWithDeps_ContinuesOnError(t *testing.T) {
 	ctx := context.Background()
-	cfg := testVMConfig()
+	vm := testVMConfig()
 	lv := newMockLibvirtClient()
 	sm := newMockStorageManager()
 
@@ -393,7 +389,7 @@ func TestCleanupWithDeps_ContinuesOnError(t *testing.T) {
 	}
 
 	// Should not panic
-	cleanupWithDeps(ctx, cfg, sm, lv, true, true)
+	cleanupWithDeps(ctx, vm, sm, lv, true, true)
 
 	// Verify attempts were made despite failures
 	if len(lv.domainLookupByNameCalls) != 1 {

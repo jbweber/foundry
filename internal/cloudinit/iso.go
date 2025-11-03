@@ -7,7 +7,7 @@ import (
 
 	"github.com/kdomanski/iso9660"
 
-	"github.com/jbweber/foundry/internal/config"
+	"github.com/jbweber/foundry/api/v1alpha1"
 )
 
 // GenerateISO creates a cloud-init NoCloud ISO image from the VM configuration.
@@ -22,23 +22,23 @@ import (
 // See https://cloudinit.readthedocs.io/en/latest/reference/datasources/nocloud.html
 //
 // Returns the ISO image as a byte slice, ready to be uploaded to libvirt storage.
-func GenerateISO(cfg *config.VMConfig) ([]byte, error) {
-	if cfg == nil {
+func GenerateISO(vm *v1alpha1.VirtualMachine) ([]byte, error) {
+	if vm == nil {
 		return nil, fmt.Errorf("VM configuration cannot be nil")
 	}
 
 	// Generate the three cloud-init files
-	userData, err := GenerateUserData(cfg)
+	userData, err := GenerateUserData(vm)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate user-data: %w", err)
 	}
 
-	metaData, err := GenerateMetaData(cfg)
+	metaData, err := GenerateMetaData(vm)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate meta-data: %w", err)
 	}
 
-	networkConfig, err := GenerateNetworkConfig(cfg)
+	networkConfig, err := GenerateNetworkConfig(vm)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate network-config: %w", err)
 	}

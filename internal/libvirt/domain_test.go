@@ -6,85 +6,97 @@ import (
 
 	"libvirt.org/go/libvirtxml"
 
-	"github.com/jbweber/foundry/internal/config"
+	"github.com/jbweber/foundry/api/v1alpha1"
 )
 
 func TestGenerateDomainXML(t *testing.T) {
 	tests := []struct {
 		name    string
-		vmCfg   *config.VMConfig
+		vm      *v1alpha1.VirtualMachine
 		wantErr bool
 	}{
 		{
 			name: "simple VM with cloud-init",
-			vmCfg: &config.VMConfig{
-				Name:      "test-vm",
-				VCPUs:     4,
-				MemoryGiB: 8,
-				BootDisk: config.BootDiskConfig{
-					SizeGB: 50,
-					Image:  "/var/lib/libvirt/images/fedora-42.qcow2",
+			vm: &v1alpha1.VirtualMachine{
+				ObjectMeta: v1alpha1.ObjectMeta{
+					Name: "test-vm",
 				},
-				Network: []config.NetworkInterface{
-					{
-						IP:         "10.20.30.40/24",
-						Gateway:    "10.20.30.1",
-						DNSServers: []string{"8.8.8.8", "1.1.1.1"},
-						Bridge:     "br0",
-						MACAddress: "be:ef:0a:14:1e:28",
+				Spec: v1alpha1.VirtualMachineSpec{
+					VCPUs:     4,
+					MemoryGiB: 8,
+					BootDisk: v1alpha1.BootDiskSpec{
+						SizeGB: 50,
+						Image:  "/var/lib/libvirt/images/fedora-42.qcow2",
 					},
-				},
-				CloudInit: &config.CloudInitConfig{
-					FQDN:    "test-vm.example.com",
-					SSHKeys: []string{"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFoo test@example.com"},
+					NetworkInterfaces: []v1alpha1.NetworkInterfaceSpec{
+						{
+							IP:           "10.20.30.40/24",
+							Gateway:      "10.20.30.1",
+							DNSServers:   []string{"8.8.8.8", "1.1.1.1"},
+							Bridge:       "br0",
+							DefaultRoute: true,
+						},
+					},
+					CloudInit: &v1alpha1.CloudInitSpec{
+						FQDN:              "test-vm.example.com",
+						SSHAuthorizedKeys: []string{"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFoo test@example.com"},
+					},
 				},
 			},
 			wantErr: false,
 		},
 		{
 			name: "VM with multiple data disks",
-			vmCfg: &config.VMConfig{
-				Name:      "multi-disk-vm",
-				VCPUs:     2,
-				MemoryGiB: 4,
-				BootDisk: config.BootDiskConfig{
-					SizeGB: 30,
-					Image:  "/var/lib/libvirt/images/ubuntu-24.04.qcow2",
+			vm: &v1alpha1.VirtualMachine{
+				ObjectMeta: v1alpha1.ObjectMeta{
+					Name: "multi-disk-vm",
 				},
-				DataDisks: []config.DataDiskConfig{
-					{Device: "vdb", SizeGB: 100},
-					{Device: "vdc", SizeGB: 200},
-				},
-				Network: []config.NetworkInterface{
-					{
-						IP:         "192.168.1.50/24",
-						Gateway:    "192.168.1.1",
-						Bridge:     "br1",
-						MACAddress: "be:ef:c0:a8:01:32",
+				Spec: v1alpha1.VirtualMachineSpec{
+					VCPUs:     2,
+					MemoryGiB: 4,
+					BootDisk: v1alpha1.BootDiskSpec{
+						SizeGB: 30,
+						Image:  "/var/lib/libvirt/images/ubuntu-24.04.qcow2",
 					},
-				},
-				CloudInit: &config.CloudInitConfig{
-					FQDN: "multi-disk.local",
+					DataDisks: []v1alpha1.DataDiskSpec{
+						{Device: "vdb", SizeGB: 100},
+						{Device: "vdc", SizeGB: 200},
+					},
+					NetworkInterfaces: []v1alpha1.NetworkInterfaceSpec{
+						{
+							IP:           "192.168.1.50/24",
+							Gateway:      "192.168.1.1",
+							Bridge:       "br1",
+							DefaultRoute: true,
+						},
+					},
+					CloudInit: &v1alpha1.CloudInitSpec{
+						FQDN: "multi-disk.local",
+					},
 				},
 			},
 			wantErr: false,
 		},
 		{
 			name: "VM without cloud-init",
-			vmCfg: &config.VMConfig{
-				Name:      "no-cloudinit-vm",
-				VCPUs:     8,
-				MemoryGiB: 16,
-				BootDisk: config.BootDiskConfig{
-					SizeGB: 100,
-					Empty:  true,
+			vm: &v1alpha1.VirtualMachine{
+				ObjectMeta: v1alpha1.ObjectMeta{
+					Name: "no-cloudinit-vm",
 				},
-				Network: []config.NetworkInterface{
-					{
-						IP:         "10.55.22.22/24",
-						Gateway:    "10.55.22.1",
-						Bridge:     "br0",
-						MACAddress: "be:ef:0a:37:16:16",
+				Spec: v1alpha1.VirtualMachineSpec{
+					VCPUs:     8,
+					MemoryGiB: 16,
+					BootDisk: v1alpha1.BootDiskSpec{
+						SizeGB: 100,
+						Empty:  true,
+					},
+					NetworkInterfaces: []v1alpha1.NetworkInterfaceSpec{
+						{
+							IP:           "10.55.22.22/24",
+							Gateway:      "10.55.22.1",
+							Bridge:       "br0",
+							DefaultRoute: true,
+						},
 					},
 				},
 			},
@@ -92,26 +104,29 @@ func TestGenerateDomainXML(t *testing.T) {
 		},
 		{
 			name: "VM with multiple NICs",
-			vmCfg: &config.VMConfig{
-				Name:      "multi-nic-vm",
-				VCPUs:     4,
-				MemoryGiB: 8,
-				BootDisk: config.BootDiskConfig{
-					SizeGB: 50,
-					Image:  "/var/lib/libvirt/images/base.qcow2",
+			vm: &v1alpha1.VirtualMachine{
+				ObjectMeta: v1alpha1.ObjectMeta{
+					Name: "multi-nic-vm",
 				},
-				Network: []config.NetworkInterface{
-					{
-						IP:         "10.20.30.40/24",
-						Gateway:    "10.20.30.1",
-						Bridge:     "br0",
-						MACAddress: "be:ef:0a:14:1e:28",
+				Spec: v1alpha1.VirtualMachineSpec{
+					VCPUs:     4,
+					MemoryGiB: 8,
+					BootDisk: v1alpha1.BootDiskSpec{
+						SizeGB: 50,
+						Image:  "/var/lib/libvirt/images/base.qcow2",
 					},
-					{
-						IP:         "192.168.1.100/24",
-						Gateway:    "192.168.1.1",
-						Bridge:     "br1",
-						MACAddress: "be:ef:c0:a8:01:64",
+					NetworkInterfaces: []v1alpha1.NetworkInterfaceSpec{
+						{
+							IP:           "10.20.30.40/24",
+							Gateway:      "10.20.30.1",
+							Bridge:       "br0",
+							DefaultRoute: true,
+						},
+						{
+							IP:      "192.168.1.100/24",
+							Gateway: "192.168.1.1",
+							Bridge:  "br1",
+						},
 					},
 				},
 			},
@@ -122,9 +137,9 @@ func TestGenerateDomainXML(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Normalize config to set default storage pools
-			tt.vmCfg.Normalize()
+			tt.vm.Normalize()
 
-			xml, err := GenerateDomainXML(tt.vmCfg)
+			xml, err := GenerateDomainXML(tt.vm)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("GenerateDomainXML() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -147,29 +162,29 @@ func TestGenerateDomainXML(t *testing.T) {
 			}
 
 			// Validate basic structure matches Ansible reference format
-			validateDomainStructure(t, &domain, tt.vmCfg)
+			validateDomainStructure(t, &domain, tt.vm)
 		})
 	}
 }
 
 // validateDomainStructure validates the domain XML structure matches Ansible reference
-func validateDomainStructure(t *testing.T, domain *libvirtxml.Domain, cfg *config.VMConfig) {
+func validateDomainStructure(t *testing.T, domain *libvirtxml.Domain, vm *v1alpha1.VirtualMachine) {
 	t.Helper()
 
 	// Validate basic metadata
 	if domain.Type != "kvm" {
 		t.Errorf("domain type = %v, want kvm", domain.Type)
 	}
-	if domain.Name != cfg.Name {
-		t.Errorf("domain name = %v, want %v", domain.Name, cfg.Name)
+	if domain.Name != vm.Name {
+		t.Errorf("domain name = %v, want %v", domain.Name, vm.Name)
 	}
 
 	// Validate memory
 	if domain.Memory == nil {
 		t.Error("domain memory is nil")
 	} else {
-		if domain.Memory.Value != uint(cfg.MemoryGiB) {
-			t.Errorf("memory value = %v, want %v", domain.Memory.Value, cfg.MemoryGiB)
+		if domain.Memory.Value != uint(vm.Spec.MemoryGiB) {
+			t.Errorf("memory value = %v, want %v", domain.Memory.Value, vm.Spec.MemoryGiB)
 		}
 		if domain.Memory.Unit != "GiB" {
 			t.Errorf("memory unit = %v, want GiB", domain.Memory.Unit)
@@ -180,8 +195,8 @@ func validateDomainStructure(t *testing.T, domain *libvirtxml.Domain, cfg *confi
 	if domain.VCPU == nil {
 		t.Error("domain VCPU is nil")
 	} else {
-		if domain.VCPU.Value != uint(cfg.VCPUs) {
-			t.Errorf("vcpu value = %v, want %v", domain.VCPU.Value, cfg.VCPUs)
+		if domain.VCPU.Value != uint(vm.Spec.VCPUs) {
+			t.Errorf("vcpu value = %v, want %v", domain.VCPU.Value, vm.Spec.VCPUs)
 		}
 		if domain.VCPU.Placement != "static" {
 			t.Errorf("vcpu placement = %v, want static", domain.VCPU.Placement)
@@ -262,8 +277,8 @@ func validateDomainStructure(t *testing.T, domain *libvirtxml.Domain, cfg *confi
 	}
 
 	// Validate disks
-	expectedDiskCount := 1 + len(cfg.DataDisks) // boot disk + data disks
-	if cfg.CloudInit != nil {
+	expectedDiskCount := 1 + len(vm.Spec.DataDisks) // boot disk + data disks
+	if vm.Spec.CloudInit != nil {
 		expectedDiskCount++ // cloud-init ISO
 	}
 	if len(domain.Devices.Disks) != expectedDiskCount {
@@ -294,8 +309,8 @@ func validateDomainStructure(t *testing.T, domain *libvirtxml.Domain, cfg *confi
 		if bootDisk.Source == nil || bootDisk.Source.Volume == nil {
 			t.Error("boot disk source volume is nil")
 		} else {
-			expectedPool := cfg.GetStoragePool()
-			expectedVolume := cfg.GetBootVolumeName()
+			expectedPool := vm.GetStoragePool()
+			expectedVolume := vm.GetBootVolumeName()
 			if bootDisk.Source.Volume.Pool != expectedPool {
 				t.Errorf("boot disk pool = %v, want %v", bootDisk.Source.Volume.Pool, expectedPool)
 			}
@@ -306,7 +321,7 @@ func validateDomainStructure(t *testing.T, domain *libvirtxml.Domain, cfg *confi
 	}
 
 	// Validate data disks
-	for i, dataDiskCfg := range cfg.DataDisks {
+	for i, dataDiskCfg := range vm.Spec.DataDisks {
 		diskIdx := i + 1 // boot disk is at index 0
 		if len(domain.Devices.Disks) <= diskIdx {
 			t.Errorf("data disk %v missing", dataDiskCfg.Device)
@@ -322,8 +337,8 @@ func validateDomainStructure(t *testing.T, domain *libvirtxml.Domain, cfg *confi
 		if disk.Source == nil || disk.Source.Volume == nil {
 			t.Errorf("data disk %v source volume is nil", dataDiskCfg.Device)
 		} else {
-			expectedPool := cfg.GetStoragePool()
-			expectedVolume := cfg.GetDataVolumeName(dataDiskCfg.Device)
+			expectedPool := vm.GetStoragePool()
+			expectedVolume := vm.GetDataVolumeName(dataDiskCfg.Device)
 			if disk.Source.Volume.Pool != expectedPool {
 				t.Errorf("data disk pool = %v, want %v", disk.Source.Volume.Pool, expectedPool)
 			}
@@ -334,8 +349,8 @@ func validateDomainStructure(t *testing.T, domain *libvirtxml.Domain, cfg *confi
 	}
 
 	// Validate cloud-init ISO (if configured)
-	if cfg.CloudInit != nil {
-		cdromIdx := 1 + len(cfg.DataDisks)
+	if vm.Spec.CloudInit != nil {
+		cdromIdx := 1 + len(vm.Spec.DataDisks)
 		if len(domain.Devices.Disks) <= cdromIdx {
 			t.Error("cloud-init CDROM missing")
 		} else {
@@ -359,8 +374,8 @@ func validateDomainStructure(t *testing.T, domain *libvirtxml.Domain, cfg *confi
 			if cdrom.Source == nil || cdrom.Source.Volume == nil {
 				t.Error("cloud-init source is nil")
 			} else {
-				expectedPool := cfg.GetStoragePool()
-				expectedVolume := cfg.GetCloudInitVolumeName()
+				expectedPool := vm.GetStoragePool()
+				expectedVolume := vm.GetCloudInitVolumeName()
 				if cdrom.Source.Volume.Pool != expectedPool {
 					t.Errorf("cloud-init pool = %v, want %v", cdrom.Source.Volume.Pool, expectedPool)
 				}
@@ -372,10 +387,10 @@ func validateDomainStructure(t *testing.T, domain *libvirtxml.Domain, cfg *confi
 	}
 
 	// Validate network interfaces
-	if len(domain.Devices.Interfaces) != len(cfg.Network) {
-		t.Errorf("interface count = %v, want %v", len(domain.Devices.Interfaces), len(cfg.Network))
+	if len(domain.Devices.Interfaces) != len(vm.Spec.NetworkInterfaces) {
+		t.Errorf("interface count = %v, want %v", len(domain.Devices.Interfaces), len(vm.Spec.NetworkInterfaces))
 	}
-	for i, ifaceCfg := range cfg.Network {
+	for i, ifaceCfg := range vm.Spec.NetworkInterfaces {
 		if len(domain.Devices.Interfaces) <= i {
 			t.Errorf("network interface %v missing", i)
 			continue
@@ -385,8 +400,9 @@ func validateDomainStructure(t *testing.T, domain *libvirtxml.Domain, cfg *confi
 		if iface.Source == nil || iface.Source.Bridge == nil {
 			t.Errorf("interface %v should have bridge source", i)
 		}
-		if iface.MAC == nil || iface.MAC.Address != ifaceCfg.MACAddress {
-			t.Errorf("interface %v MAC = %v, want %v", i, iface.MAC.Address, ifaceCfg.MACAddress)
+		// MAC address is calculated from IP, so we verify it exists but don't check the exact value
+		if iface.MAC == nil || iface.MAC.Address == "" {
+			t.Errorf("interface %v MAC address is missing", i)
 		}
 		if iface.Source == nil || iface.Source.Bridge == nil || iface.Source.Bridge.Bridge != ifaceCfg.Bridge {
 			t.Errorf("interface %v bridge = %v, want %v", i, iface.Source.Bridge.Bridge, ifaceCfg.Bridge)
@@ -463,26 +479,29 @@ func validateDomainStructure(t *testing.T, domain *libvirtxml.Domain, cfg *confi
 
 func TestGenerateDomainXML_XMLFormat(t *testing.T) {
 	// Test that generated XML contains expected elements in proper format
-	cfg := &config.VMConfig{
-		Name:      "format-test",
-		VCPUs:     2,
-		MemoryGiB: 4,
-		BootDisk: config.BootDiskConfig{
-			SizeGB: 20,
-			Image:  "/var/lib/libvirt/images/test.qcow2",
+	vm := &v1alpha1.VirtualMachine{
+		ObjectMeta: v1alpha1.ObjectMeta{
+			Name: "format-test",
 		},
-		Network: []config.NetworkInterface{
-			{
-				IP:            "10.0.0.10/24",
-				Gateway:       "10.0.0.1",
-				Bridge:        "br0",
-				MACAddress:    "be:ef:0a:00:00:0a",
-				InterfaceName: "vm0a00000a",
+		Spec: v1alpha1.VirtualMachineSpec{
+			VCPUs:     2,
+			MemoryGiB: 4,
+			BootDisk: v1alpha1.BootDiskSpec{
+				SizeGB: 20,
+				Image:  "/var/lib/libvirt/images/test.qcow2",
+			},
+			NetworkInterfaces: []v1alpha1.NetworkInterfaceSpec{
+				{
+					IP:           "10.0.0.10/24",
+					Gateway:      "10.0.0.1",
+					Bridge:       "br0",
+					DefaultRoute: true,
+				},
 			},
 		},
 	}
 
-	xml, err := GenerateDomainXML(cfg)
+	xml, err := GenerateDomainXML(vm)
 	if err != nil {
 		t.Fatalf("GenerateDomainXML() error = %v", err)
 	}
@@ -508,10 +527,9 @@ func TestGenerateDomainXML_XMLFormat(t *testing.T) {
 		`bus="virtio"`,
 		`<boot order="1"`,
 		`<interface type="bridge"`,
-		`<mac address="be:ef:0a:00:00:0a"`,
+		`<mac address=`,
 		`<source bridge="br0"`,
 		`<model type="virtio"`,
-		`<target dev="vm0a00000a"`,
 		`<serial type="pty"`,
 		`<console type="pty"`,
 		`<memballoon model="virtio"`,

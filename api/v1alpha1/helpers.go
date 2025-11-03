@@ -1,6 +1,8 @@
 package v1alpha1
 
 import (
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -156,4 +158,46 @@ func (vm *VirtualMachine) GetInterfaceNames() []string {
 // UpdateObservedGeneration updates the status.observedGeneration to match metadata.generation.
 func (vm *VirtualMachine) UpdateObservedGeneration() {
 	vm.Status.ObservedGeneration = vm.Generation
+}
+
+// GetBootVolumeName returns the volume name for the boot disk.
+// Format: <vm-name>_boot.qcow2 (includes extension to indicate format)
+func (vm *VirtualMachine) GetBootVolumeName() string {
+	return fmt.Sprintf("%s_boot.qcow2", vm.Name)
+}
+
+// GetDataVolumeName returns the volume name for a data disk.
+// Format: <vm-name>_data-<device>.qcow2 (e.g., "my-vm_data-vdb.qcow2")
+func (vm *VirtualMachine) GetDataVolumeName(device string) string {
+	return fmt.Sprintf("%s_data-%s.qcow2", vm.Name, device)
+}
+
+// GetCloudInitVolumeName returns the volume name for the cloud-init ISO.
+// Format: <vm-name>_cloudinit.iso (includes extension to indicate format)
+func (vm *VirtualMachine) GetCloudInitVolumeName() string {
+	return fmt.Sprintf("%s_cloudinit.iso", vm.Name)
+}
+
+// Normalize sanitizes user input to consistent formats.
+// This is called automatically before validation.
+func (vm *VirtualMachine) Normalize() {
+	// Normalize VM name to lowercase
+	vm.Name = strings.ToLower(strings.TrimSpace(vm.Name))
+
+	// Normalize cloud-init FQDN to lowercase (hostname will be derived from this)
+	if vm.Spec.CloudInit != nil {
+		vm.Spec.CloudInit.FQDN = strings.ToLower(strings.TrimSpace(vm.Spec.CloudInit.FQDN))
+	}
+
+	// Note: Bridge names are NOT normalized - they must match hypervisor config exactly
+
+	// Set default storage pool if not specified
+	if vm.Spec.StoragePool == "" {
+		vm.Spec.StoragePool = "foundry-vms"
+	}
+
+	// Set default image pool if not specified
+	if vm.Spec.BootDisk.ImagePool == "" {
+		vm.Spec.BootDisk.ImagePool = "foundry-images"
+	}
 }

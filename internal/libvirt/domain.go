@@ -2,10 +2,12 @@ package libvirt
 
 import (
 	"fmt"
+	"net"
+	"strings"
 
 	"libvirt.org/go/libvirtxml"
 
-	"github.com/jbweber/foundry/internal/config"
+	"github.com/jbweber/foundry/api/v1alpha1"
 )
 
 const (
@@ -13,18 +15,108 @@ const (
 	BaseStoragePath = "/var/lib/libvirt/images"
 )
 
+// GetStoragePool returns the storage pool name, using default if not set.
+func GetStoragePool(vm *v1alpha1.VirtualMachine) string {
+	if vm.Spec.StoragePool == "" {
+		return "foundry-vms"
+	}
+	return vm.Spec.StoragePool
+}
+
+// GetBootVolumeName returns the volume name for the boot disk.
+// Format: <vm-name>_boot.qcow2
+func GetBootVolumeName(vm *v1alpha1.VirtualMachine) string {
+	return fmt.Sprintf("%s_boot.qcow2", vm.Name)
+}
+
+// GetDataVolumeName returns the volume name for a data disk.
+// Format: <vm-name>_data-<device>.qcow2
+func GetDataVolumeName(vm *v1alpha1.VirtualMachine, device string) string {
+	return fmt.Sprintf("%s_data-%s.qcow2", vm.Name, device)
+}
+
+// GetCloudInitVolumeName returns the volume name for the cloud-init ISO.
+// Format: <vm-name>_cloudinit.iso
+func GetCloudInitVolumeName(vm *v1alpha1.VirtualMachine) string {
+	return fmt.Sprintf("%s_cloudinit.iso", vm.Name)
+}
+
+// calculateMACFromIP generates a MAC address from an IP address.
+// Algorithm: IP 10.20.30.40 → MAC be:ef:0a:14:1e:28
+func calculateMACFromIP(ipWithCIDR string) (string, error) {
+	// Strip CIDR suffix if present
+	ipStr := ipWithCIDR
+	if strings.Contains(ipWithCIDR, "/") {
+		ip, _, err := net.ParseCIDR(ipWithCIDR)
+		if err != nil {
+			return "", fmt.Errorf("invalid IP/CIDR format: %w", err)
+		}
+		ipStr = ip.String()
+	}
+
+	// Parse IP address
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		return "", fmt.Errorf("invalid IP address: %s", ipStr)
+	}
+
+	// Convert to IPv4
+	ip = ip.To4()
+	if ip == nil {
+		return "", fmt.Errorf("only IPv4 addresses are supported: %s", ipStr)
+	}
+
+	// Generate MAC: be:ef:xx:xx:xx:xx
+	return fmt.Sprintf("be:ef:%02x:%02x:%02x:%02x", ip[0], ip[1], ip[2], ip[3]), nil
+}
+
+// calculateInterfaceNameFromIP generates a tap interface name from an IP address.
+// Algorithm: IP 10.20.30.40 → Interface vm0a141e28
+func calculateInterfaceNameFromIP(ipWithCIDR string) (string, error) {
+	// Strip CIDR suffix if present
+	ipStr := ipWithCIDR
+	if strings.Contains(ipWithCIDR, "/") {
+		ip, _, err := net.ParseCIDR(ipWithCIDR)
+		if err != nil {
+			return "", fmt.Errorf("invalid IP/CIDR format: %w", err)
+		}
+		ipStr = ip.String()
+	}
+
+	// Parse IP address
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		return "", fmt.Errorf("invalid IP address: %s", ipStr)
+	}
+
+	// Convert to IPv4
+	ip = ip.To4()
+	if ip == nil {
+		return "", fmt.Errorf("only IPv4 addresses are supported: %s", ipStr)
+	}
+
+	// Generate interface name: vm{hex octets}
+	return fmt.Sprintf("vm%02x%02x%02x%02x", ip[0], ip[1], ip[2], ip[3]), nil
+}
+
 // GenerateDomainXML generates libvirt domain XML from VM configuration
-func GenerateDomainXML(cfg *config.VMConfig) (string, error) {
+func GenerateDomainXML(vm *v1alpha1.VirtualMachine) (string, error) {
+	// Get CPU mode with default
+	cpuMode := vm.Spec.CPUMode
+	if cpuMode == "" {
+		cpuMode = "host-model"
+	}
+
 	domain := &libvirtxml.Domain{
 		Type: "kvm",
-		Name: cfg.Name,
+		Name: vm.Name,
 		Memory: &libvirtxml.DomainMemory{
-			Value: uint(cfg.MemoryGiB),
+			Value: uint(vm.Spec.MemoryGiB),
 			Unit:  "GiB",
 		},
 		VCPU: &libvirtxml.DomainVCPU{
 			Placement: "static",
-			Value:     uint(cfg.VCPUs),
+			Value:     uint(vm.Spec.VCPUs),
 		},
 		OS: &libvirtxml.DomainOS{
 			Firmware: "efi",
@@ -42,7 +134,7 @@ func GenerateDomainXML(cfg *config.VMConfig) (string, error) {
 			PAE:  &libvirtxml.DomainFeature{},
 		},
 		CPU: &libvirtxml.DomainCPU{
-			Mode: "host-model", // Default CPU mode
+			Mode: cpuMode,
 			Model: &libvirtxml.DomainCPUModel{
 				Fallback: "allow",
 			},
@@ -92,8 +184,8 @@ func GenerateDomainXML(cfg *config.VMConfig) (string, error) {
 		},
 		Source: &libvirtxml.DomainDiskSource{
 			Volume: &libvirtxml.DomainDiskSourceVolume{
-				Pool:   cfg.GetStoragePool(),
-				Volume: cfg.GetBootVolumeName(),
+				Pool:   GetStoragePool(vm),
+				Volume: GetBootVolumeName(vm),
 			},
 		},
 		Target: &libvirtxml.DomainDiskTarget{
@@ -107,7 +199,7 @@ func GenerateDomainXML(cfg *config.VMConfig) (string, error) {
 	domain.Devices.Disks = append(domain.Devices.Disks, bootDisk)
 
 	// Add data disks (volume-based)
-	for _, dataDisk := range cfg.DataDisks {
+	for _, dataDisk := range vm.Spec.DataDisks {
 		disk := libvirtxml.DomainDisk{
 			Device: "disk",
 			Driver: &libvirtxml.DomainDiskDriver{
@@ -117,8 +209,8 @@ func GenerateDomainXML(cfg *config.VMConfig) (string, error) {
 			},
 			Source: &libvirtxml.DomainDiskSource{
 				Volume: &libvirtxml.DomainDiskSourceVolume{
-					Pool:   cfg.GetStoragePool(),
-					Volume: cfg.GetDataVolumeName(dataDisk.Device),
+					Pool:   GetStoragePool(vm),
+					Volume: GetDataVolumeName(vm, dataDisk.Device),
 				},
 			},
 			Target: &libvirtxml.DomainDiskTarget{
@@ -130,7 +222,7 @@ func GenerateDomainXML(cfg *config.VMConfig) (string, error) {
 	}
 
 	// Add cloud-init ISO if configured (volume-based)
-	if cfg.CloudInit != nil {
+	if vm.Spec.CloudInit != nil {
 		cdrom := libvirtxml.DomainDisk{
 			Device: "cdrom",
 			Driver: &libvirtxml.DomainDiskDriver{
@@ -139,8 +231,8 @@ func GenerateDomainXML(cfg *config.VMConfig) (string, error) {
 			},
 			Source: &libvirtxml.DomainDiskSource{
 				Volume: &libvirtxml.DomainDiskSourceVolume{
-					Pool:   cfg.GetStoragePool(),
-					Volume: cfg.GetCloudInitVolumeName(),
+					Pool:   GetStoragePool(vm),
+					Volume: GetCloudInitVolumeName(vm),
 				},
 			},
 			Target: &libvirtxml.DomainDiskTarget{
@@ -153,10 +245,22 @@ func GenerateDomainXML(cfg *config.VMConfig) (string, error) {
 	}
 
 	// Add network interfaces
-	for _, iface := range cfg.Network {
+	for _, iface := range vm.Spec.NetworkInterfaces {
+		// Calculate MAC address from IP
+		macAddr, err := calculateMACFromIP(iface.IP)
+		if err != nil {
+			return "", fmt.Errorf("failed to calculate MAC address for %s: %w", iface.IP, err)
+		}
+
+		// Calculate interface name from IP
+		ifaceName, err := calculateInterfaceNameFromIP(iface.IP)
+		if err != nil {
+			return "", fmt.Errorf("failed to calculate interface name for %s: %w", iface.IP, err)
+		}
+
 		netIface := libvirtxml.DomainInterface{
 			MAC: &libvirtxml.DomainInterfaceMAC{
-				Address: iface.MACAddress,
+				Address: macAddr,
 			},
 			Source: &libvirtxml.DomainInterfaceSource{
 				Bridge: &libvirtxml.DomainInterfaceSourceBridge{
@@ -167,7 +271,7 @@ func GenerateDomainXML(cfg *config.VMConfig) (string, error) {
 				Type: "virtio",
 			},
 			Target: &libvirtxml.DomainInterfaceTarget{
-				Dev: iface.InterfaceName,
+				Dev: ifaceName,
 			},
 		}
 		domain.Devices.Interfaces = append(domain.Devices.Interfaces, netIface)
