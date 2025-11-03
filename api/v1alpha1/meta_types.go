@@ -87,7 +87,7 @@ func (t Time) MarshalJSON() ([]byte, error) {
 	if t.IsZero() {
 		return []byte("null"), nil
 	}
-	return json.Marshal(t.Time.Format(time.RFC3339))
+	return json.Marshal(t.Format(time.RFC3339))
 }
 
 // UnmarshalJSON implements the json.Unmarshaler interface.
@@ -114,7 +114,7 @@ func (t Time) MarshalYAML() (interface{}, error) {
 	if t.IsZero() {
 		return nil, nil
 	}
-	return t.Time.Format(time.RFC3339), nil
+	return t.Format(time.RFC3339), nil
 }
 
 // UnmarshalYAML implements the yaml.Unmarshaler interface.

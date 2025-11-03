@@ -17,7 +17,7 @@ func SetCondition(vm *v1alpha1.VirtualMachine, condType string, status v1alpha1.
 	newCondition := v1alpha1.Condition{
 		Type:               condType,
 		Status:             status,
-		ObservedGeneration: vm.ObjectMeta.Generation,
+		ObservedGeneration: vm.Generation,
 		LastTransitionTime: now,
 		Reason:             reason,
 		Message:            message,
@@ -37,7 +37,7 @@ func SetCondition(vm *v1alpha1.VirtualMachine, condType string, status v1alpha1.
 			existing.Status = status
 			existing.Reason = reason
 			existing.Message = message
-			existing.ObservedGeneration = vm.ObjectMeta.Generation
+			existing.ObservedGeneration = vm.Generation
 			return
 		}
 	}

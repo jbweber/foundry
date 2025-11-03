@@ -8,8 +8,9 @@ import (
 	"fmt"
 
 	"github.com/digitalocean/go-libvirt"
-	"github.com/jbweber/foundry/api/v1alpha1"
 	"gopkg.in/yaml.v3"
+
+	"github.com/jbweber/foundry/api/v1alpha1"
 )
 
 const (
@@ -102,7 +103,7 @@ func Load(l *libvirt.Libvirt, domain libvirt.Domain) (*v1alpha1.VirtualMachine, 
 // This is useful when the spec changes (e.g., after editing).
 func Update(l *libvirt.Libvirt, domain libvirt.Domain, vm *v1alpha1.VirtualMachine) error {
 	// Increment generation to track changes
-	vm.ObjectMeta.Generation++
+	vm.Generation++
 
 	return Store(l, domain, vm)
 }

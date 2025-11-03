@@ -102,7 +102,7 @@ func (vm *VirtualMachine) GetBootDiskImagePool() string {
 
 // GetName returns the VM name from metadata.
 func (vm *VirtualMachine) GetName() string {
-	return vm.ObjectMeta.Name
+	return vm.Name
 }
 
 // SetPhase sets the VM phase in status.
@@ -155,5 +155,5 @@ func (vm *VirtualMachine) GetInterfaceNames() []string {
 
 // UpdateObservedGeneration updates the status.observedGeneration to match metadata.generation.
 func (vm *VirtualMachine) UpdateObservedGeneration() {
-	vm.Status.ObservedGeneration = vm.ObjectMeta.Generation
+	vm.Status.ObservedGeneration = vm.Generation
 }

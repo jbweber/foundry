@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/jbweber/foundry/internal/libvirt"
+	"github.com/jbweber/foundry/internal/output"
 	"github.com/jbweber/foundry/internal/storage"
 	"github.com/jbweber/foundry/internal/vm"
 )
@@ -17,6 +18,10 @@ import (
 var (
 	version = "dev"
 	commit  = "unknown"
+
+	// Global flags for output formatting
+	outputFormat string
+	noHeaders    bool
 )
 
 func main() {
@@ -37,10 +42,15 @@ declarative configuration files.`,
 }
 
 func init() {
+	// Global persistent flags for output formatting
+	rootCmd.PersistentFlags().StringVarP(&outputFormat, "output", "o", "table", "Output format (table|yaml|json)")
+	rootCmd.PersistentFlags().BoolVar(&noHeaders, "no-headers", false, "Omit headers in table output")
+
 	// Subcommands will be added here
 	rootCmd.AddCommand(createCmd)
 	rootCmd.AddCommand(destroyCmd)
 	rootCmd.AddCommand(listCmd)
+	rootCmd.AddCommand(getCmd)
 	rootCmd.AddCommand(testConnCmd)
 	rootCmd.AddCommand(imageCmd)
 	rootCmd.AddCommand(poolCmd)
@@ -99,15 +109,40 @@ var listCmd = &cobra.Command{
 	Short: "List all VMs",
 	Long: `List all virtual machines (both running and stopped).
 
-Shows VM name, state, autostart status, CPUs, and memory.`,
+Shows VM name, phase, IP address, CPUs, memory, and age.
+
+Output formats:
+  -o table  Human-readable table (default)
+  -o yaml   Full YAML resource definitions
+  -o json   Full JSON resource definitions`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Validate output format
+		if err := output.ValidateFormat(outputFormat); err != nil {
+			return err
+		}
+
 		ctx := context.Background()
-		vms, err := vm.List(ctx)
+		vms, err := vm.ListVMs(ctx)
 		if err != nil {
 			return fmt.Errorf("failed to list VMs: %w", err)
 		}
 
-		vm.PrintVMs(vms)
+		// Create formatter
+		formatter, err := output.NewFormatter(output.Options{
+			Format:    output.Format(outputFormat),
+			NoHeaders: noHeaders,
+		})
+		if err != nil {
+			return err
+		}
+
+		// Format and print
+		result, err := formatter.FormatVMList(vms)
+		if err != nil {
+			return fmt.Errorf("failed to format output: %w", err)
+		}
+
+		fmt.Print(result)
 		return nil
 	},
 }

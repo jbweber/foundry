@@ -7,8 +7,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/jbweber/foundry/api/v1alpha1"
 	"gopkg.in/yaml.v3"
+
+	"github.com/jbweber/foundry/api/v1alpha1"
 )
 
 // LoadFromFile loads a VirtualMachine resource from a YAML file.
@@ -103,7 +104,7 @@ func applyDefaults(vm *v1alpha1.VirtualMachine) {
 	}
 
 	// Normalize name to lowercase
-	vm.ObjectMeta.Name = strings.ToLower(vm.ObjectMeta.Name)
+	vm.Name = strings.ToLower(vm.Name)
 
 	// Normalize FQDN to lowercase
 	if vm.Spec.CloudInit != nil && vm.Spec.CloudInit.FQDN != "" {
@@ -114,7 +115,7 @@ func applyDefaults(vm *v1alpha1.VirtualMachine) {
 // validateSpec validates the VirtualMachine spec for required fields and consistency.
 func validateSpec(vm *v1alpha1.VirtualMachine) error {
 	// Validate metadata.name
-	if vm.ObjectMeta.Name == "" {
+	if vm.Name == "" {
 		return fmt.Errorf("metadata.name is required")
 	}
 
