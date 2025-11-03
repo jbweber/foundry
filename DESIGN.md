@@ -32,12 +32,27 @@ foundry/
 │   ├── create.go            # VM create command
 │   ├── destroy.go           # VM destroy command
 │   ├── list.go              # VM list command
+│   ├── get.go               # VM get command (single VM details)
 │   ├── pool.go              # Pool management commands
 │   ├── image.go             # Image management commands
 │   └── storage.go           # Storage status command
+├── api/
+│   └── v1alpha1/
+│       ├── types.go         # VirtualMachine K8s-style API types
+│       ├── types_test.go    # API type tests
+│       └── helpers.go       # Helper methods (MAC calculation, volume naming, etc.)
 ├── internal/
-│   ├── config/
-│   │   └── types.go         # VM configuration structs + MAC calculation
+│   ├── loader/
+│   │   └── loader.go        # YAML loader for v1alpha1 format
+│   ├── metadata/
+│   │   └── storage.go       # Libvirt XML metadata storage for VM specs
+│   ├── status/
+│   │   ├── conditions.go    # Condition management
+│   │   └── phase.go         # Phase management (Pending, Running, etc.)
+│   ├── output/
+│   │   ├── table.go         # Table output formatter
+│   │   ├── yaml.go          # YAML output formatter
+│   │   └── json.go          # JSON output formatter
 │   ├── storage/
 │   │   ├── types.go         # Storage types (PoolType, VolumeSpec, etc.)
 │   │   ├── manager.go       # Storage manager coordinator
@@ -53,7 +68,8 @@ foundry/
 │   └── vm/
 │       ├── create.go        # VM creation orchestration
 │       ├── destroy.go       # VM destruction logic
-│       ├── list.go          # VM listing
+│       ├── list.go          # VM listing with status population
+│       ├── get.go           # Get single VM with status
 │       └── interfaces.go    # Interfaces for dependency injection
 ├── examples/
 │   ├── simple-vm.yaml       # Basic VM config example
@@ -72,78 +88,107 @@ foundry/
 
 ### VM Configuration YAML
 
+Foundry uses a Kubernetes-style API format with `apiVersion`, `kind`, `metadata`, `spec`, and `status` sections:
+
 ```yaml
-# Required fields
-name: my-vm                   # VM name (libvirt domain name, normalized to lowercase)
-vcpus: 4                      # Number of virtual CPUs
-memory_gib: 8                 # Memory in GiB
+apiVersion: foundry.cofront.xyz/v1alpha1
+kind: VirtualMachine
+metadata:
+  name: my-vm                 # VM name (libvirt domain name, normalized to lowercase)
+  labels:                     # Optional: key-value labels for organization
+    environment: production
+    role: webserver
+  annotations:                # Optional: arbitrary metadata
+    description: "Production web server"
 
-# Boot disk configuration
-boot_disk:
-  size_gb: 50                 # Disk size in GB
-  image: /var/lib/libvirt/images/fedora-42.qcow2  # Base image path
-  format: qcow2               # Optional: qcow2 (default), raw
-  # OR for empty boot disk:
-  # empty: true               # Create empty disk instead of snapshot
+spec:
+  # Resource allocation
+  vcpus: 4                    # Number of virtual CPUs
+  memoryGiB: 8                # Memory in GiB
 
-# Optional: Additional data disks
-data_disks:
-  - device: vdb               # Device name (vdb, vdc, etc.)
-    size_gb: 100
-  - device: vdc
-    size_gb: 200
+  # Boot disk configuration
+  bootDisk:
+    sizeGB: 50                # Disk size in GB
+    image: fedora-43.qcow2    # Image reference (see formats below)
+    imagePool: foundry-images # Optional: pool containing base image (default: foundry-images)
+    # OR for empty boot disk:
+    # empty: true             # Create empty disk instead of snapshot
 
-# Network configuration
-network_interfaces:
-  - ip: 10.20.30.40/24        # IP with CIDR
-    gateway: 10.20.30.1       # Gateway IP
-    dns_servers:              # DNS servers
-      - 8.8.8.8
-      - 1.1.1.1
-    bridge: br0               # Bridge name to attach to
-    default_route: true       # Set default route (optional, default: true for first interface)
+  # Optional: Additional data disks
+  dataDisks:
+    - device: vdb             # Device name (vdb, vdc, etc.)
+      sizeGB: 100
+    - device: vdc
+      sizeGB: 200
 
-  # Optional: Additional interfaces
-  - ip: 192.168.1.50/24
-    gateway: 192.168.1.1
-    dns_servers:
-      - 192.168.1.1
-    bridge: br1
-    default_route: false
+  # Network configuration
+  networkInterfaces:
+    - ip: 10.20.30.40/24      # IP with CIDR
+      gateway: 10.20.30.1     # Gateway IP
+      dnsServers:             # DNS servers
+        - 8.8.8.8
+        - 1.1.1.1
+      bridge: br0             # Bridge name to attach to
+      defaultRoute: true      # Set default route (optional, default: true for first interface)
 
-# Optional: Cloud-init configuration
-cloud_init:
-  fqdn: my-vm.example.com     # FQDN (hostname derived from this, normalized to lowercase)
-  ssh_keys:                   # SSH public keys to inject
-    - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFoo..."
-    - "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC..."
-  root_password_hash: "$6$..."  # Optional: Root password hash
-  ssh_pwauth: false           # Optional: Enable SSH password auth (default: false)
+    # Optional: Additional interfaces
+    - ip: 192.168.1.50/24
+      gateway: 192.168.1.1
+      dnsServers:
+        - 192.168.1.1
+      bridge: br1
+      defaultRoute: false
 
-# Optional: Advanced settings
-cpu_mode: host-model          # CPU mode: host-model (default), host-passthrough
-autostart: true               # Auto-start VM on host boot (default: true)
-storage_pool: foundry-vms     # Storage pool to use (default: foundry-vms)
+  # Optional: Cloud-init configuration
+  cloudInit:
+    fqdn: my-vm.example.com   # FQDN (hostname derived from this, normalized to lowercase)
+    sshAuthorizedKeys:        # SSH public keys to inject
+      - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFoo..."
+      - "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC..."
+    passwordHash: "$6$..."    # Optional: Root password hash (mkpasswd --method=SHA-512)
+    sshPwauth: false          # Optional: Enable SSH password auth (default: false)
+
+  # Optional: Advanced settings
+  cpuMode: host-model         # CPU mode: host-model (default), host-passthrough
+  autostart: true             # Auto-start VM on host boot (default: true)
+  storagePool: foundry-vms    # Storage pool to use (default: foundry-vms)
+
+# Status (populated automatically by foundry)
+status:
+  phase: Running              # Pending, Creating, Running, Stopped, Failed, Destroying
+  conditions:                 # Array of condition objects
+    - type: Ready
+      status: "True"
+      lastTransitionTime: "2025-11-03T10:30:00Z"
+      reason: VMRunning
+      message: "VM is running successfully"
+  observedGeneration: 1       # Last generation observed by controller
 ```
+
+**Image Reference Formats:**
+- Volume name: `fedora-43.qcow2` (uses `imagePool` or defaults to `foundry-images`)
+- Full reference: `foundry-images:fedora-43.qcow2` (explicit pool:volume format)
+- File path: `/path/to/image.qcow2` (direct filesystem path, not recommended)
 
 ### Configuration Validation Rules
 
 **Required:**
-- `name`, `vcpus`, `memory_gib`
-- `boot_disk.size_gb`
-- `boot_disk.image` OR `boot_disk.empty: true`
-- At least one `network_interfaces` entry with `ip`, `gateway`, `bridge`
+- `metadata.name`
+- `spec.vcpus`, `spec.memoryGiB`
+- `spec.bootDisk.sizeGB`
+- `spec.bootDisk.image` OR `spec.bootDisk.empty: true`
+- At least one `spec.networkInterfaces` entry with `ip`, `gateway`, `bridge`
 
 **Normalization (automatic):**
-- `name` → lowercase
-- `cloud_init.fqdn` → lowercase (hostname derived from this)
+- `metadata.name` → lowercase
+- `spec.cloudInit.fqdn` → lowercase (hostname derived from this)
 
 **Validation checks:**
-- `name` format: `^[a-z0-9][a-z0-9_-]*[a-z0-9]$` (after normalization)
+- `metadata.name` format: `^[a-z0-9][a-z0-9_-]*[a-z0-9]$` (after normalization)
   - Must start and end with alphanumeric
   - Can contain alphanumeric, hyphens, underscores
-- `cloud_init.fqdn` format: valid FQDN (hostname + domain with dots)
-- VCPUs > 0, memory_gib > 0, disk sizes > 0
+- `spec.cloudInit.fqdn` format: valid FQDN (hostname + domain with dots)
+- VCPUs > 0, memoryGiB > 0, disk sizes > 0
 - IP addresses valid with CIDR notation
 - No duplicate device names in data disks
 - No duplicate IP addresses in network interfaces

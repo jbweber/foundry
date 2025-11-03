@@ -16,6 +16,8 @@ This project isn't suggested for general purpose use, and really exists because 
 
 ## Features
 
+- **Kubernetes-Style API**: Familiar `apiVersion`, `kind`, `metadata`, `spec`, `status` format
+- **Status Observation**: Automatic status population with phases and conditions
 - **Simple Configuration**: Define VMs in easy-to-read YAML files
 - **Pure Go Implementation**: No CGo dependencies, easy to install and deploy
 - **Cloud-init Support**: Automatic SSH key injection and network configuration
@@ -25,6 +27,7 @@ This project isn't suggested for general purpose use, and really exists because 
 - **Image Management**: Import, list, and manage base OS images
 - **UEFI Boot**: Modern UEFI firmware support
 - **Deterministic MACs**: MAC addresses automatically calculated from IP addresses
+- **Metadata Persistence**: VM specs stored in libvirt domain metadata for state recovery
 
 ## Installation
 
@@ -134,28 +137,42 @@ foundry storage status
 
 See [examples/](examples/) directory for sample configurations.
 
-Basic VM configuration:
+Basic VM configuration (Kubernetes-style API):
 
 ```yaml
-name: my-vm
-vcpus: 4
-memory_gib: 8
+apiVersion: foundry.cofront.xyz/v1alpha1
+kind: VirtualMachine
+metadata:
+  name: my-vm
+  labels:
+    environment: production
 
-boot_disk:
-  size_gb: 50
-  image: /var/lib/libvirt/images/fedora-42.qcow2
+spec:
+  vcpus: 4
+  memoryGiB: 8
 
-network_interfaces:
-  - ip: 10.20.30.40/24
-    gateway: 10.20.30.1
-    dns_servers:
-      - 8.8.8.8
-    bridge: br0
+  bootDisk:
+    sizeGB: 50
+    image: fedora-43.qcow2
+    imagePool: foundry-images
 
-cloud_init:
-  enabled: true
-  ssh_keys:
-    - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFoo..."
+  networkInterfaces:
+    - ip: 10.20.30.40/24
+      gateway: 10.20.30.1
+      dnsServers:
+        - 8.8.8.8
+      bridge: br0
+
+  cloudInit:
+    fqdn: my-vm.example.com
+    sshAuthorizedKeys:
+      - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFoo..."
+
+status:
+  phase: Running
+  conditions:
+    - type: Ready
+      status: "True"
 ```
 
 For complete configuration options, see [DESIGN.md](DESIGN.md#configuration-format).
@@ -189,13 +206,17 @@ make lint
 
 ```
 foundry/
-├── cmd/foundry/        # CLI entry point
+├── cmd/foundry/        # CLI entry point and commands
+├── api/v1alpha1/       # Kubernetes-style API types (VirtualMachine)
 ├── internal/
-│   ├── config/         # Configuration types, validation, and MAC calculation
+│   ├── loader/         # YAML config loader for v1alpha1
+│   ├── metadata/       # Libvirt metadata storage for VM specs
+│   ├── status/         # Status management (phases, conditions)
+│   ├── output/         # Output formatters (table, YAML, JSON)
+│   ├── storage/        # Storage pool and volume management
 │   ├── cloudinit/      # Cloud-init ISO generation
-│   ├── disk/           # Storage management
 │   ├── libvirt/        # Libvirt client and domain operations
-│   └── vm/             # VM creation, destruction, listing
+│   └── vm/             # VM lifecycle operations (create, destroy, list, get)
 ├── examples/           # Example configurations
 └── DESIGN.md          # Detailed design document
 ```

@@ -542,3 +542,493 @@ func TestGenerateDomainXML_XMLFormat(t *testing.T) {
 		}
 	}
 }
+
+// TestGenerateDomainXML_EdgeCases tests edge cases for domain XML generation
+func TestGenerateDomainXML_EdgeCases(t *testing.T) {
+	tests := []struct {
+		name    string
+		vm      *v1alpha1.VirtualMachine
+		wantErr bool
+		errMsg  string
+	}{
+		{
+			name: "VM with custom CPU mode",
+			vm: &v1alpha1.VirtualMachine{
+				ObjectMeta: v1alpha1.ObjectMeta{
+					Name: "custom-cpu-vm",
+				},
+				Spec: v1alpha1.VirtualMachineSpec{
+					VCPUs:     4,
+					MemoryGiB: 8,
+					CPUMode:   "host-passthrough",
+					BootDisk: v1alpha1.BootDiskSpec{
+						SizeGB: 50,
+						Image:  "/var/lib/libvirt/images/test.qcow2",
+					},
+					NetworkInterfaces: []v1alpha1.NetworkInterfaceSpec{
+						{
+							IP:      "10.0.0.10/24",
+							Gateway: "10.0.0.1",
+							Bridge:  "br0",
+						},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "VM with minimal memory (512MB)",
+			vm: &v1alpha1.VirtualMachine{
+				ObjectMeta: v1alpha1.ObjectMeta{
+					Name: "minimal-vm",
+				},
+				Spec: v1alpha1.VirtualMachineSpec{
+					VCPUs:     1,
+					MemoryGiB: 1, // Minimal memory
+					BootDisk: v1alpha1.BootDiskSpec{
+						SizeGB: 10,
+						Image:  "/var/lib/libvirt/images/test.qcow2",
+					},
+					NetworkInterfaces: []v1alpha1.NetworkInterfaceSpec{
+						{
+							IP:      "10.0.0.10/24",
+							Gateway: "10.0.0.1",
+							Bridge:  "br0",
+						},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "VM with large memory (256GB)",
+			vm: &v1alpha1.VirtualMachine{
+				ObjectMeta: v1alpha1.ObjectMeta{
+					Name: "large-memory-vm",
+				},
+				Spec: v1alpha1.VirtualMachineSpec{
+					VCPUs:     32,
+					MemoryGiB: 256, // Large memory
+					BootDisk: v1alpha1.BootDiskSpec{
+						SizeGB: 500,
+						Image:  "/var/lib/libvirt/images/test.qcow2",
+					},
+					NetworkInterfaces: []v1alpha1.NetworkInterfaceSpec{
+						{
+							IP:      "10.0.0.10/24",
+							Gateway: "10.0.0.1",
+							Bridge:  "br0",
+						},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "VM with many VCPUs (32)",
+			vm: &v1alpha1.VirtualMachine{
+				ObjectMeta: v1alpha1.ObjectMeta{
+					Name: "many-vcpu-vm",
+				},
+				Spec: v1alpha1.VirtualMachineSpec{
+					VCPUs:     32,
+					MemoryGiB: 64,
+					BootDisk: v1alpha1.BootDiskSpec{
+						SizeGB: 100,
+						Image:  "/var/lib/libvirt/images/test.qcow2",
+					},
+					NetworkInterfaces: []v1alpha1.NetworkInterfaceSpec{
+						{
+							IP:      "10.0.0.10/24",
+							Gateway: "10.0.0.1",
+							Bridge:  "br0",
+						},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "VM with long name",
+			vm: &v1alpha1.VirtualMachine{
+				ObjectMeta: v1alpha1.ObjectMeta{
+					Name: "this-is-a-very-long-vm-name-that-tests-name-length-handling",
+				},
+				Spec: v1alpha1.VirtualMachineSpec{
+					VCPUs:     2,
+					MemoryGiB: 4,
+					BootDisk: v1alpha1.BootDiskSpec{
+						SizeGB: 20,
+						Image:  "/var/lib/libvirt/images/test.qcow2",
+					},
+					NetworkInterfaces: []v1alpha1.NetworkInterfaceSpec{
+						{
+							IP:      "10.0.0.10/24",
+							Gateway: "10.0.0.1",
+							Bridge:  "br0",
+						},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "VM with name containing hyphens",
+			vm: &v1alpha1.VirtualMachine{
+				ObjectMeta: v1alpha1.ObjectMeta{
+					Name: "web-server-prod-01",
+				},
+				Spec: v1alpha1.VirtualMachineSpec{
+					VCPUs:     2,
+					MemoryGiB: 4,
+					BootDisk: v1alpha1.BootDiskSpec{
+						SizeGB: 20,
+						Image:  "/var/lib/libvirt/images/test.qcow2",
+					},
+					NetworkInterfaces: []v1alpha1.NetworkInterfaceSpec{
+						{
+							IP:      "10.0.0.10/24",
+							Gateway: "10.0.0.1",
+							Bridge:  "br0",
+						},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "VM with many data disks (4 disks)",
+			vm: &v1alpha1.VirtualMachine{
+				ObjectMeta: v1alpha1.ObjectMeta{
+					Name: "many-disk-vm",
+				},
+				Spec: v1alpha1.VirtualMachineSpec{
+					VCPUs:     4,
+					MemoryGiB: 8,
+					BootDisk: v1alpha1.BootDiskSpec{
+						SizeGB: 50,
+						Image:  "/var/lib/libvirt/images/test.qcow2",
+					},
+					DataDisks: []v1alpha1.DataDiskSpec{
+						{Device: "vdb", SizeGB: 100},
+						{Device: "vdc", SizeGB: 200},
+						{Device: "vdd", SizeGB: 300},
+						{Device: "vde", SizeGB: 400},
+					},
+					NetworkInterfaces: []v1alpha1.NetworkInterfaceSpec{
+						{
+							IP:      "10.0.0.10/24",
+							Gateway: "10.0.0.1",
+							Bridge:  "br0",
+						},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "VM with multiple NICs on different bridges",
+			vm: &v1alpha1.VirtualMachine{
+				ObjectMeta: v1alpha1.ObjectMeta{
+					Name: "multi-bridge-vm",
+				},
+				Spec: v1alpha1.VirtualMachineSpec{
+					VCPUs:     2,
+					MemoryGiB: 4,
+					BootDisk: v1alpha1.BootDiskSpec{
+						SizeGB: 20,
+						Image:  "/var/lib/libvirt/images/test.qcow2",
+					},
+					NetworkInterfaces: []v1alpha1.NetworkInterfaceSpec{
+						{
+							IP:      "10.0.0.10/24",
+							Gateway: "10.0.0.1",
+							Bridge:  "br0",
+						},
+						{
+							IP:      "192.168.1.50/24",
+							Gateway: "192.168.1.1",
+							Bridge:  "br1",
+						},
+						{
+							IP:      "172.16.0.100/16",
+							Gateway: "172.16.0.1",
+							Bridge:  "br2",
+						},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "VM with invalid IP in network interface",
+			vm: &v1alpha1.VirtualMachine{
+				ObjectMeta: v1alpha1.ObjectMeta{
+					Name: "invalid-ip-vm",
+				},
+				Spec: v1alpha1.VirtualMachineSpec{
+					VCPUs:     2,
+					MemoryGiB: 4,
+					BootDisk: v1alpha1.BootDiskSpec{
+						SizeGB: 20,
+						Image:  "/var/lib/libvirt/images/test.qcow2",
+					},
+					NetworkInterfaces: []v1alpha1.NetworkInterfaceSpec{
+						{
+							IP:      "not-an-ip-address",
+							Gateway: "10.0.0.1",
+							Bridge:  "br0",
+						},
+					},
+				},
+			},
+			wantErr: true,
+			errMsg:  "failed to calculate MAC address",
+		},
+		{
+			name: "VM with IPv6 address (unsupported)",
+			vm: &v1alpha1.VirtualMachine{
+				ObjectMeta: v1alpha1.ObjectMeta{
+					Name: "ipv6-vm",
+				},
+				Spec: v1alpha1.VirtualMachineSpec{
+					VCPUs:     2,
+					MemoryGiB: 4,
+					BootDisk: v1alpha1.BootDiskSpec{
+						SizeGB: 20,
+						Image:  "/var/lib/libvirt/images/test.qcow2",
+					},
+					NetworkInterfaces: []v1alpha1.NetworkInterfaceSpec{
+						{
+							IP:      "2001:db8::1/64",
+							Gateway: "2001:db8::ffff",
+							Bridge:  "br0",
+						},
+					},
+				},
+			},
+			wantErr: true,
+			errMsg:  "only IPv4 addresses are supported",
+		},
+		{
+			name: "VM with custom storage pool",
+			vm: &v1alpha1.VirtualMachine{
+				ObjectMeta: v1alpha1.ObjectMeta{
+					Name: "custom-pool-vm",
+				},
+				Spec: v1alpha1.VirtualMachineSpec{
+					VCPUs:       2,
+					MemoryGiB:   4,
+					StoragePool: "custom-pool",
+					BootDisk: v1alpha1.BootDiskSpec{
+						SizeGB: 20,
+						Image:  "/var/lib/libvirt/images/test.qcow2",
+					},
+					NetworkInterfaces: []v1alpha1.NetworkInterfaceSpec{
+						{
+							IP:      "10.0.0.10/24",
+							Gateway: "10.0.0.1",
+							Bridge:  "br0",
+						},
+					},
+				},
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Normalize config to set defaults
+			tt.vm.Normalize()
+
+			xml, err := GenerateDomainXML(tt.vm)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("GenerateDomainXML() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.wantErr {
+				if err != nil && tt.errMsg != "" && !strings.Contains(err.Error(), tt.errMsg) {
+					t.Errorf("GenerateDomainXML() error = %v, want error containing %q", err, tt.errMsg)
+				}
+				return
+			}
+
+			// Verify XML is not empty
+			if xml == "" {
+				t.Error("GenerateDomainXML() returned empty XML")
+				return
+			}
+
+			// Verify XML can be parsed back
+			var domain libvirtxml.Domain
+			if err := domain.Unmarshal(xml); err != nil {
+				t.Errorf("Generated XML cannot be unmarshaled: %v", err)
+				return
+			}
+
+			// Verify CPU mode if specified
+			if tt.vm.Spec.CPUMode != "" {
+				if domain.CPU == nil || domain.CPU.Mode != tt.vm.Spec.CPUMode {
+					t.Errorf("CPU mode = %v, want %v", domain.CPU.Mode, tt.vm.Spec.CPUMode)
+				}
+			}
+
+			// Verify custom storage pool if specified
+			if tt.vm.Spec.StoragePool != "" {
+				if len(domain.Devices.Disks) > 0 {
+					bootDisk := domain.Devices.Disks[0]
+					if bootDisk.Source != nil && bootDisk.Source.Volume != nil {
+						if bootDisk.Source.Volume.Pool != tt.vm.Spec.StoragePool {
+							t.Errorf("Boot disk pool = %v, want %v", bootDisk.Source.Volume.Pool, tt.vm.Spec.StoragePool)
+						}
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestCalculateMACFromIP_EdgeCases tests edge cases for MAC calculation
+func TestCalculateMACFromIP_EdgeCases(t *testing.T) {
+	tests := []struct {
+		name    string
+		ip      string
+		want    string
+		wantErr bool
+	}{
+		{
+			name:    "IP with CIDR",
+			ip:      "10.20.30.40/24",
+			want:    "be:ef:0a:14:1e:28",
+			wantErr: false,
+		},
+		{
+			name:    "IP without CIDR",
+			ip:      "192.168.1.100",
+			want:    "be:ef:c0:a8:01:64",
+			wantErr: false,
+		},
+		{
+			name:    "invalid IP",
+			ip:      "not-an-ip",
+			want:    "",
+			wantErr: true,
+		},
+		{
+			name:    "invalid CIDR",
+			ip:      "10.20.30.40/99",
+			want:    "",
+			wantErr: true,
+		},
+		{
+			name:    "IPv6 address",
+			ip:      "2001:db8::1",
+			want:    "",
+			wantErr: true,
+		},
+		{
+			name:    "IPv6 with CIDR",
+			ip:      "fe80::1/64",
+			want:    "",
+			wantErr: true,
+		},
+		{
+			name:    "edge IP 0.0.0.0",
+			ip:      "0.0.0.0/0",
+			want:    "be:ef:00:00:00:00",
+			wantErr: false,
+		},
+		{
+			name:    "edge IP 255.255.255.255",
+			ip:      "255.255.255.255/32",
+			want:    "be:ef:ff:ff:ff:ff",
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := calculateMACFromIP(tt.ip)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("calculateMACFromIP() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && got != tt.want {
+				t.Errorf("calculateMACFromIP() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestCalculateInterfaceNameFromIP_EdgeCases tests edge cases for interface name calculation
+func TestCalculateInterfaceNameFromIP_EdgeCases(t *testing.T) {
+	tests := []struct {
+		name    string
+		ip      string
+		want    string
+		wantErr bool
+	}{
+		{
+			name:    "IP with CIDR",
+			ip:      "10.20.30.40/24",
+			want:    "vm0a141e28",
+			wantErr: false,
+		},
+		{
+			name:    "IP without CIDR",
+			ip:      "192.168.1.100",
+			want:    "vmc0a80164",
+			wantErr: false,
+		},
+		{
+			name:    "invalid IP",
+			ip:      "invalid",
+			want:    "",
+			wantErr: true,
+		},
+		{
+			name:    "invalid CIDR",
+			ip:      "10.20.30.40/999",
+			want:    "",
+			wantErr: true,
+		},
+		{
+			name:    "IPv6 address",
+			ip:      "2001:db8::1",
+			want:    "",
+			wantErr: true,
+		},
+		{
+			name:    "IPv6 with CIDR",
+			ip:      "fe80::1/64",
+			want:    "",
+			wantErr: true,
+		},
+		{
+			name:    "edge IP 0.0.0.0",
+			ip:      "0.0.0.0/0",
+			want:    "vm00000000",
+			wantErr: false,
+		},
+		{
+			name:    "edge IP 255.255.255.255",
+			ip:      "255.255.255.255/32",
+			want:    "vmffffffff",
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := calculateInterfaceNameFromIP(tt.ip)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("calculateInterfaceNameFromIP() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && got != tt.want {
+				t.Errorf("calculateInterfaceNameFromIP() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

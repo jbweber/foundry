@@ -517,6 +517,163 @@ func TestGenerateNetworkConfig(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "invalid IP address format",
+			vm: &v1alpha1.VirtualMachine{
+				ObjectMeta: v1alpha1.ObjectMeta{
+					Name: "test-vm",
+				},
+				Spec: v1alpha1.VirtualMachineSpec{
+					NetworkInterfaces: []v1alpha1.NetworkInterfaceSpec{
+						{
+							IP:           "not-an-ip",
+							Gateway:      "10.20.30.1",
+							DefaultRoute: true,
+						},
+					},
+				},
+			},
+			expectErr: true,
+		},
+		{
+			name: "invalid CIDR format",
+			vm: &v1alpha1.VirtualMachine{
+				ObjectMeta: v1alpha1.ObjectMeta{
+					Name: "test-vm",
+				},
+				Spec: v1alpha1.VirtualMachineSpec{
+					NetworkInterfaces: []v1alpha1.NetworkInterfaceSpec{
+						{
+							IP:           "10.20.30.40/99",
+							Gateway:      "10.20.30.1",
+							DefaultRoute: true,
+						},
+					},
+				},
+			},
+			expectErr: true,
+		},
+		{
+			name: "IP without CIDR notation",
+			vm: &v1alpha1.VirtualMachine{
+				ObjectMeta: v1alpha1.ObjectMeta{
+					Name: "test-vm",
+				},
+				Spec: v1alpha1.VirtualMachineSpec{
+					NetworkInterfaces: []v1alpha1.NetworkInterfaceSpec{
+						{
+							IP:           "192.168.100.50",
+							Gateway:      "192.168.100.1",
+							DefaultRoute: true,
+						},
+					},
+				},
+			},
+			checkContent: func(t *testing.T, content string) {
+				var netConfig NetworkConfig
+				if err := yaml.Unmarshal([]byte(content), &netConfig); err != nil {
+					t.Fatalf("Failed to parse network-config YAML: %v", err)
+				}
+
+				eth0 := netConfig.Ethernets["eth0"]
+				// MAC should be calculated from the plain IP
+				if eth0.Match.MACAddress != "be:ef:c0:a8:64:32" {
+					t.Errorf("Expected MAC 'be:ef:c0:a8:64:32' for IP 192.168.100.50, got %q", eth0.Match.MACAddress)
+				}
+			},
+		},
+		{
+			name: "edge case IP - 0.0.0.0",
+			vm: &v1alpha1.VirtualMachine{
+				ObjectMeta: v1alpha1.ObjectMeta{
+					Name: "test-vm",
+				},
+				Spec: v1alpha1.VirtualMachineSpec{
+					NetworkInterfaces: []v1alpha1.NetworkInterfaceSpec{
+						{
+							IP:           "0.0.0.0/0",
+							Gateway:      "0.0.0.1",
+							DefaultRoute: true,
+						},
+					},
+				},
+			},
+			checkContent: func(t *testing.T, content string) {
+				var netConfig NetworkConfig
+				if err := yaml.Unmarshal([]byte(content), &netConfig); err != nil {
+					t.Fatalf("Failed to parse network-config YAML: %v", err)
+				}
+
+				eth0 := netConfig.Ethernets["eth0"]
+				if eth0.Match.MACAddress != "be:ef:00:00:00:00" {
+					t.Errorf("Expected MAC 'be:ef:00:00:00:00' for IP 0.0.0.0, got %q", eth0.Match.MACAddress)
+				}
+			},
+		},
+		{
+			name: "edge case IP - 255.255.255.255",
+			vm: &v1alpha1.VirtualMachine{
+				ObjectMeta: v1alpha1.ObjectMeta{
+					Name: "test-vm",
+				},
+				Spec: v1alpha1.VirtualMachineSpec{
+					NetworkInterfaces: []v1alpha1.NetworkInterfaceSpec{
+						{
+							IP:           "255.255.255.255/32",
+							Gateway:      "255.255.255.254",
+							DefaultRoute: true,
+						},
+					},
+				},
+			},
+			checkContent: func(t *testing.T, content string) {
+				var netConfig NetworkConfig
+				if err := yaml.Unmarshal([]byte(content), &netConfig); err != nil {
+					t.Fatalf("Failed to parse network-config YAML: %v", err)
+				}
+
+				eth0 := netConfig.Ethernets["eth0"]
+				if eth0.Match.MACAddress != "be:ef:ff:ff:ff:ff" {
+					t.Errorf("Expected MAC 'be:ef:ff:ff:ff:ff' for IP 255.255.255.255, got %q", eth0.Match.MACAddress)
+				}
+			},
+		},
+		{
+			name: "IPv6 address - should fail",
+			vm: &v1alpha1.VirtualMachine{
+				ObjectMeta: v1alpha1.ObjectMeta{
+					Name: "test-vm",
+				},
+				Spec: v1alpha1.VirtualMachineSpec{
+					NetworkInterfaces: []v1alpha1.NetworkInterfaceSpec{
+						{
+							IP:           "2001:db8::1",
+							Gateway:      "2001:db8::ff",
+							DefaultRoute: true,
+						},
+					},
+				},
+			},
+			expectErr: true,
+		},
+		{
+			name: "IPv6 with CIDR - should fail",
+			vm: &v1alpha1.VirtualMachine{
+				ObjectMeta: v1alpha1.ObjectMeta{
+					Name: "test-vm",
+				},
+				Spec: v1alpha1.VirtualMachineSpec{
+					NetworkInterfaces: []v1alpha1.NetworkInterfaceSpec{
+						{
+							IP:           "fe80::1/64",
+							Gateway:      "fe80::ff",
+							DefaultRoute: true,
+						},
+					},
+				},
+			},
+			expectErr: true,
+		},
 	}
 
 	for _, tt := range tests {

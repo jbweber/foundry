@@ -3,6 +3,7 @@ package cloudinit
 import (
 	"bytes"
 	"io"
+	"strings"
 	"testing"
 
 	"github.com/kdomanski/iso9660"
@@ -144,6 +145,94 @@ func TestGenerateISO(t *testing.T) {
 
 			// Verify the ISO structure
 			verifyISOStructure(t, isoBytes, tt.vm)
+		})
+	}
+}
+
+func TestGenerateISO_ErrorPropagation(t *testing.T) {
+	tests := []struct {
+		name      string
+		vm        *v1alpha1.VirtualMachine
+		wantErr   bool
+		errSubstr string // Substring that should appear in error
+	}{
+		{
+			name: "error from GenerateUserData - nil cloud-init with password",
+			vm: &v1alpha1.VirtualMachine{
+				ObjectMeta: v1alpha1.ObjectMeta{
+					Name: "test-vm",
+				},
+				Spec: v1alpha1.VirtualMachineSpec{
+					VCPUs:     2,
+					MemoryGiB: 4,
+					NetworkInterfaces: []v1alpha1.NetworkInterfaceSpec{
+						{
+							IP:           "10.0.1.10/24",
+							Gateway:      "10.0.1.1",
+							Bridge:       "br0",
+							DefaultRoute: true,
+						},
+					},
+				},
+			},
+			wantErr: false, // This should succeed - just testing the path
+		},
+		{
+			name: "error from GenerateNetworkConfig - no interfaces",
+			vm: &v1alpha1.VirtualMachine{
+				ObjectMeta: v1alpha1.ObjectMeta{
+					Name: "test-vm",
+				},
+				Spec: v1alpha1.VirtualMachineSpec{
+					VCPUs:             2,
+					MemoryGiB:         4,
+					NetworkInterfaces: []v1alpha1.NetworkInterfaceSpec{},
+				},
+			},
+			wantErr:   true,
+			errSubstr: "failed to generate network-config",
+		},
+		{
+			name: "error from GenerateNetworkConfig - invalid IP",
+			vm: &v1alpha1.VirtualMachine{
+				ObjectMeta: v1alpha1.ObjectMeta{
+					Name: "test-vm",
+				},
+				Spec: v1alpha1.VirtualMachineSpec{
+					VCPUs:     2,
+					MemoryGiB: 4,
+					NetworkInterfaces: []v1alpha1.NetworkInterfaceSpec{
+						{
+							IP:           "invalid-ip",
+							Gateway:      "10.0.1.1",
+							Bridge:       "br0",
+							DefaultRoute: true,
+						},
+					},
+				},
+			},
+			wantErr:   true,
+			errSubstr: "failed to generate network-config",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := GenerateISO(tt.vm)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("GenerateISO() expected error but got nil")
+					return
+				}
+				if tt.errSubstr != "" && !strings.Contains(err.Error(), tt.errSubstr) {
+					t.Errorf("GenerateISO() error = %v, want error containing %q", err.Error(), tt.errSubstr)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("GenerateISO() unexpected error: %v", err)
+				}
+			}
 		})
 	}
 }

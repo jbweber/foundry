@@ -302,3 +302,64 @@ func TestStateToString(t *testing.T) {
 		})
 	}
 }
+
+// TestMapStateToPhase tests VM phase mapping
+func TestMapStateToPhase(t *testing.T) {
+	tests := []struct {
+		state         int32
+		expectedPhase string
+	}{
+		{0, "Pending"},  // no state
+		{1, "Running"},  // running
+		{2, "Running"},  // blocked
+		{3, "Running"},  // paused
+		{4, "Stopping"}, // shutdown
+		{5, "Stopped"},  // shutoff
+		{6, "Failed"},   // crashed
+		{7, "Running"},  // pmsuspended
+		{99, "Pending"}, // unknown
+	}
+
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("state_%d", tt.state), func(t *testing.T) {
+			result := mapStateToPhase(tt.state)
+			if string(result) != tt.expectedPhase {
+				t.Errorf("mapStateToPhase(%d) = %s, want %s", tt.state, result, tt.expectedPhase)
+			}
+		})
+	}
+}
+
+// TestPrintVMs tests VM list printing
+func TestPrintVMs(t *testing.T) {
+	tests := []struct {
+		name string
+		vms  []VMInfo
+	}{
+		{
+			name: "empty list",
+			vms:  []VMInfo{},
+		},
+		{
+			name: "single VM",
+			vms: []VMInfo{
+				{Name: "test-vm", State: "running", Autostart: true, CPUs: 2, MemoryMB: 2048},
+			},
+		},
+		{
+			name: "multiple VMs",
+			vms: []VMInfo{
+				{Name: "vm1", State: "running", Autostart: true, CPUs: 4, MemoryMB: 4096},
+				{Name: "vm2", State: "shutoff", Autostart: false, CPUs: 2, MemoryMB: 2048},
+				{Name: "vm3", State: "paused", Autostart: true, CPUs: 1, MemoryMB: 1024},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Should not panic
+			PrintVMs(tt.vms)
+		})
+	}
+}
