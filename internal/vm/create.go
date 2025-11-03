@@ -13,6 +13,7 @@ import (
 	"github.com/jbweber/foundry/internal/cloudinit"
 	foundrylibvirt "github.com/jbweber/foundry/internal/libvirt"
 	"github.com/jbweber/foundry/internal/loader"
+	"github.com/jbweber/foundry/internal/metadata"
 	"github.com/jbweber/foundry/internal/storage"
 )
 
@@ -296,6 +297,13 @@ func createFromConfigWithDeps(ctx context.Context, vm *v1alpha1.VirtualMachine, 
 	log.Printf("Starting VM...")
 	if createErr = lv.DomainCreate(domain); createErr != nil {
 		return fmt.Errorf("failed to start domain: %w", createErr)
+	}
+
+	// Step 13: Store VM metadata in libvirt domain
+	log.Printf("Storing VM metadata...")
+	if createErr = metadata.Store(lv, domain, vm); createErr != nil {
+		log.Printf("Warning: failed to store VM metadata: %v", createErr)
+		// Don't fail the creation if metadata storage fails - VM is already running
 	}
 
 	log.Printf("VM '%s' created successfully!", vm.Name)

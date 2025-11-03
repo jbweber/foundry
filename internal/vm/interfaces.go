@@ -49,6 +49,12 @@ type libvirtClient interface {
 
 	// DomainUndefine undefines a domain
 	DomainUndefine(dom libvirt.Domain) error
+
+	// DomainSetMetadata sets custom metadata on a domain
+	DomainSetMetadata(dom libvirt.Domain, typ int32, metadata libvirt.OptString, key libvirt.OptString, uri libvirt.OptString, flags libvirt.DomainModificationImpact) error
+
+	// DomainGetMetadata retrieves custom metadata from a domain
+	DomainGetMetadata(dom libvirt.Domain, typ int32, uri libvirt.OptString, flags libvirt.DomainModificationImpact) (string, error)
 }
 
 // storageManager defines the storage operations needed for VM management.

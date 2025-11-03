@@ -13,6 +13,16 @@ import (
 	"github.com/jbweber/foundry/api/v1alpha1"
 )
 
+// LibvirtClient defines the minimal libvirt operations needed for metadata storage.
+// This allows for dependency injection and testing.
+type LibvirtClient interface {
+	// DomainSetMetadata sets custom metadata on a domain
+	DomainSetMetadata(dom libvirt.Domain, typ int32, metadata libvirt.OptString, key libvirt.OptString, uri libvirt.OptString, flags libvirt.DomainModificationImpact) error
+
+	// DomainGetMetadata retrieves custom metadata from a domain
+	DomainGetMetadata(dom libvirt.Domain, typ int32, uri libvirt.OptString, flags libvirt.DomainModificationImpact) (string, error)
+}
+
 const (
 	// MetadataNamespace is the XML namespace for Foundry metadata.
 	// This follows the pattern used by Kubernetes and other tools.
@@ -34,7 +44,7 @@ type FoundryMetadata struct {
 
 // Store saves the VirtualMachine spec to libvirt domain metadata.
 // This allows the spec to persist with the VM itself.
-func Store(l *libvirt.Libvirt, domain libvirt.Domain, vm *v1alpha1.VirtualMachine) error {
+func Store(l LibvirtClient, domain libvirt.Domain, vm *v1alpha1.VirtualMachine) error {
 	// Serialize the entire VirtualMachine (including TypeMeta, ObjectMeta, Spec) to YAML
 	yamlData, err := yaml.Marshal(vm)
 	if err != nil {
@@ -72,7 +82,7 @@ func Store(l *libvirt.Libvirt, domain libvirt.Domain, vm *v1alpha1.VirtualMachin
 
 // Load retrieves the VirtualMachine spec from libvirt domain metadata.
 // Returns the full VirtualMachine object with spec populated.
-func Load(l *libvirt.Libvirt, domain libvirt.Domain) (*v1alpha1.VirtualMachine, error) {
+func Load(l LibvirtClient, domain libvirt.Domain) (*v1alpha1.VirtualMachine, error) {
 	// Get metadata from domain
 	xmlStr, err := l.DomainGetMetadata(
 		domain,
@@ -101,7 +111,7 @@ func Load(l *libvirt.Libvirt, domain libvirt.Domain) (*v1alpha1.VirtualMachine, 
 
 // Update updates the stored metadata for an existing VM.
 // This is useful when the spec changes (e.g., after editing).
-func Update(l *libvirt.Libvirt, domain libvirt.Domain, vm *v1alpha1.VirtualMachine) error {
+func Update(l LibvirtClient, domain libvirt.Domain, vm *v1alpha1.VirtualMachine) error {
 	// Increment generation to track changes
 	vm.Generation++
 
@@ -110,7 +120,7 @@ func Update(l *libvirt.Libvirt, domain libvirt.Domain, vm *v1alpha1.VirtualMachi
 
 // Delete removes Foundry metadata from a domain.
 // This is typically called during VM destruction cleanup.
-func Delete(l *libvirt.Libvirt, domain libvirt.Domain) error {
+func Delete(l LibvirtClient, domain libvirt.Domain) error {
 	// Setting empty string with flags=1 removes the metadata
 	err := l.DomainSetMetadata(
 		domain,
@@ -129,7 +139,7 @@ func Delete(l *libvirt.Libvirt, domain libvirt.Domain) error {
 }
 
 // Exists checks if Foundry metadata exists for a domain.
-func Exists(l *libvirt.Libvirt, domain libvirt.Domain) bool {
+func Exists(l LibvirtClient, domain libvirt.Domain) bool {
 	_, err := l.DomainGetMetadata(
 		domain,
 		int32(libvirt.DomainMetadataElement),

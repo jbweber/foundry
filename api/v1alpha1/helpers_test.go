@@ -57,10 +57,10 @@ func TestNewVirtualMachine(t *testing.T) {
 
 func TestSetDefaultAPIVersion(t *testing.T) {
 	tests := []struct {
-		name           string
-		vm             *VirtualMachine
-		expectedAPI    string
-		expectedKind   string
+		name         string
+		vm           *VirtualMachine
+		expectedAPI  string
+		expectedKind string
 	}{
 		{
 			name: "missing both",

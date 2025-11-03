@@ -27,6 +27,8 @@ type mockLibvirtClient struct {
 	domainDestroyFunc         func(dom libvirt.Domain) error
 	domainUndefineFlagsFunc   func(dom libvirt.Domain, flags libvirt.DomainUndefineFlagsValues) error
 	domainUndefineFunc        func(dom libvirt.Domain) error
+	domainSetMetadataFunc     func(dom libvirt.Domain, typ int32, metadata libvirt.OptString, key libvirt.OptString, uri libvirt.OptString, flags libvirt.DomainModificationImpact) error
+	domainGetMetadataFunc     func(dom libvirt.Domain, typ int32, uri libvirt.OptString, flags libvirt.DomainModificationImpact) (string, error)
 
 	// Call tracking
 	connectListAllDomainsCalls int
@@ -41,6 +43,8 @@ type mockLibvirtClient struct {
 	domainDestroyCalls         []libvirt.Domain
 	domainUndefineFlagsCalls   []libvirt.Domain
 	domainUndefineCalls        []libvirt.Domain
+	domainSetMetadataCalls     []libvirt.Domain
+	domainGetMetadataCalls     []libvirt.Domain
 }
 
 // newMockLibvirtClient creates a new mock libvirt client with default behavior.
@@ -111,6 +115,16 @@ func newMockLibvirtClient() *mockLibvirtClient {
 	// Default: undefine succeeds
 	m.domainUndefineFunc = func(dom libvirt.Domain) error {
 		return nil
+	}
+
+	// Default: set metadata succeeds
+	m.domainSetMetadataFunc = func(dom libvirt.Domain, typ int32, metadata libvirt.OptString, key libvirt.OptString, uri libvirt.OptString, flags libvirt.DomainModificationImpact) error {
+		return nil
+	}
+
+	// Default: get metadata returns empty (no metadata set)
+	m.domainGetMetadataFunc = func(dom libvirt.Domain, typ int32, uri libvirt.OptString, flags libvirt.DomainModificationImpact) (string, error) {
+		return "", fmt.Errorf("no metadata found")
 	}
 
 	return m
@@ -198,6 +212,20 @@ func (m *mockLibvirtClient) DomainUndefine(dom libvirt.Domain) error {
 	defer m.mu.Unlock()
 	m.domainUndefineCalls = append(m.domainUndefineCalls, dom)
 	return m.domainUndefineFunc(dom)
+}
+
+func (m *mockLibvirtClient) DomainSetMetadata(dom libvirt.Domain, typ int32, metadata libvirt.OptString, key libvirt.OptString, uri libvirt.OptString, flags libvirt.DomainModificationImpact) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.domainSetMetadataCalls = append(m.domainSetMetadataCalls, dom)
+	return m.domainSetMetadataFunc(dom, typ, metadata, key, uri, flags)
+}
+
+func (m *mockLibvirtClient) DomainGetMetadata(dom libvirt.Domain, typ int32, uri libvirt.OptString, flags libvirt.DomainModificationImpact) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.domainGetMetadataCalls = append(m.domainGetMetadataCalls, dom)
+	return m.domainGetMetadataFunc(dom, typ, uri, flags)
 }
 
 // mockStorageManager is a mock implementation of the storageManager interface for testing.
