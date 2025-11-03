@@ -37,6 +37,18 @@ archives:
 checksum:
   name_template: "checksums.txt"
 
+# SBOM (Software Bill of Materials) generation using Syft
+# Generates SPDX-format SBOMs for supply chain transparency
+sboms:
+  - id: archive-sbom
+    artifacts: archive
+    documents:
+      - "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}_sbom.spdx.json"
+  - id: binary-sbom
+    artifacts: binary
+    documents:
+      - "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}_bin_sbom.spdx.json"
+
 changelog:
   sort: asc
   use: github

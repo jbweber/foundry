@@ -494,7 +494,8 @@ foundry pool list
 foundry pool info <pool-name>
 
 # Add custom pool
-foundry pool add <name> --type dir --path /mnt/ssd/foundry
+foundry pool add <name> <type> <path>
+foundry pool add my-pool dir /mnt/ssd/foundry
 
 # Delete custom pool (prevents deleting foundry-images, foundry-vms)
 foundry pool delete <name> [--force]
@@ -509,13 +510,14 @@ foundry pool refresh <name>
 foundry image list
 
 # Import local image file
-foundry image import <file-path> --name <image-name>
+foundry image import <source-path> <name>
+foundry image import /path/to/fedora-43.qcow2 fedora-43.qcow2
 
-# Download and import image from URL
+# Download and import image from URL (TODO: not yet implemented)
 foundry image pull <url> --name <image-name> [--checksum sha256:...]
 
-# Delete base image (checks if in use)
-foundry image delete <image-name> [--force]
+# Delete base image
+foundry image delete <image-name>
 
 # Show image details and usage
 foundry image info <image-name>
