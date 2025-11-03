@@ -725,3 +725,113 @@ This keeps tests maintainable while providing confidence in the system.
 - Both manage libvirt domains
 - No state file conflicts
 - Eventual goal: Replace Ansible for VM management
+
+## Implementation Notes
+
+### go-libvirt Library Quirks
+
+When working with `github.com/digitalocean/go-libvirt`, be aware of these implementation details:
+
+#### OptString Type
+The `libvirt.OptString` type is defined as `type OptString []string` (a string slice), not a string wrapper.
+
+**Usage:**
+```go
+// Correct - create with slice literal syntax
+libvirt.OptString{"value"}
+libvirt.OptString{MetadataNamespace}
+
+// Access - use slice index
+if len(optString) > 0 {
+    value := optString[0]
+}
+```
+
+**Common mistake:**
+```go
+// WRONG - doesn't compile
+optString.String  // no such field or method
+```
+
+**Impact on testing:**
+When creating mocks for `LibvirtClient` interface methods that use `OptString` parameters, extract values using slice indexing:
+
+```go
+func (m *mockLibvirtClient) DomainSetMetadata(
+    dom libvirt.Domain,
+    typ int32,
+    metadata libvirt.OptString,
+    key libvirt.OptString,
+    uri libvirt.OptString,
+    flags libvirt.DomainModificationImpact,
+) error {
+    // Extract values safely
+    if len(metadata) > 0 {
+        m.lastSetMetadata = metadata[0]
+    }
+    if len(key) > 0 {
+        m.lastSetKey = key[0]
+    }
+    // ...
+}
+```
+
+#### Domain Type
+The `libvirt.Domain` type is a simple struct, not an interface. This makes it easy to use in tests without complex mocking.
+
+#### Error Handling
+Libvirt errors are returned as Go errors. Check specific error conditions using string matching when needed:
+```go
+_, err := l.DomainGetMetadata(...)
+if err != nil && strings.Contains(err.Error(), "not found") {
+    // Handle "not found" case
+}
+```
+
+### YAML/XML Marshaling Edge Cases
+
+When storing VM metadata using `yaml.Marshal()` and `xml.Marshal()`:
+
+- **Nil values**: `yaml.Marshal(nil)` returns `"null\n"` without error
+- **Empty structs**: Both marshalers handle empty structs gracefully
+- **Marshal errors**: Practically impossible to trigger for well-formed Go structs
+- **Test coverage**: Don't worry about covering marshal error paths for standard types
+
+This is why the `metadata.Store()` function achieves only 81.8% coverage - the error paths for YAML/XML marshaling failures (lines 51, 63 in storage.go) are unreachable in practice with valid struct types.
+
+### Embedded Field Access Pattern
+
+The `VirtualMachine` type embeds `TypeMeta` and `ObjectMeta`, allowing direct access to their fields without qualification.
+
+**Correct usage:**
+```go
+vm := &v1alpha1.VirtualMachine{}
+vm.Name = "my-vm"                    // Direct access
+vm.Labels = map[string]string{...}   // Direct access
+vm.Annotations = map[string]string{...}
+vm.Generation = 1
+```
+
+**Incorrect usage (triggers linter warning QF1008):**
+```go
+vm.ObjectMeta.Name = "my-vm"         // Redundant embedded field qualifier
+vm.ObjectMeta.Labels = ...           // Triggers staticcheck warning
+```
+
+**Rationale:**
+- Go's embedded fields promote their methods and exported fields to the embedding struct
+- Accessing through the embedded field name is redundant and flagged by `staticcheck`
+- This pattern applies to all embedded fields in the codebase
+
+**In tests:**
+```go
+// Good
+if loadedVM.Name != originalVM.Name {
+    t.Errorf("Name mismatch: expected %q, got %q", originalVM.Name, loadedVM.Name)
+}
+
+// Bad - triggers QF1008
+if loadedVM.ObjectMeta.Name != originalVM.ObjectMeta.Name {
+    t.Errorf("Name mismatch...")
+}
+```
