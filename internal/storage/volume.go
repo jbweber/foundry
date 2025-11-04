@@ -172,6 +172,9 @@ func generateVolumeXML(_ string, spec VolumeSpec, _ *Manager) (string, error) {
 	// Convert capacity from GB to bytes
 	capacityBytes := spec.CapacityGB * 1024 * 1024 * 1024
 
+	// Get the QEMU user/group IDs for this system
+	uid, gid, _ := GetQEMUUserGroup()
+
 	vol := &libvirtxml.StorageVolume{
 		Type: "file",
 		Name: spec.Name,
@@ -184,8 +187,8 @@ func generateVolumeXML(_ string, spec VolumeSpec, _ *Manager) (string, error) {
 				Type: string(spec.Format),
 			},
 			Permissions: &libvirtxml.StorageVolumeTargetPermissions{
-				Owner: "107", // qemu user
-				Group: "107", // qemu group
+				Owner: uid,
+				Group: gid,
 				Mode:  "0644",
 			},
 		},

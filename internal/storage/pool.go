@@ -226,14 +226,17 @@ func (m *Manager) RefreshPool(ctx context.Context, name string) error {
 
 // generateDirPoolXML generates XML for a directory-based storage pool.
 func generateDirPoolXML(name, path string) (string, error) {
+	// Get the QEMU user/group IDs for this system
+	uid, gid, _ := GetQEMUUserGroup()
+
 	pool := &libvirtxml.StoragePool{
 		Type: "dir",
 		Name: name,
 		Target: &libvirtxml.StoragePoolTarget{
 			Path: path,
 			Permissions: &libvirtxml.StoragePoolTargetPermissions{
-				Owner: "107", // qemu user (typically uid 107)
-				Group: "107", // qemu group (typically gid 107)
+				Owner: uid,
+				Group: gid,
 				Mode:  "0755",
 			},
 		},
