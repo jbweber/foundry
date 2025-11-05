@@ -880,3 +880,110 @@ if loadedVM.ObjectMeta.Name != originalVM.ObjectMeta.Name {
     t.Errorf("Name mismatch...")
 }
 ```
+
+## Code Architecture
+
+### Interface Boundaries
+
+Foundry uses **targeted interfaces** following the Interface Segregation Principle for clean separation between domain logic and infrastructure:
+
+- **`internal/libvirt.VMClient`** (12 methods) - VM lifecycle operations (define, start, stop, destroy, query state)
+- **`internal/libvirt.StorageClient`** (18 methods) - Pool and volume management (create pools/volumes, upload data)
+- **`internal/libvirt.MetadataClient`** (2 methods) - Domain metadata persistence (get/set VM specs in libvirt)
+
+**Design Rationale:**
+- **Interface Segregation**: Analysis showed 0% overlap between VM and storage operations in practice
+- **100% utilization**: Each interface is used at 100% efficiency (no unused methods)
+- **Testing simplicity**: Mocks only implement needed methods (~230 lines vs ~500+ for fat interface)
+- **Future flexibility**: K8s controller can implement subsets as needed
+
+**Current Implementation (Phase 1):**
+These are **thin wrapper interfaces** that mirror `go-libvirt` method signatures:
+```go
+type VMClient interface {
+    DomainLookupByName(name string) (libvirt.Domain, error)  // Still exposes libvirt types
+    DomainDefineXML(xml string) (libvirt.Domain, error)
+    // ... 10 more methods
+}
+```
+
+**Future Enhancement (Task 32 - Backlog):**
+Migrate to **true repository pattern** that returns our domain types:
+```go
+type VMRepository interface {
+    Get(ctx context.Context, name string) (*v1alpha1.VirtualMachine, error)  // Returns OUR types
+    Create(ctx context.Context, vm *v1alpha1.VirtualMachine) error
+    Delete(ctx context.Context, name string) error
+}
+```
+
+This requires moving XML generation into the adapter layer and adding translation logic. Deferred until K8s controller work begins.
+
+### Naming Conventions
+
+Infrastructure-level resource naming lives in `internal/naming/`:
+- **`MACFromIP(ip)`** - Calculate MAC address from IP (RFC 2731 local assignment prefix: `be:ef:XX:XX:XX:XX`)
+- **`InterfaceNameFromIP(ip)`** - Calculate tap interface name (`vm{hex}`, e.g., `vm0a371616`)
+- **`VolumeNameBoot(vmName)`** - Boot disk volume name (`{vmName}_boot`)
+- **`VolumeNameData(vmName, device)`** - Data disk volume name (`{vmName}_data-vdb`)
+- **`VolumeNameCloudInit(vmName)`** - Cloud-init ISO name (`{vmName}_cloudinit`)
+
+**Why `internal/naming/`?**
+- Infrastructure concerns (encoding rules, not business logic)
+- Version-independent (won't change across API versions like v1alpha2)
+- Not part of public API contract
+- Previously duplicated across 3 packages - now consolidated
+
+### Package Responsibilities
+
+| Package | Purpose | Key Types/Functions |
+|---------|---------|-------------------|
+| `api/v1alpha1/` | K8s-style API types | `VirtualMachine`, `VirtualMachineSpec`, `VirtualMachineStatus` |
+| `cmd/foundry/` | CLI commands | `create`, `destroy`, `list`, `get`, `pool`, `image`, `storage` |
+| `internal/vm/` | VM orchestration workflows | `Create()`, `Destroy()`, `List()`, `Get()` - high-level operations |
+| `internal/libvirt/` | Libvirt client interfaces + XML generation | `VMClient`, `StorageClient`, `MetadataClient`, `GenerateDomainXML()` |
+| `internal/storage/` | Storage pool/volume management | `Manager` - pool/volume CRUD, image import |
+| `internal/naming/` | Resource naming conventions | MAC/interface/volume naming functions |
+| `internal/cloudinit/` | Cloud-init generation | `GenerateUserData()`, `GenerateNetworkConfig()`, `GenerateISO()` |
+| `internal/metadata/` | VM spec persistence | `Store()`, `Load()` - persist specs in libvirt metadata |
+| `internal/status/` | Status/condition management | `SetCondition()`, `SetPhase()` - K8s-style status updates |
+| `internal/output/` | Output formatters | `TableFormatter`, `YAMLFormatter`, `JSONFormatter` |
+| `internal/loader/` | YAML loading/validation | `LoadFromFile()`, `SaveToFile()` |
+
+**Dependency Flow** (following Clean Architecture principles):
+```
+cmd/foundry/        → (uses)
+internal/vm/        → (uses)
+internal/libvirt/   → (implements interfaces, calls)
+go-libvirt          → (external dependency)
+```
+
+All packages depend on `api/v1alpha1/` for domain types. No circular dependencies.
+
+### Testing Approach
+
+**Interface-Based Dependency Injection:**
+- Key packages (`internal/vm/`, `internal/storage/`) accept interfaces, not concrete types
+- Test files include mock implementations (e.g., `mocks_test.go`)
+- Integration tests check real libvirt behavior, unit tests use mocks
+
+**Coverage Targets:**
+- Pure functions (naming, cloudinit): 100%
+- Domain logic (vm, status): 85%+
+- Infrastructure adapters (libvirt, storage): 80%+
+
+**Example - Testing VM Creation:**
+```go
+func TestCreateVM(t *testing.T) {
+    mockVM := &mockVMClient{}      // Implements VMClient interface
+    mockStorage := &mockStorageManager{}
+
+    err := createFromConfigWithDeps(ctx, vm, mockVM, mockStorage)
+    // Assert orchestration logic without real libvirt
+}
+```
+
+This architecture enables:
+- Fast unit tests (no libvirt required)
+- Integration tests when needed (real libvirt connection)
+- Future alternative implementations (remote libvirt, cloud providers)

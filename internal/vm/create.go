@@ -107,19 +107,22 @@ func Create(ctx context.Context, configPath string) error {
 func CreateFromConfig(ctx context.Context, vm *v1alpha1.VirtualMachine) error {
 	// Connect to libvirt
 	log.Printf("Connecting to libvirt...")
-	libvirtClient, err := foundrylibvirt.ConnectWithContext(ctx, "", 0)
+	LibvirtClient, err := foundrylibvirt.ConnectWithContext(ctx, "", 0)
 	if err != nil {
 		return fmt.Errorf("failed to connect to libvirt: %w", err)
 	}
 	defer func() {
-		if err := libvirtClient.Close(); err != nil {
+		if err := LibvirtClient.Close(); err != nil {
 			log.Printf("Warning: failed to close libvirt connection: %v", err)
 		}
 	}()
 
 	// Create storage manager
 	log.Printf("Initializing storage manager...")
-	storageMgr := storage.NewManager(libvirtClient.Libvirt())
+	storageMgr := storage.NewManager(LibvirtClient.Libvirt())
+
+	// Create metadata client
+	metaClient := metadata.NewClient(LibvirtClient.Libvirt())
 
 	// Ensure default pools exist
 	log.Printf("Ensuring default storage pools exist...")
@@ -128,12 +131,12 @@ func CreateFromConfig(ctx context.Context, vm *v1alpha1.VirtualMachine) error {
 	}
 
 	// Delegate to internal function with dependencies
-	return createFromConfigWithDeps(ctx, vm, libvirtClient.Libvirt(), storageMgr)
+	return createFromConfigWithDeps(ctx, vm, LibvirtClient.Libvirt(), storageMgr, metaClient)
 }
 
 // createFromConfigWithDeps creates a VM with injected dependencies.
 // This allows for testing by accepting interfaces instead of concrete types.
-func createFromConfigWithDeps(ctx context.Context, vm *v1alpha1.VirtualMachine, lv libvirtClient, sm storageManager) error {
+func createFromConfigWithDeps(ctx context.Context, vm *v1alpha1.VirtualMachine, lv LibvirtClient, sm storageManager, mc *metadata.Client) error {
 	// State tracking for cleanup
 	var (
 		domainDefined  bool
@@ -302,7 +305,7 @@ func createFromConfigWithDeps(ctx context.Context, vm *v1alpha1.VirtualMachine, 
 
 	// Step 13: Store VM metadata in libvirt domain
 	log.Printf("Storing VM metadata...")
-	if createErr = metadata.Store(lv, domain, vm); createErr != nil {
+	if createErr = mc.Store(domain, vm); createErr != nil {
 		log.Printf("Warning: failed to store VM metadata: %v", createErr)
 		// Don't fail the creation if metadata storage fails - VM is already running
 	}
@@ -316,7 +319,7 @@ func createFromConfigWithDeps(ctx context.Context, vm *v1alpha1.VirtualMachine, 
 //
 // This is best-effort: it logs errors but continues trying to clean up
 // as much as possible. It never returns an error.
-func cleanupWithDeps(ctx context.Context, vm *v1alpha1.VirtualMachine, sm storageManager, lv libvirtClient, domainDefined, storageCreated bool) {
+func cleanupWithDeps(ctx context.Context, vm *v1alpha1.VirtualMachine, sm storageManager, lv LibvirtClient, domainDefined, storageCreated bool) {
 	log.Printf("Cleaning up after failed VM creation...")
 
 	// Clean up libvirt domain if it was defined

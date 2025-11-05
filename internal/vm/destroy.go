@@ -40,19 +40,19 @@ const (
 func Destroy(ctx context.Context, vmName string) error {
 	// Connect to libvirt
 	log.Printf("Connecting to libvirt...")
-	libvirtClient, err := foundrylibvirt.ConnectWithContext(ctx, "", 0)
+	LibvirtClient, err := foundrylibvirt.ConnectWithContext(ctx, "", 0)
 	if err != nil {
 		return fmt.Errorf("failed to connect to libvirt: %w", err)
 	}
 	defer func() {
-		if err := libvirtClient.Close(); err != nil {
+		if err := LibvirtClient.Close(); err != nil {
 			log.Printf("Warning: failed to close libvirt connection: %v", err)
 		}
 	}()
 
 	// Create storage manager
 	log.Printf("Initializing storage manager...")
-	storageMgr := storage.NewManager(libvirtClient.Libvirt())
+	storageMgr := storage.NewManager(LibvirtClient.Libvirt())
 
 	// Ensure default pools exist (needed for volume listing)
 	log.Printf("Ensuring default storage pools exist...")
@@ -61,12 +61,12 @@ func Destroy(ctx context.Context, vmName string) error {
 	}
 
 	// Delegate to internal function with dependencies
-	return destroyWithDeps(ctx, vmName, libvirtClient.Libvirt(), storageMgr)
+	return destroyWithDeps(ctx, vmName, LibvirtClient.Libvirt(), storageMgr)
 }
 
 // destroyWithDeps destroys a VM with injected dependencies.
 // This allows for testing by accepting interfaces instead of concrete types.
-func destroyWithDeps(ctx context.Context, vmName string, lv libvirtClient, sm storageManager) error {
+func destroyWithDeps(ctx context.Context, vmName string, lv LibvirtClient, sm storageManager) error {
 	// Step 1: Check if VM exists
 	log.Printf("Looking up VM '%s'...", vmName)
 	domain, err := lv.DomainLookupByName(vmName)

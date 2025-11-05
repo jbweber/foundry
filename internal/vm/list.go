@@ -31,23 +31,23 @@ type VMInfo struct {
 func List(ctx context.Context) ([]VMInfo, error) {
 	// Connect to libvirt
 	log.Printf("Connecting to libvirt...")
-	libvirtClient, err := foundrylibvirt.ConnectWithContext(ctx, "", 0)
+	LibvirtClient, err := foundrylibvirt.ConnectWithContext(ctx, "", 0)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to libvirt: %w", err)
 	}
 	defer func() {
-		if err := libvirtClient.Close(); err != nil {
+		if err := LibvirtClient.Close(); err != nil {
 			log.Printf("Warning: failed to close libvirt connection: %v", err)
 		}
 	}()
 
 	// Delegate to internal function with dependencies
-	return listWithDeps(ctx, libvirtClient.Libvirt())
+	return listWithDeps(ctx, LibvirtClient.Libvirt())
 }
 
 // listWithDeps lists VMs with injected dependencies.
 // This allows for testing by accepting interfaces instead of concrete types.
-func listWithDeps(_ context.Context, lv libvirtClient) ([]VMInfo, error) {
+func listWithDeps(_ context.Context, lv LibvirtClient) ([]VMInfo, error) {
 	// List all domains (running and stopped)
 	// NeedResults: 1 means populate the domains slice
 	// Flags: 0 means all domains (active and inactive)
@@ -76,7 +76,7 @@ func listWithDeps(_ context.Context, lv libvirtClient) ([]VMInfo, error) {
 }
 
 // getDomainInfo gets detailed information about a single domain.
-func getDomainInfo(lv libvirtClient, domain libvirt.Domain) (VMInfo, error) {
+func getDomainInfo(lv LibvirtClient, domain libvirt.Domain) (VMInfo, error) {
 	// Get domain state
 	state, _, err := lv.DomainGetState(domain, 0)
 	if err != nil {
@@ -169,21 +169,21 @@ func PrintVMs(vms []VMInfo) {
 func ListVMs(ctx context.Context) ([]*v1alpha1.VirtualMachine, error) {
 	// Connect to libvirt
 	log.Printf("Connecting to libvirt...")
-	libvirtClient, err := foundrylibvirt.ConnectWithContext(ctx, "", 0)
+	LibvirtClient, err := foundrylibvirt.ConnectWithContext(ctx, "", 0)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to libvirt: %w", err)
 	}
 	defer func() {
-		if err := libvirtClient.Close(); err != nil {
+		if err := LibvirtClient.Close(); err != nil {
 			log.Printf("Warning: failed to close libvirt connection: %v", err)
 		}
 	}()
 
-	return listVMsWithDeps(ctx, libvirtClient.Libvirt())
+	return listVMsWithDeps(ctx, LibvirtClient.Libvirt())
 }
 
 // listVMsWithDeps lists VMs with injected dependencies.
-func listVMsWithDeps(_ context.Context, lv libvirtClient) ([]*v1alpha1.VirtualMachine, error) {
+func listVMsWithDeps(_ context.Context, lv LibvirtClient) ([]*v1alpha1.VirtualMachine, error) {
 	// List all domains (running and stopped)
 	domains, _, err := lv.ConnectListAllDomains(1, 0)
 	if err != nil {
@@ -201,7 +201,7 @@ func listVMsWithDeps(_ context.Context, lv libvirtClient) ([]*v1alpha1.VirtualMa
 		// Convert interface to *libvirt.Libvirt for metadata operations
 		libvirtPtr, ok := lv.(*libvirt.Libvirt)
 		if !ok {
-			log.Printf("Warning: cannot convert libvirtClient to *libvirt.Libvirt")
+			log.Printf("Warning: cannot convert LibvirtClient to *libvirt.Libvirt")
 			continue
 		}
 
@@ -220,7 +220,8 @@ func listVMsWithDeps(_ context.Context, lv libvirtClient) ([]*v1alpha1.VirtualMa
 // its status from the current domain state.
 func getVirtualMachine(lv *libvirt.Libvirt, domain libvirt.Domain) (*v1alpha1.VirtualMachine, error) {
 	// Try to load metadata first
-	vm, err := metadata.Load(lv, domain)
+	metaClient := metadata.NewClient(lv)
+	vm, err := metaClient.Load(domain)
 	if err != nil {
 		// If metadata doesn't exist, create a minimal VM object
 		// This handles VMs not created by Foundry
@@ -299,22 +300,22 @@ func mapStateToPhase(state int32) v1alpha1.VMPhase {
 // GetVM retrieves a single VM by name.
 func GetVM(ctx context.Context, name string) (*v1alpha1.VirtualMachine, error) {
 	// Connect to libvirt
-	libvirtClient, err := foundrylibvirt.ConnectWithContext(ctx, "", 0)
+	LibvirtClient, err := foundrylibvirt.ConnectWithContext(ctx, "", 0)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to libvirt: %w", err)
 	}
 	defer func() {
-		if err := libvirtClient.Close(); err != nil {
+		if err := LibvirtClient.Close(); err != nil {
 			log.Printf("Warning: failed to close libvirt connection: %v", err)
 		}
 	}()
 
 	// Look up domain by name
-	domain, err := libvirtClient.Libvirt().DomainLookupByName(name)
+	domain, err := LibvirtClient.Libvirt().DomainLookupByName(name)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find VM %s: %w", name, err)
 	}
 
 	// Get VM with populated status
-	return getVirtualMachine(libvirtClient.Libvirt(), domain)
+	return getVirtualMachine(LibvirtClient.Libvirt(), domain)
 }

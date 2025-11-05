@@ -8,7 +8,9 @@ import (
 	"github.com/digitalocean/go-libvirt"
 )
 
-// LibvirtClient is the interface for libvirt operations.
+// LibvirtClient is the interface for libvirt operations needed by the storage package.
+// This interface is defined on the consumer side (this package) following Go best practices.
+// The concrete implementation is *libvirt.Libvirt from github.com/digitalocean/go-libvirt.
 // This allows for dependency injection and testing.
 type LibvirtClient interface {
 	StoragePoolLookupByName(Name string) (libvirt.StoragePool, error)
@@ -37,6 +39,7 @@ type Manager struct {
 }
 
 // NewManager creates a new storage manager.
+// Accepts any type implementing LibvirtClient (both *libvirt.Libvirt and test mocks).
 func NewManager(client LibvirtClient) *Manager {
 	return &Manager{
 		client: client,

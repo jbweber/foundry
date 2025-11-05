@@ -7,6 +7,7 @@ import (
 
 	"github.com/digitalocean/go-libvirt"
 
+	"github.com/jbweber/foundry/internal/metadata"
 	"github.com/jbweber/foundry/internal/storage"
 )
 
@@ -345,4 +346,10 @@ func (m *mockStorageManager) ListVolumes(ctx context.Context, poolName string) (
 	defer m.mu.Unlock()
 	m.listVolumesCalls = append(m.listVolumesCalls, poolName)
 	return m.listVolumesFunc(ctx, poolName)
+}
+
+// newMockMetadataClient creates a mock metadata.Client for testing.
+// Uses metadata.NewClient with our mock which implements metadata.LibvirtClient.
+func newMockMetadataClient(lv *mockLibvirtClient) *metadata.Client {
+	return metadata.NewClient(lv)
 }

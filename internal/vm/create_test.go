@@ -80,7 +80,7 @@ func TestCreateFromConfigWithDeps_Success(t *testing.T) {
 			lv := newMockLibvirtClient()
 			sm := newMockStorageManager()
 
-			err := createFromConfigWithDeps(ctx, tt.vm, lv, sm)
+			err := createFromConfigWithDeps(ctx, tt.vm, lv, sm, newMockMetadataClient(lv))
 			if err != nil {
 				t.Fatalf("expected success, got error: %v", err)
 			}
@@ -154,7 +154,7 @@ func TestCreateFromConfigWithDeps_PreflightChecksFail(t *testing.T) {
 			sm := newMockStorageManager()
 			tt.setupMock(lv, sm)
 
-			err := createFromConfigWithDeps(ctx, vm, lv, sm)
+			err := createFromConfigWithDeps(ctx, vm, lv, sm, newMockMetadataClient(lv))
 
 			// Verify error occurred
 			if err == nil {
@@ -199,7 +199,7 @@ func TestCreateFromConfigWithDeps_StorageFailures(t *testing.T) {
 			sm := newMockStorageManager()
 			tt.setupMock(sm)
 
-			err := createFromConfigWithDeps(ctx, tt.vm, lv, sm)
+			err := createFromConfigWithDeps(ctx, tt.vm, lv, sm, newMockMetadataClient(lv))
 
 			if err == nil {
 				t.Fatal("expected error, got nil")
@@ -268,7 +268,7 @@ func TestCreateFromConfigWithDeps_LibvirtFailures(t *testing.T) {
 			sm := newMockStorageManager()
 			tt.setupMock(lv)
 
-			err := createFromConfigWithDeps(ctx, vm, lv, sm)
+			err := createFromConfigWithDeps(ctx, vm, lv, sm, newMockMetadataClient(lv))
 
 			if err == nil {
 				t.Fatal("expected error, got nil")
@@ -640,7 +640,7 @@ func TestCreateFromConfigWithDeps_DataDiskFailure(t *testing.T) {
 		return nil
 	}
 
-	err := createFromConfigWithDeps(ctx, vm, lv, sm)
+	err := createFromConfigWithDeps(ctx, vm, lv, sm, newMockMetadataClient(lv))
 
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -696,7 +696,7 @@ func TestCreateFromConfigWithDeps_CloudInitFailures(t *testing.T) {
 			sm := newMockStorageManager()
 			tt.setupMock(sm)
 
-			err := createFromConfigWithDeps(ctx, vm, lv, sm)
+			err := createFromConfigWithDeps(ctx, vm, lv, sm, newMockMetadataClient(lv))
 
 			if err == nil {
 				t.Fatal("expected error, got nil")
@@ -762,7 +762,7 @@ func TestCreateFromConfigWithDeps_ImagePathHandling(t *testing.T) {
 			sm := newMockStorageManager()
 			tt.setupMock(sm)
 
-			err := createFromConfigWithDeps(ctx, vm, lv, sm)
+			err := createFromConfigWithDeps(ctx, vm, lv, sm, newMockMetadataClient(lv))
 
 			if tt.wantErr == "" {
 				if err != nil {
@@ -791,7 +791,7 @@ func TestCreateFromConfigWithDeps_VolumeExistsCheckError(t *testing.T) {
 		return false, errors.New("volume check failed")
 	}
 
-	err := createFromConfigWithDeps(ctx, vm, lv, sm)
+	err := createFromConfigWithDeps(ctx, vm, lv, sm, newMockMetadataClient(lv))
 
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -865,7 +865,7 @@ func TestCreateFromConfigWithDeps_MetadataStoreFailure(t *testing.T) {
 	}
 
 	// Should succeed despite metadata failure (it's just a warning)
-	err := createFromConfigWithDeps(ctx, vm, lv, sm)
+	err := createFromConfigWithDeps(ctx, vm, lv, sm, newMockMetadataClient(lv))
 
 	if err != nil {
 		t.Fatalf("expected success (metadata failure is non-fatal), got error: %v", err)
@@ -923,7 +923,7 @@ func TestCreateFromConfigWithDeps_AutostartVariations(t *testing.T) {
 				return nil
 			}
 
-			err := createFromConfigWithDeps(ctx, vm, lv, sm)
+			err := createFromConfigWithDeps(ctx, vm, lv, sm, newMockMetadataClient(lv))
 
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)

@@ -8,7 +8,7 @@ import (
 	"github.com/digitalocean/go-libvirt"
 )
 
-// mockLibvirtClient is a mock implementation of LibvirtClient for testing.
+// mockLibvirtClient is a mock implementation of libvirtClient for testing.
 type mockLibvirtClient struct {
 	pools   map[string]*mockPool
 	volumes map[string]map[string]*mockVolume // pool name -> volume name -> volume

@@ -8,12 +8,12 @@ import (
 	"github.com/jbweber/foundry/internal/storage"
 )
 
-// libvirtClient defines the libvirt operations needed for VM management.
+// LibvirtClient defines the libvirt operations needed for VM management.
 // This wraps operations from *libvirt.Libvirt to allow for testing.
 //
 // In production, this is satisfied by *libvirt.Libvirt directly.
 // In tests, this is satisfied by mock implementations.
-type libvirtClient interface {
+type LibvirtClient interface {
 	// ConnectListAllDomains lists all domains
 	ConnectListAllDomains(needResults int32, flags libvirt.ConnectListAllDomainsFlags) (domains []libvirt.Domain, ret uint32, err error)
 

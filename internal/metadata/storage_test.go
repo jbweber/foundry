@@ -10,7 +10,7 @@ import (
 	"github.com/jbweber/foundry/api/v1alpha1"
 )
 
-// mockLibvirtClient is a mock implementation of LibvirtClient for testing.
+// mockLibvirtClient is a mock implementation of libvirtClient for testing.
 type mockLibvirtClient struct {
 	// For controlling behavior
 	setMetadataError error
@@ -117,7 +117,8 @@ func TestStore_ValidVM(t *testing.T) {
 	domain := libvirt.Domain{}
 	vm := newTestVM("test-vm")
 
-	err := Store(mock, domain, vm)
+	client := NewClient(mock)
+	err := client.Store(domain, vm)
 
 	if err != nil {
 		t.Fatalf("Store() failed: %v", err)
@@ -159,7 +160,8 @@ func TestStore_CompleteVM(t *testing.T) {
 	domain := libvirt.Domain{}
 	vm := newCompleteTestVM("complete-vm")
 
-	err := Store(mock, domain, vm)
+	client := NewClient(mock)
+	err := client.Store(domain, vm)
 
 	if err != nil {
 		t.Fatalf("Store() failed: %v", err)
@@ -204,7 +206,8 @@ func TestStore_MinimalVM(t *testing.T) {
 		},
 	}
 
-	err := Store(mock, domain, vm)
+	client := NewClient(mock)
+	err := client.Store(domain, vm)
 
 	if err != nil {
 		t.Fatalf("Store() failed with minimal VM: %v", err)
@@ -222,7 +225,8 @@ func TestStore_DomainSetMetadataError(t *testing.T) {
 	domain := libvirt.Domain{}
 	vm := newTestVM("test-vm")
 
-	err := Store(mock, domain, vm)
+	client := NewClient(mock)
+	err := client.Store(domain, vm)
 
 	if err == nil {
 		t.Fatal("Expected error from Store(), got nil")
@@ -239,7 +243,8 @@ func TestStore_EmptyVMName(t *testing.T) {
 	vm := newTestVM("")
 
 	// Should not fail - empty name is still valid YAML
-	err := Store(mock, domain, vm)
+	client := NewClient(mock)
+	err := client.Store(domain, vm)
 
 	if err != nil {
 		t.Fatalf("Store() failed with empty name: %v", err)
@@ -252,7 +257,8 @@ func TestStore_NilVM(t *testing.T) {
 
 	// Go's yaml.Marshal handles nil gracefully (marshals to "null")
 	// This test just ensures we don't panic with nil input
-	err := Store(mock, domain, nil)
+	client := NewClient(mock)
+	err := client.Store(domain, nil)
 
 	if err != nil {
 		t.Fatalf("Store() failed with nil VM: %v", err)
@@ -295,7 +301,8 @@ spec:
 	}
 	domain := libvirt.Domain{}
 
-	loadedVM, err := Load(mock, domain)
+	client2 := NewClient(mock)
+	loadedVM, err := client2.Load(domain)
 
 	if err != nil {
 		t.Fatalf("Load() failed: %v", err)
@@ -367,7 +374,8 @@ spec:
 	}
 	domain := libvirt.Domain{}
 
-	loadedVM, err := Load(mock, domain)
+	client2 := NewClient(mock)
+	loadedVM, err := client2.Load(domain)
 
 	if err != nil {
 		t.Fatalf("Load() failed: %v", err)
@@ -396,7 +404,8 @@ func TestLoad_DomainGetMetadataError(t *testing.T) {
 	}
 	domain := libvirt.Domain{}
 
-	vm, err := Load(mock, domain)
+	client := NewClient(mock)
+	vm, err := client.Load(domain)
 
 	if err == nil {
 		t.Fatal("Expected error from Load(), got nil")
@@ -413,7 +422,8 @@ func TestLoad_InvalidXML(t *testing.T) {
 	}
 	domain := libvirt.Domain{}
 
-	vm, err := Load(mock, domain)
+	client := NewClient(mock)
+	vm, err := client.Load(domain)
 
 	if err == nil {
 		t.Fatal("Expected error from Load() with invalid XML, got nil")
@@ -430,7 +440,8 @@ func TestLoad_CorruptedXML(t *testing.T) {
 	}
 	domain := libvirt.Domain{}
 
-	vm, err := Load(mock, domain)
+	client := NewClient(mock)
+	vm, err := client.Load(domain)
 
 	// Should succeed in parsing XML but fail on YAML unmarshal
 	if err == nil {
@@ -454,7 +465,8 @@ func TestLoad_InvalidYAML(t *testing.T) {
 	}
 	domain := libvirt.Domain{}
 
-	vm, err := Load(mock, domain)
+	client := NewClient(mock)
+	vm, err := client.Load(domain)
 
 	if err == nil {
 		t.Fatal("Expected error from Load() with invalid YAML, got nil")
@@ -478,7 +490,8 @@ func TestLoad_EmptyYAML(t *testing.T) {
 	domain := libvirt.Domain{}
 
 	// Empty YAML should parse to an empty VM struct
-	vm, err := Load(mock, domain)
+	client := NewClient(mock)
+	vm, err := client.Load(domain)
 
 	if err != nil {
 		t.Fatalf("Load() failed with empty YAML: %v", err)
@@ -499,7 +512,8 @@ func TestUpdate_IncrementsGeneration(t *testing.T) {
 	vm := newTestVM("test-vm")
 	vm.Generation = 1
 
-	err := Update(mock, domain, vm)
+	client := NewClient(mock)
+	err := client.Update(domain, vm)
 
 	if err != nil {
 		t.Fatalf("Update() failed: %v", err)
@@ -520,7 +534,8 @@ func TestUpdate_ModifiesExistingMetadata(t *testing.T) {
 	vm := newTestVM("test-vm")
 	vm.Generation = 5
 
-	err := Update(mock, domain, vm)
+	client := NewClient(mock)
+	err := client.Update(domain, vm)
 
 	if err != nil {
 		t.Fatalf("Update() failed: %v", err)
@@ -539,7 +554,8 @@ func TestUpdate_StoreError(t *testing.T) {
 	vm := newTestVM("test-vm")
 	originalGeneration := vm.Generation
 
-	err := Update(mock, domain, vm)
+	client := NewClient(mock)
+	err := client.Update(domain, vm)
 
 	if err == nil {
 		t.Fatal("Expected error from Update(), got nil")
@@ -555,7 +571,8 @@ func TestDelete_Success(t *testing.T) {
 	mock := &mockLibvirtClient{}
 	domain := libvirt.Domain{}
 
-	err := Delete(mock, domain)
+	client := NewClient(mock)
+	err := client.Delete(domain)
 
 	if err != nil {
 		t.Fatalf("Delete() failed: %v", err)
@@ -588,7 +605,8 @@ func TestDelete_NonExistentMetadata(t *testing.T) {
 	mock := &mockLibvirtClient{}
 	domain := libvirt.Domain{}
 
-	err := Delete(mock, domain)
+	client := NewClient(mock)
+	err := client.Delete(domain)
 
 	if err != nil {
 		t.Fatalf("Delete() failed: %v", err)
@@ -605,7 +623,8 @@ func TestDelete_Error(t *testing.T) {
 	}
 	domain := libvirt.Domain{}
 
-	err := Delete(mock, domain)
+	client := NewClient(mock)
+	err := client.Delete(domain)
 
 	if err == nil {
 		t.Fatal("Expected error from Delete(), got nil")
@@ -618,7 +637,8 @@ func TestExists_WithMetadata(t *testing.T) {
 	}
 	domain := libvirt.Domain{}
 
-	exists := Exists(mock, domain)
+	client := NewClient(mock)
+	exists := client.Exists(domain)
 
 	if !exists {
 		t.Error("Expected Exists() to return true when metadata exists")
@@ -635,7 +655,8 @@ func TestExists_WithoutMetadata(t *testing.T) {
 	}
 	domain := libvirt.Domain{}
 
-	exists := Exists(mock, domain)
+	client := NewClient(mock)
+	exists := client.Exists(domain)
 
 	if exists {
 		t.Error("Expected Exists() to return false when metadata doesn't exist")
@@ -652,7 +673,8 @@ func TestExists_LibvirtError(t *testing.T) {
 	}
 	domain := libvirt.Domain{}
 
-	exists := Exists(mock, domain)
+	client := NewClient(mock)
+	exists := client.Exists(domain)
 
 	// Any error returns false
 	if exists {
@@ -667,7 +689,8 @@ func TestRoundTrip_StoreAndLoad(t *testing.T) {
 	originalVM.Generation = 42
 
 	// Store the VM
-	err := Store(mock, domain, originalVM)
+	client := NewClient(mock)
+	err := client.Store(domain, originalVM)
 	if err != nil {
 		t.Fatalf("Store() failed: %v", err)
 	}
@@ -676,7 +699,8 @@ func TestRoundTrip_StoreAndLoad(t *testing.T) {
 	mock.getMetadataValue = mock.lastSetMetadata
 
 	// Load the VM back
-	loadedVM, err := Load(mock, domain)
+	client2 := NewClient(mock)
+	loadedVM, err := client2.Load(domain)
 	if err != nil {
 		t.Fatalf("Load() failed: %v", err)
 	}
