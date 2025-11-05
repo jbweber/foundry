@@ -92,7 +92,11 @@ group = qemu
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer os.Remove(tmpfile.Name())
+			defer func() {
+				if removeErr := os.Remove(tmpfile.Name()); removeErr != nil {
+					t.Logf("Warning: failed to remove temp file: %v", removeErr)
+				}
+			}()
 
 			if _, err := tmpfile.Write([]byte(tt.configContent)); err != nil {
 				t.Fatal(err)

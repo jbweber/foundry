@@ -8,12 +8,12 @@ package cloudinit
 
 import (
 	"fmt"
-	"net"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/jbweber/foundry/api/v1alpha1"
+	"github.com/jbweber/foundry/internal/naming"
 )
 
 // UserData represents the cloud-config user-data structure.
@@ -78,35 +78,6 @@ type RouteConfig struct {
 // Nameservers represents DNS server configuration.
 type Nameservers struct {
 	Addresses []string `yaml:"addresses"`
-}
-
-// calculateMACFromIP generates a MAC address from an IP address.
-// Algorithm: IP 10.20.30.40 → MAC be:ef:0a:14:1e:28
-func calculateMACFromIP(ipWithCIDR string) (string, error) {
-	// Strip CIDR suffix if present
-	ipStr := ipWithCIDR
-	if strings.Contains(ipWithCIDR, "/") {
-		ip, _, err := net.ParseCIDR(ipWithCIDR)
-		if err != nil {
-			return "", fmt.Errorf("invalid IP/CIDR format: %w", err)
-		}
-		ipStr = ip.String()
-	}
-
-	// Parse IP address
-	ip := net.ParseIP(ipStr)
-	if ip == nil {
-		return "", fmt.Errorf("invalid IP address: %s", ipStr)
-	}
-
-	// Convert to IPv4
-	ip = ip.To4()
-	if ip == nil {
-		return "", fmt.Errorf("only IPv4 addresses are supported: %s", ipStr)
-	}
-
-	// Generate MAC: be:ef:xx:xx:xx:xx
-	return fmt.Sprintf("be:ef:%02x:%02x:%02x:%02x", ip[0], ip[1], ip[2], ip[3]), nil
 }
 
 // GenerateUserData generates the user-data YAML content from VM configuration.
@@ -209,7 +180,7 @@ func GenerateNetworkConfig(vm *v1alpha1.VirtualMachine) (string, error) {
 		ethName := fmt.Sprintf("eth%d", i)
 
 		// Calculate MAC address from IP
-		macAddr, err := calculateMACFromIP(iface.IP)
+		macAddr, err := naming.MACFromIP(iface.IP)
 		if err != nil {
 			return "", fmt.Errorf("failed to calculate MAC address for %s: %w", iface.IP, err)
 		}

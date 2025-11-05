@@ -14,6 +14,7 @@ import (
 	foundrylibvirt "github.com/jbweber/foundry/internal/libvirt"
 	"github.com/jbweber/foundry/internal/loader"
 	"github.com/jbweber/foundry/internal/metadata"
+	"github.com/jbweber/foundry/internal/naming"
 	"github.com/jbweber/foundry/internal/storage"
 )
 
@@ -26,15 +27,15 @@ func getStoragePool(vm *v1alpha1.VirtualMachine) string {
 }
 
 func getBootVolumeName(vm *v1alpha1.VirtualMachine) string {
-	return fmt.Sprintf("%s_boot.qcow2", vm.Name)
+	return naming.VolumeNameBoot(vm.Name)
 }
 
 func getDataVolumeName(vm *v1alpha1.VirtualMachine, device string) string {
-	return fmt.Sprintf("%s_data-%s.qcow2", vm.Name, device)
+	return naming.VolumeNameData(vm.Name, device)
 }
 
 func getCloudInitVolumeName(vm *v1alpha1.VirtualMachine) string {
-	return fmt.Sprintf("%s_cloudinit.iso", vm.Name)
+	return naming.VolumeNameCloudInit(vm.Name)
 }
 
 // parseImageReference parses an image reference and returns the pool and volume names.

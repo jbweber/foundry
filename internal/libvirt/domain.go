@@ -2,12 +2,11 @@ package libvirt
 
 import (
 	"fmt"
-	"net"
-	"strings"
 
 	"libvirt.org/go/libvirtxml"
 
 	"github.com/jbweber/foundry/api/v1alpha1"
+	"github.com/jbweber/foundry/internal/naming"
 )
 
 const (
@@ -26,77 +25,19 @@ func GetStoragePool(vm *v1alpha1.VirtualMachine) string {
 // GetBootVolumeName returns the volume name for the boot disk.
 // Format: <vm-name>_boot.qcow2
 func GetBootVolumeName(vm *v1alpha1.VirtualMachine) string {
-	return fmt.Sprintf("%s_boot.qcow2", vm.Name)
+	return naming.VolumeNameBoot(vm.Name)
 }
 
 // GetDataVolumeName returns the volume name for a data disk.
 // Format: <vm-name>_data-<device>.qcow2
 func GetDataVolumeName(vm *v1alpha1.VirtualMachine, device string) string {
-	return fmt.Sprintf("%s_data-%s.qcow2", vm.Name, device)
+	return naming.VolumeNameData(vm.Name, device)
 }
 
 // GetCloudInitVolumeName returns the volume name for the cloud-init ISO.
 // Format: <vm-name>_cloudinit.iso
 func GetCloudInitVolumeName(vm *v1alpha1.VirtualMachine) string {
-	return fmt.Sprintf("%s_cloudinit.iso", vm.Name)
-}
-
-// calculateMACFromIP generates a MAC address from an IP address.
-// Algorithm: IP 10.20.30.40 → MAC be:ef:0a:14:1e:28
-func calculateMACFromIP(ipWithCIDR string) (string, error) {
-	// Strip CIDR suffix if present
-	ipStr := ipWithCIDR
-	if strings.Contains(ipWithCIDR, "/") {
-		ip, _, err := net.ParseCIDR(ipWithCIDR)
-		if err != nil {
-			return "", fmt.Errorf("invalid IP/CIDR format: %w", err)
-		}
-		ipStr = ip.String()
-	}
-
-	// Parse IP address
-	ip := net.ParseIP(ipStr)
-	if ip == nil {
-		return "", fmt.Errorf("invalid IP address: %s", ipStr)
-	}
-
-	// Convert to IPv4
-	ip = ip.To4()
-	if ip == nil {
-		return "", fmt.Errorf("only IPv4 addresses are supported: %s", ipStr)
-	}
-
-	// Generate MAC: be:ef:xx:xx:xx:xx
-	return fmt.Sprintf("be:ef:%02x:%02x:%02x:%02x", ip[0], ip[1], ip[2], ip[3]), nil
-}
-
-// calculateInterfaceNameFromIP generates a tap interface name from an IP address.
-// Algorithm: IP 10.20.30.40 → Interface vm0a141e28
-func calculateInterfaceNameFromIP(ipWithCIDR string) (string, error) {
-	// Strip CIDR suffix if present
-	ipStr := ipWithCIDR
-	if strings.Contains(ipWithCIDR, "/") {
-		ip, _, err := net.ParseCIDR(ipWithCIDR)
-		if err != nil {
-			return "", fmt.Errorf("invalid IP/CIDR format: %w", err)
-		}
-		ipStr = ip.String()
-	}
-
-	// Parse IP address
-	ip := net.ParseIP(ipStr)
-	if ip == nil {
-		return "", fmt.Errorf("invalid IP address: %s", ipStr)
-	}
-
-	// Convert to IPv4
-	ip = ip.To4()
-	if ip == nil {
-		return "", fmt.Errorf("only IPv4 addresses are supported: %s", ipStr)
-	}
-
-	// Generate interface name: vm{hex octets}
-	return fmt.Sprintf("vm%02x%02x%02x%02x", ip[0], ip[1], ip[2], ip[3]), nil
+	return naming.VolumeNameCloudInit(vm.Name)
 }
 
 // GenerateDomainXML generates libvirt domain XML from VM configuration
@@ -247,13 +188,13 @@ func GenerateDomainXML(vm *v1alpha1.VirtualMachine) (string, error) {
 	// Add network interfaces
 	for _, iface := range vm.Spec.NetworkInterfaces {
 		// Calculate MAC address from IP
-		macAddr, err := calculateMACFromIP(iface.IP)
+		macAddr, err := naming.MACFromIP(iface.IP)
 		if err != nil {
 			return "", fmt.Errorf("failed to calculate MAC address for %s: %w", iface.IP, err)
 		}
 
 		// Calculate interface name from IP
-		ifaceName, err := calculateInterfaceNameFromIP(iface.IP)
+		ifaceName, err := naming.InterfaceNameFromIP(iface.IP)
 		if err != nil {
 			return "", fmt.Errorf("failed to calculate interface name for %s: %w", iface.IP, err)
 		}

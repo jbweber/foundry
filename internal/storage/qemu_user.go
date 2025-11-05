@@ -78,7 +78,12 @@ func getQEMUConfiguredUser() (username, groupname string) {
 	if err != nil {
 		return "", ""
 	}
-	defer file.Close()
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil {
+			// Log error but continue since we're returning data already read
+			_ = closeErr
+		}
+	}()
 
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
