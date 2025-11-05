@@ -14,9 +14,32 @@ import (
 )
 
 // LibvirtClient defines the minimal libvirt operations needed for metadata storage.
-// This interface is defined on the consumer side (this package) following Go best practices.
-// The concrete implementation is *libvirt.Libvirt from github.com/digitalocean/go-libvirt.
-// This allows for dependency injection and testing.
+//
+// This interface is defined on the consumer side (this package) following Go best practices
+// for interface design. The concrete implementation is *libvirt.Libvirt from
+// github.com/digitalocean/go-libvirt, which satisfies this interface implicitly.
+//
+// This pattern enables clean dependency injection:
+//   - Production: Pass *libvirt.Libvirt to NewClient()
+//   - Testing: Pass a mock implementation to NewClient()
+//
+// Example usage in production:
+//
+//	client, err := libvirt.Connect()
+//	if err != nil {
+//	    return err
+//	}
+//	defer client.Close()
+//
+//	metaClient := metadata.NewClient(client.Libvirt())
+//
+// Example usage in tests:
+//
+//	mock := &MockLibvirtClient{...}
+//	metaClient := metadata.NewClient(mock)
+//
+// This interface only includes domain metadata operations, following the
+// Interface Segregation Principle.
 type LibvirtClient interface {
 	// DomainSetMetadata sets custom metadata on a domain
 	DomainSetMetadata(dom libvirt.Domain, typ int32, metadata libvirt.OptString, key libvirt.OptString, uri libvirt.OptString, flags libvirt.DomainModificationImpact) error

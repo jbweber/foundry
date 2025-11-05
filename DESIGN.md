@@ -45,7 +45,7 @@ foundry/
 │   ├── loader/
 │   │   └── loader.go        # YAML loader for v1alpha1 format
 │   ├── metadata/
-│   │   └── storage.go       # Libvirt XML metadata storage for VM specs
+│   │   └── storage.go       # Libvirt XML metadata storage + consumer interface
 │   ├── status/
 │   │   ├── conditions.go    # Condition management
 │   │   └── phase.go         # Phase management (Pending, Running, etc.)
@@ -55,22 +55,23 @@ foundry/
 │   │   └── json.go          # JSON output formatter
 │   ├── storage/
 │   │   ├── types.go         # Storage types (PoolType, VolumeSpec, etc.)
-│   │   ├── manager.go       # Storage manager coordinator
+│   │   ├── manager.go       # Storage manager + consumer interface
 │   │   ├── pool.go          # Pool operations (create, list, delete)
 │   │   ├── volume.go        # Volume operations (create, delete, upload)
 │   │   └── image.go         # Base image management (import, pull, list)
 │   ├── cloudinit/
 │   │   ├── generator.go     # Generate user-data, meta-data, network-config
 │   │   └── iso.go           # Create ISO using iso9660
-│   ├── libvirt/
-│   │   ├── client.go        # Libvirt connection management
-│   │   └── domain.go        # Domain XML generation & operations
+│   ├── libvirtxml/
+│   │   └── domain.go        # Domain XML generation from VirtualMachine spec
+│   ├── naming/
+│   │   └── naming.go        # Resource naming (MAC, interface, volume names)
 │   └── vm/
 │       ├── create.go        # VM creation orchestration
 │       ├── destroy.go       # VM destruction logic
 │       ├── list.go          # VM listing with status population
 │       ├── get.go           # Get single VM with status
-│       └── interfaces.go    # Interfaces for dependency injection
+│       └── interfaces.go    # Consumer-side LibvirtClient interface
 ├── examples/
 │   ├── simple-vm.yaml       # Basic VM config example
 │   ├── multi-disk-vm.yaml   # VM with data disks
@@ -885,39 +886,47 @@ if loadedVM.ObjectMeta.Name != originalVM.ObjectMeta.Name {
 
 ### Interface Boundaries
 
-Foundry uses **targeted interfaces** following the Interface Segregation Principle for clean separation between domain logic and infrastructure:
+Foundry follows **consumer-side interface design** (the Go idiom) where interfaces are defined by the consumer package, not the provider. This pattern is used throughout the Go standard library, Kubernetes client-go, and Prometheus.
 
-- **`internal/libvirt.VMClient`** (12 methods) - VM lifecycle operations (define, start, stop, destroy, query state)
-- **`internal/libvirt.StorageClient`** (18 methods) - Pool and volume management (create pools/volumes, upload data)
-- **`internal/libvirt.MetadataClient`** (2 methods) - Domain metadata persistence (get/set VM specs in libvirt)
+**Consumer-Side Interfaces (exported for dependency injection):**
+- **`storage.LibvirtClient`** (18 methods) - Storage operations needed by storage.Manager
+- **`metadata.LibvirtClient`** (2 methods) - Metadata operations needed by metadata.Client
+- **`vm.LibvirtClient`** (12 methods) - VM operations needed by vm package functions
 
 **Design Rationale:**
-- **Interface Segregation**: Analysis showed 0% overlap between VM and storage operations in practice
-- **100% utilization**: Each interface is used at 100% efficiency (no unused methods)
-- **Testing simplicity**: Mocks only implement needed methods (~230 lines vs ~500+ for fat interface)
-- **Future flexibility**: K8s controller can implement subsets as needed
+- **Consumer-driven**: Each package defines only the libvirt operations it actually uses
+- **Interface Segregation**: Zero overlap between storage, metadata, and vm interfaces
+- **Testing simplicity**: Mocks only implement needed methods (no unused interface pollution)
+- **Exported for DI**: Interfaces are exported (capitalized) so constructors can accept them across packages
+- **Kubernetes pattern**: Matches the pattern used in k8s client-go (e.g., `PodInterface`)
 
-**Current Implementation (Phase 1):**
-These are **thin wrapper interfaces** that mirror `go-libvirt` method signatures:
+**Example Pattern:**
 ```go
-type VMClient interface {
-    DomainLookupByName(name string) (libvirt.Domain, error)  // Still exposes libvirt types
-    DomainDefineXML(xml string) (libvirt.Domain, error)
-    // ... 10 more methods
+// Package metadata defines its own interface (consumer-side)
+package metadata
+
+type LibvirtClient interface {  // Exported for dependency injection
+    DomainSetMetadata(...) error
+    DomainGetMetadata(...) (string, error)
 }
+
+type Client struct {
+    client LibvirtClient  // Unexported field, exported type
+}
+
+func NewClient(client LibvirtClient) *Client {  // Constructor accepts interface
+    return &Client{client: client}
+}
+
+// Production: NewClient(realLibvirtConnection) - implicit satisfaction
+// Tests: NewClient(mockClient) - implicit satisfaction
 ```
 
-**Future Enhancement (Task 32 - Backlog):**
-Migrate to **true repository pattern** that returns our domain types:
-```go
-type VMRepository interface {
-    Get(ctx context.Context, name string) (*v1alpha1.VirtualMachine, error)  // Returns OUR types
-    Create(ctx context.Context, vm *v1alpha1.VirtualMachine) error
-    Delete(ctx context.Context, name string) error
-}
-```
-
-This requires moving XML generation into the adapter layer and adding translation logic. Deferred until K8s controller work begins.
+**Why not repository pattern?**
+The current thin-wrapper approach directly exposes `go-libvirt` types, which may seem leaky. However:
+- It's pragmatic for a CLI tool (no need for abstraction layers)
+- XML generation already lives in dedicated functions, not scattered
+- Migration to repository pattern deferred until K8s controller work (if ever needed)
 
 ### Naming Conventions
 
@@ -940,50 +949,66 @@ Infrastructure-level resource naming lives in `internal/naming/`:
 |---------|---------|-------------------|
 | `api/v1alpha1/` | K8s-style API types | `VirtualMachine`, `VirtualMachineSpec`, `VirtualMachineStatus` |
 | `cmd/foundry/` | CLI commands | `create`, `destroy`, `list`, `get`, `pool`, `image`, `storage` |
-| `internal/vm/` | VM orchestration workflows | `Create()`, `Destroy()`, `List()`, `Get()` - high-level operations |
-| `internal/libvirt/` | Libvirt client interfaces + XML generation | `VMClient`, `StorageClient`, `MetadataClient`, `GenerateDomainXML()` |
-| `internal/storage/` | Storage pool/volume management | `Manager` - pool/volume CRUD, image import |
+| `internal/vm/` | VM orchestration + consumer-side interface | `Create()`, `Destroy()`, `List()`, `Get()`, `LibvirtClient` interface |
+| `internal/storage/` | Storage management + consumer-side interface | `Manager`, `LibvirtClient` interface - pool/volume CRUD, image import |
+| `internal/metadata/` | VM spec persistence + consumer-side interface | `Client`, `LibvirtClient` interface - persist specs in libvirt metadata |
 | `internal/naming/` | Resource naming conventions | MAC/interface/volume naming functions |
 | `internal/cloudinit/` | Cloud-init generation | `GenerateUserData()`, `GenerateNetworkConfig()`, `GenerateISO()` |
-| `internal/metadata/` | VM spec persistence | `Store()`, `Load()` - persist specs in libvirt metadata |
+| `internal/libvirtxml/` | Libvirt domain XML generation | `GenerateDomainXML()` - creates libvirt XML from VirtualMachine spec |
 | `internal/status/` | Status/condition management | `SetCondition()`, `SetPhase()` - K8s-style status updates |
 | `internal/output/` | Output formatters | `TableFormatter`, `YAMLFormatter`, `JSONFormatter` |
 | `internal/loader/` | YAML loading/validation | `LoadFromFile()`, `SaveToFile()` |
 
 **Dependency Flow** (following Clean Architecture principles):
 ```
-cmd/foundry/        → (uses)
-internal/vm/        → (uses)
-internal/libvirt/   → (implements interfaces, calls)
-go-libvirt          → (external dependency)
+cmd/foundry/              → (uses)
+internal/vm/              → (uses, defines LibvirtClient interface)
+internal/storage/         → (uses, defines LibvirtClient interface)
+internal/metadata/        → (uses, defines LibvirtClient interface)
+github.com/digitalocean/go-libvirt  → (satisfies all interfaces implicitly)
 ```
 
 All packages depend on `api/v1alpha1/` for domain types. No circular dependencies.
+Each consumer package defines its own `LibvirtClient` interface with only the methods it needs.
 
 ### Testing Approach
 
-**Interface-Based Dependency Injection:**
-- Key packages (`internal/vm/`, `internal/storage/`) accept interfaces, not concrete types
-- Test files include mock implementations (e.g., `mocks_test.go`)
-- Integration tests check real libvirt behavior, unit tests use mocks
+**Interface-Based Dependency Injection (Consumer-Side Pattern):**
+- Each package defines its own interface for only the operations it needs
+- Constructors accept the exported interface type (e.g., `storage.LibvirtClient`)
+- Production code passes `*libvirt.Libvirt` which implicitly satisfies all interfaces
+- Test code passes package-specific mocks that implement the interface
+- No test-only constructors needed - standard constructors work for both prod and test
 
 **Coverage Targets:**
 - Pure functions (naming, cloudinit): 100%
 - Domain logic (vm, status): 85%+
-- Infrastructure adapters (libvirt, storage): 80%+
+- Infrastructure adapters (storage, metadata): 80%+
 
-**Example - Testing VM Creation:**
+**Example - Testing Storage Manager:**
 ```go
-func TestCreateVM(t *testing.T) {
-    mockVM := &mockVMClient{}      // Implements VMClient interface
-    mockStorage := &mockStorageManager{}
+func TestCreateVolume(t *testing.T) {
+    mockClient := &mockLibvirtClient{}  // Implements storage.LibvirtClient
+    mgr := storage.NewManager(mockClient)  // Same constructor as production!
 
-    err := createFromConfigWithDeps(ctx, vm, mockVM, mockStorage)
-    // Assert orchestration logic without real libvirt
+    err := mgr.CreateVolume(ctx, "pool", spec)
+    // Assert storage logic without real libvirt
+}
+```
+
+**Example - Testing Metadata Client:**
+```go
+func TestStoreVM(t *testing.T) {
+    mockClient := &mockLibvirtClient{}  // Implements metadata.LibvirtClient
+    client := metadata.NewClient(mockClient)  // Same constructor as production!
+
+    err := client.Store(domain, vm)
+    // Assert metadata persistence without real libvirt
 }
 ```
 
 This architecture enables:
 - Fast unit tests (no libvirt required)
 - Integration tests when needed (real libvirt connection)
-- Future alternative implementations (remote libvirt, cloud providers)
+- No duplication between prod and test constructors
+- Clean dependency injection following Go idioms

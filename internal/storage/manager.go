@@ -8,10 +8,33 @@ import (
 	"github.com/digitalocean/go-libvirt"
 )
 
-// LibvirtClient is the interface for libvirt operations needed by the storage package.
-// This interface is defined on the consumer side (this package) following Go best practices.
-// The concrete implementation is *libvirt.Libvirt from github.com/digitalocean/go-libvirt.
-// This allows for dependency injection and testing.
+// LibvirtClient defines the minimal libvirt operations needed for storage management.
+//
+// This interface is defined on the consumer side (this package) following Go best practices
+// for interface design. The concrete implementation is *libvirt.Libvirt from
+// github.com/digitalocean/go-libvirt, which satisfies this interface implicitly.
+//
+// This pattern enables clean dependency injection:
+//   - Production: Pass *libvirt.Libvirt to NewManager()
+//   - Testing: Pass a mock implementation to NewManager()
+//
+// Example usage in production:
+//
+//	client, err := libvirt.Connect()
+//	if err != nil {
+//	    return err
+//	}
+//	defer client.Close()
+//
+//	mgr := storage.NewManager(client.Libvirt())
+//
+// Example usage in tests:
+//
+//	mock := &MockLibvirtClient{...}
+//	mgr := storage.NewManager(mock)
+//
+// This interface follows the Interface Segregation Principle - it only includes
+// the storage-related operations this package needs, not the entire libvirt API.
 type LibvirtClient interface {
 	StoragePoolLookupByName(Name string) (libvirt.StoragePool, error)
 	StoragePoolDefineXML(XML string, Flags uint32) (libvirt.StoragePool, error)

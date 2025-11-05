@@ -8,11 +8,38 @@ import (
 	"github.com/jbweber/foundry/internal/storage"
 )
 
-// LibvirtClient defines the libvirt operations needed for VM management.
-// This wraps operations from *libvirt.Libvirt to allow for testing.
+// LibvirtClient defines the minimal libvirt operations needed for VM lifecycle management.
 //
-// In production, this is satisfied by *libvirt.Libvirt directly.
-// In tests, this is satisfied by mock implementations.
+// This interface is defined on the consumer side (this package) following Go best practices
+// for interface design. The concrete implementation is *libvirt.Libvirt from
+// github.com/digitalocean/go-libvirt, which satisfies this interface implicitly.
+//
+// This pattern enables clean dependency injection:
+//   - Production: Pass *libvirt.Libvirt to NewManager()
+//   - Testing: Pass a mock implementation to NewManager()
+//
+// Example usage in production:
+//
+//	client, err := libvirt.Connect()
+//	if err != nil {
+//	    return err
+//	}
+//	defer client.Close()
+//
+//	storageMgr := storage.NewManager(client.Libvirt())
+//	metaClient := metadata.NewClient(client.Libvirt())
+//	vmMgr := vm.NewManager(client.Libvirt(), storageMgr, metaClient)
+//
+// Example usage in tests:
+//
+//	mockLibvirt := &MockLibvirtClient{...}
+//	mockStorage := &MockStorageManager{...}
+//	mockMetadata := &MockMetadataClient{...}
+//	vmMgr := vm.NewManager(mockLibvirt, mockStorage, mockMetadata)
+//
+// This interface includes domain lifecycle operations (create, destroy, list)
+// and metadata operations for persisting VM specs. It follows the Interface
+// Segregation Principle by only including the operations this package needs.
 type LibvirtClient interface {
 	// ConnectListAllDomains lists all domains
 	ConnectListAllDomains(needResults int32, flags libvirt.ConnectListAllDomainsFlags) (domains []libvirt.Domain, ret uint32, err error)
