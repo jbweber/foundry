@@ -115,6 +115,22 @@ func GenerateDomainXML(vm *v1alpha1.VirtualMachine) (string, error) {
 		},
 	}
 
+	// Determine boot order based on PXE boot configuration
+	// If any interface has PXEBoot enabled, network boots first (order 1),
+	// then disk (order 2). Otherwise, disk boots first (order 1).
+	hasPXEBoot := false
+	for _, iface := range vm.Spec.NetworkInterfaces {
+		if iface.PXEBoot {
+			hasPXEBoot = true
+			break
+		}
+	}
+
+	diskBootOrder := uint(1)
+	if hasPXEBoot {
+		diskBootOrder = 2
+	}
+
 	// Add boot disk (volume-based)
 	bootDisk := libvirtxml.DomainDisk{
 		Device: "disk",
@@ -134,7 +150,7 @@ func GenerateDomainXML(vm *v1alpha1.VirtualMachine) (string, error) {
 			Bus: "virtio",
 		},
 		Boot: &libvirtxml.DomainDeviceBoot{
-			Order: 1,
+			Order: diskBootOrder,
 		},
 	}
 	domain.Devices.Disks = append(domain.Devices.Disks, bootDisk)
@@ -215,6 +231,14 @@ func GenerateDomainXML(vm *v1alpha1.VirtualMachine) (string, error) {
 				Dev: ifaceName,
 			},
 		}
+
+		// Add boot order if PXE boot is enabled for this interface
+		if iface.PXEBoot {
+			netIface.Boot = &libvirtxml.DomainDeviceBoot{
+				Order: 1,
+			}
+		}
+
 		domain.Devices.Interfaces = append(domain.Devices.Interfaces, netIface)
 	}
 

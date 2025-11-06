@@ -149,6 +149,14 @@ type NetworkInterfaceSpec struct {
 	// Defaults to false.
 	// +optional
 	DefaultRoute bool `json:"defaultRoute,omitempty" yaml:"defaultRoute,omitempty"`
+
+	// PXEBoot enables network boot (PXE) on this interface.
+	// When true, this interface will be configured as the primary boot device
+	// with boot order 1, and the boot disk will be set to boot order 2.
+	// Only one interface should have this set to true.
+	// Defaults to false.
+	// +optional
+	PXEBoot bool `json:"pxeBoot,omitempty" yaml:"pxeBoot,omitempty"`
 }
 
 // CloudInitSpec defines cloud-init configuration.

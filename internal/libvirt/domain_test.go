@@ -890,3 +890,169 @@ func TestGenerateDomainXML_EdgeCases(t *testing.T) {
 }
 
 // Note: MAC and interface name calculation tests have been moved to internal/naming package
+
+// TestGenerateDomainXML_PXEBoot tests PXE boot configuration
+func TestGenerateDomainXML_PXEBoot(t *testing.T) {
+	tests := []struct {
+		name              string
+		vm                *v1alpha1.VirtualMachine
+		wantNetBootOrder  uint
+		wantDiskBootOrder uint
+		wantErr           bool
+	}{
+		{
+			name: "VM with PXE boot enabled",
+			vm: &v1alpha1.VirtualMachine{
+				ObjectMeta: v1alpha1.ObjectMeta{
+					Name: "pxe-boot-vm",
+				},
+				Spec: v1alpha1.VirtualMachineSpec{
+					VCPUs:     4,
+					MemoryGiB: 8,
+					BootDisk: v1alpha1.BootDiskSpec{
+						SizeGB: 60,
+						Empty:  true,
+					},
+					NetworkInterfaces: []v1alpha1.NetworkInterfaceSpec{
+						{
+							IP:           "10.230.230.108/24",
+							Gateway:      "10.230.230.1",
+							Bridge:       "br230",
+							DefaultRoute: true,
+							PXEBoot:      true, // PXE boot enabled
+						},
+					},
+				},
+			},
+			wantNetBootOrder:  1, // Network boots first
+			wantDiskBootOrder: 2, // Disk boots second
+			wantErr:           false,
+		},
+		{
+			name: "VM without PXE boot",
+			vm: &v1alpha1.VirtualMachine{
+				ObjectMeta: v1alpha1.ObjectMeta{
+					Name: "no-pxe-vm",
+				},
+				Spec: v1alpha1.VirtualMachineSpec{
+					VCPUs:     4,
+					MemoryGiB: 8,
+					BootDisk: v1alpha1.BootDiskSpec{
+						SizeGB: 50,
+						Image:  "fedora-43.qcow2",
+					},
+					NetworkInterfaces: []v1alpha1.NetworkInterfaceSpec{
+						{
+							IP:           "10.230.230.101/24",
+							Gateway:      "10.230.230.1",
+							Bridge:       "br230",
+							DefaultRoute: true,
+							PXEBoot:      false, // PXE boot disabled
+						},
+					},
+					CloudInit: &v1alpha1.CloudInitSpec{
+						FQDN: "test.example.com",
+					},
+				},
+			},
+			wantNetBootOrder:  0, // No boot order on network interface
+			wantDiskBootOrder: 1, // Disk boots first
+			wantErr:           false,
+		},
+		{
+			name: "VM with multiple interfaces, one with PXE",
+			vm: &v1alpha1.VirtualMachine{
+				ObjectMeta: v1alpha1.ObjectMeta{
+					Name: "multi-nic-pxe-vm",
+				},
+				Spec: v1alpha1.VirtualMachineSpec{
+					VCPUs:     4,
+					MemoryGiB: 8,
+					BootDisk: v1alpha1.BootDiskSpec{
+						SizeGB: 60,
+						Empty:  true,
+					},
+					NetworkInterfaces: []v1alpha1.NetworkInterfaceSpec{
+						{
+							IP:           "172.22.0.100/24",
+							Gateway:      "172.22.0.1",
+							Bridge:       "provisioning",
+							DefaultRoute: false,
+							PXEBoot:      true, // First interface has PXE
+						},
+						{
+							IP:           "192.168.111.100/24",
+							Gateway:      "192.168.111.1",
+							Bridge:       "baremetal",
+							DefaultRoute: true,
+							PXEBoot:      false,
+						},
+					},
+				},
+			},
+			wantNetBootOrder:  1, // First interface boots first
+			wantDiskBootOrder: 2, // Disk boots second
+			wantErr:           false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			xml, err := GenerateDomainXML(tt.vm)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("GenerateDomainXML() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if tt.wantErr {
+				return
+			}
+
+			// Parse the generated XML
+			var domain libvirtxml.Domain
+			if err := domain.Unmarshal(xml); err != nil {
+				t.Fatalf("Failed to unmarshal generated XML: %v", err)
+			}
+
+			// Verify disk boot order
+			if len(domain.Devices.Disks) == 0 {
+				t.Fatal("No disks found in generated domain")
+			}
+			bootDisk := domain.Devices.Disks[0]
+			if bootDisk.Boot == nil {
+				t.Fatal("Boot disk has no boot order")
+			}
+			if bootDisk.Boot.Order != tt.wantDiskBootOrder {
+				t.Errorf("Disk boot order = %d, want %d", bootDisk.Boot.Order, tt.wantDiskBootOrder)
+			}
+
+			// Verify network interface boot order
+			if len(domain.Devices.Interfaces) == 0 {
+				t.Fatal("No network interfaces found in generated domain")
+			}
+
+			// Find interface with PXE boot (if any)
+			foundPXEInterface := false
+			for i, iface := range domain.Devices.Interfaces {
+				if tt.vm.Spec.NetworkInterfaces[i].PXEBoot {
+					foundPXEInterface = true
+					if iface.Boot == nil {
+						t.Errorf("Interface %d should have boot order but doesn't", i)
+					} else if iface.Boot.Order != tt.wantNetBootOrder {
+						t.Errorf("Interface %d boot order = %d, want %d", i, iface.Boot.Order, tt.wantNetBootOrder)
+					}
+				} else {
+					// Interfaces without PXE boot should not have boot order
+					if iface.Boot != nil {
+						t.Errorf("Interface %d should not have boot order but has order %d", i, iface.Boot.Order)
+					}
+				}
+			}
+
+			// If we expect a network boot order, make sure we found a PXE interface
+			if tt.wantNetBootOrder > 0 && !foundPXEInterface {
+				t.Error("Expected to find PXE boot interface but didn't")
+			}
+		})
+	}
+}
