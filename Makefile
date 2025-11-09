@@ -18,8 +18,12 @@ GOFMT=$(GOCMD) fmt
 GOVET=$(GOCMD) vet
 GOTOOL=$(GOCMD) tool
 
+# Version information from git
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+
 # Build flags
-LDFLAGS=-ldflags "-s -w"
+LDFLAGS=-ldflags "-s -w -X 'main.version=$(VERSION)' -X 'main.commit=$(COMMIT)'"
 
 ## help: Display this help message
 help:
