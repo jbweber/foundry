@@ -82,12 +82,24 @@ type Nameservers struct {
 
 // GenerateUserData generates the user-data YAML content from VM configuration.
 //
+// If RawUserData is provided in the CloudInit spec, it is validated and returned as-is.
+// Otherwise, user-data is generated from the CloudInit configuration fields.
+//
 // Returns the complete user-data file content including the "#cloud-config" header.
 func GenerateUserData(vm *v1alpha1.VirtualMachine) (string, error) {
 	if vm == nil {
 		return "", fmt.Errorf("VM configuration cannot be nil")
 	}
 
+	// If raw user-data is provided, validate and use it
+	if vm.Spec.CloudInit != nil && vm.Spec.CloudInit.RawUserData != "" {
+		if err := validateUserData(vm.Spec.CloudInit.RawUserData); err != nil {
+			return "", fmt.Errorf("invalid raw user-data: %w", err)
+		}
+		return vm.Spec.CloudInit.RawUserData, nil
+	}
+
+	// Generate user-data from CloudInit fields
 	// Derive hostname from FQDN or VM name
 	hostname := vm.Name
 	fqdn := vm.Name
@@ -132,6 +144,40 @@ func GenerateUserData(vm *v1alpha1.VirtualMachine) (string, error) {
 
 	// Prepend #cloud-config header (required by cloud-init spec)
 	return "#cloud-config\n" + string(yamlBytes), nil
+}
+
+// validateUserData validates that the provided user-data is in a valid cloud-init format.
+//
+// Cloud-init supports multiple formats:
+// - #cloud-config: YAML cloud-config
+// - #!/bin/sh or #!/bin/bash: Shell script
+// - #include: Include other files
+// - #include-once: Include files once
+// - ## template: jinja: Jinja2 template
+// - Content-Type: MIME multi-part format
+//
+// See https://cloudinit.readthedocs.io/en/latest/explanation/format.html
+func validateUserData(userData string) error {
+	if userData == "" {
+		return fmt.Errorf("user-data cannot be empty")
+	}
+
+	// Valid cloud-init formats start with specific headers
+	validPrefixes := []string{
+		"#cloud-config",
+		"#!/",
+		"#include",
+		"## template:",
+		"Content-Type:",
+	}
+
+	for _, prefix := range validPrefixes {
+		if strings.HasPrefix(userData, prefix) {
+			return nil
+		}
+	}
+
+	return fmt.Errorf("user-data must start with a valid cloud-init header (#cloud-config, #!/, #include, ## template:, or Content-Type:)")
 }
 
 // GenerateMetaData generates the meta-data YAML content from VM configuration.

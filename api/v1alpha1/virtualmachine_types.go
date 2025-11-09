@@ -163,22 +163,33 @@ type NetworkInterfaceSpec struct {
 //
 // +k8s:deepcopy-gen=true
 type CloudInitSpec struct {
+	// RawUserData allows providing complete custom user-data content.
+	// When set, this overrides the generated user-data from other fields.
+	// Must be valid cloud-init format (e.g., start with #cloud-config).
+	// Meta-data and network-config are still generated automatically.
+	// +optional
+	RawUserData string `json:"rawUserData,omitempty" yaml:"rawUserData,omitempty"`
+
 	// FQDN is the fully qualified domain name for the VM.
 	// The hostname is derived from this.
+	// Ignored if RawUserData is set.
 	// +optional
 	FQDN string `json:"fqdn,omitempty" yaml:"fqdn,omitempty"`
 
 	// SSHAuthorizedKeys is a list of SSH public keys to inject.
+	// Ignored if RawUserData is set.
 	// +optional
 	SSHAuthorizedKeys []string `json:"sshAuthorizedKeys,omitempty" yaml:"sshAuthorizedKeys,omitempty"`
 
 	// PasswordHash is the hashed password for the root user.
 	// Generate with: mkpasswd --method=SHA-512
+	// Ignored if RawUserData is set.
 	// +optional
 	PasswordHash string `json:"passwordHash,omitempty" yaml:"passwordHash,omitempty"`
 
 	// SSHPasswordAuth enables SSH password authentication.
 	// Defaults to false (key-only authentication).
+	// Ignored if RawUserData is set.
 	// +optional
 	SSHPasswordAuth bool `json:"sshPasswordAuth,omitempty" yaml:"sshPasswordAuth,omitempty"`
 }

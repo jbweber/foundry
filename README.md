@@ -167,6 +167,10 @@ spec:
     fqdn: my-vm.example.com
     sshAuthorizedKeys:
       - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFoo..."
+    # Or use custom raw user-data:
+    # rawUserData: |
+    #   #!/bin/bash
+    #   curl -sfL https://get.k3s.io | sh -
 
 status:
   phase: Running

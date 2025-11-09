@@ -31,13 +31,20 @@ Per the NoCloud specification:
 
 ### 1. user-data (Cloud-Config)
 
-**Format**: YAML file that **must** start with `#cloud-config` header.
+**Format**: YAML file that **must** start with `#cloud-config` header (or other valid cloud-init format).
 
-**Specification**: https://cloudinit.readthedocs.io/en/latest/explanation/format.html#cloud-config-data
+**Specification**: https://cloudinit.readthedocs.io/en/latest/explanation/format.html
 
 **Purpose**: Configure the instance (hostname, users, SSH keys, passwords, packages, etc.)
 
-**Example**:
+**Supported Formats**:
+- `#cloud-config` - YAML cloud-config (most common)
+- `#!/bin/bash` or `#!/bin/sh` - Shell script
+- `#include` or `#include-once` - Include external files
+- `## template: jinja` - Jinja2 template
+- `Content-Type: multipart/mixed` - MIME multi-part for multiple configs
+
+**Example (Generated)**:
 ```yaml
 #cloud-config
 hostname: my-vm
@@ -52,7 +59,15 @@ chpasswd:
 ssh_pwauth: false
 ```
 
-**Key Fields**:
+**Example (Custom Shell Script)**:
+```bash
+#!/bin/bash
+echo "Installing k3s..."
+curl -sfL https://get.k3s.io | sh -
+systemctl enable k3s
+```
+
+**Key Fields** (for generated cloud-config):
 - `hostname` - Short hostname for the instance
 - `fqdn` - Fully qualified domain name
 - `ssh_authorized_keys` - List of SSH public keys to inject
@@ -177,7 +192,11 @@ Example: `my-vm-1730534400`
 
 ### User Data Generation
 
-When generating user-data, we:
+Foundry supports two modes for user-data generation:
+
+#### 1. Generated User-Data (Default)
+
+When no raw user-data is provided, foundry generates a standard cloud-config:
 
 1. Start with `#cloud-config` header (required)
 2. Marshal the configuration to YAML
@@ -187,6 +206,42 @@ When generating user-data, we:
 6. Set `ssh_pwauth` to false (unless explicitly enabled)
 
 **Important**: The `#cloud-config` header must be the first line, followed by valid YAML.
+
+#### 2. Custom Raw User-Data
+
+For advanced use cases (installing software, running custom scripts, etc.), you can provide complete custom user-data via the `rawUserData` field in the CloudInit spec:
+
+```yaml
+apiVersion: foundry.io/v1alpha1
+kind: VirtualMachine
+metadata:
+  name: k3s-server
+spec:
+  vcpus: 4
+  memoryGiB: 8
+  cloudInit:
+    rawUserData: |
+      #!/bin/bash
+      curl -sfL https://get.k3s.io | sh -
+      systemctl enable k3s
+  networkInterfaces:
+    - ip: 10.250.250.100/24
+      gateway: 10.250.250.1
+      bridge: br0
+      defaultRoute: true
+```
+
+**When using `rawUserData`**:
+- The content is validated but used as-is
+- Must start with a valid cloud-init header (`#cloud-config`, `#!/`, `#include`, etc.)
+- Other CloudInit fields (FQDN, SSH keys, password) are **ignored**
+- Meta-data and network-config are **still generated automatically**
+
+**Use Cases for Raw User-Data**:
+- Installing software at boot time (k3s, k8s, docker, etc.)
+- Running complex initialization scripts
+- Using advanced cloud-config modules (packages, runcmd, write_files, etc.)
+- MIME multi-part configurations combining multiple formats
 
 ## Cloud-Init Execution Flow
 
@@ -274,16 +329,14 @@ sudo reboot
 
 1. **NoCloud only**: We only support NoCloud datasource (ISO-based)
 2. **Static network only**: Only static IP configuration (no DHCP)
-3. **Basic user-data**: Only hostname, SSH keys, and password configuration
-4. **No vendor-data**: We don't generate vendor-data (optional in NoCloud)
+3. **No vendor-data**: We don't generate vendor-data (optional in NoCloud)
 
 ### Future Enhancements
 
-- Support additional cloud-config modules (packages, runcmd, write_files, etc.)
 - Support DHCP network configuration
 - Support for ConfigDrive datasource
-- Support for custom user-data templates
 - Support for CoreOS Ignition (alternative to cloud-init)
+- User-data templating with variable substitution
 
 ## References
 
@@ -295,4 +348,5 @@ sudo reboot
 
 ## Version History
 
+- **2025-11-07**: Added support for custom raw user-data (all cloud-init formats)
 - **2025-11-02**: Initial documentation created, following cloud-init specs for foundry implementation

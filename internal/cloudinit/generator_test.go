@@ -228,6 +228,152 @@ func TestGenerateUserData(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "raw user-data - cloud-config format",
+			vm: &v1alpha1.VirtualMachine{
+				ObjectMeta: v1alpha1.ObjectMeta{
+					Name: "test-vm",
+				},
+				Spec: v1alpha1.VirtualMachineSpec{
+					CloudInit: &v1alpha1.CloudInitSpec{
+						RawUserData: `#cloud-config
+packages:
+  - curl
+  - vim
+runcmd:
+  - echo "Custom cloud-init"
+`,
+						// These should be ignored when RawUserData is set
+						FQDN:              "ignored.example.com",
+						SSHAuthorizedKeys: []string{testSSHKeyEd25519},
+					},
+				},
+			},
+			checkContent: func(t *testing.T, content string) {
+				expectedContent := `#cloud-config
+packages:
+  - curl
+  - vim
+runcmd:
+  - echo "Custom cloud-init"
+`
+				if content != expectedContent {
+					t.Errorf("Raw user-data not returned as-is.\nExpected:\n%s\nGot:\n%s", expectedContent, content)
+				}
+			},
+		},
+		{
+			name: "raw user-data - shell script",
+			vm: &v1alpha1.VirtualMachine{
+				ObjectMeta: v1alpha1.ObjectMeta{
+					Name: "test-vm",
+				},
+				Spec: v1alpha1.VirtualMachineSpec{
+					CloudInit: &v1alpha1.CloudInitSpec{
+						RawUserData: `#!/bin/bash
+echo "Installing k3s..."
+curl -sfL https://get.k3s.io | sh -
+`,
+					},
+				},
+			},
+			checkContent: func(t *testing.T, content string) {
+				if !strings.HasPrefix(content, "#!/bin/bash") {
+					t.Error("Shell script user-data should start with shebang")
+				}
+				if !strings.Contains(content, "k3s") {
+					t.Error("Shell script content missing")
+				}
+			},
+		},
+		{
+			name: "raw user-data - include format",
+			vm: &v1alpha1.VirtualMachine{
+				ObjectMeta: v1alpha1.ObjectMeta{
+					Name: "test-vm",
+				},
+				Spec: v1alpha1.VirtualMachineSpec{
+					CloudInit: &v1alpha1.CloudInitSpec{
+						RawUserData: `#include
+http://example.com/cloud-config.yaml
+`,
+					},
+				},
+			},
+			checkContent: func(t *testing.T, content string) {
+				if !strings.HasPrefix(content, "#include") {
+					t.Error("Include format user-data should start with #include")
+				}
+			},
+		},
+		{
+			name: "raw user-data - invalid format (no header)",
+			vm: &v1alpha1.VirtualMachine{
+				ObjectMeta: v1alpha1.ObjectMeta{
+					Name: "test-vm",
+				},
+				Spec: v1alpha1.VirtualMachineSpec{
+					CloudInit: &v1alpha1.CloudInitSpec{
+						RawUserData: `This is invalid user-data
+without proper header`,
+					},
+				},
+			},
+			expectErr: true,
+		},
+		{
+			name: "raw user-data - empty string",
+			vm: &v1alpha1.VirtualMachine{
+				ObjectMeta: v1alpha1.ObjectMeta{
+					Name: "test-vm",
+				},
+				Spec: v1alpha1.VirtualMachineSpec{
+					CloudInit: &v1alpha1.CloudInitSpec{
+						RawUserData: "",
+						// Should fall back to generated user-data
+						FQDN: "fallback.example.com",
+					},
+				},
+			},
+			checkContent: func(t *testing.T, content string) {
+				// Should generate normal user-data since RawUserData is empty
+				if !strings.HasPrefix(content, "#cloud-config\n") {
+					t.Error("Should fall back to generated user-data when RawUserData is empty")
+				}
+				if !strings.Contains(content, "fallback") {
+					t.Error("Should use FQDN when falling back to generated user-data")
+				}
+			},
+		},
+		{
+			name: "raw user-data - MIME multi-part",
+			vm: &v1alpha1.VirtualMachine{
+				ObjectMeta: v1alpha1.ObjectMeta{
+					Name: "test-vm",
+				},
+				Spec: v1alpha1.VirtualMachineSpec{
+					CloudInit: &v1alpha1.CloudInitSpec{
+						RawUserData: `Content-Type: multipart/mixed; boundary="==BOUNDARY=="
+MIME-Version: 1.0
+
+--==BOUNDARY==
+Content-Type: text/cloud-config; charset="us-ascii"
+
+#cloud-config
+packages:
+  - nginx
+
+--==BOUNDARY==--
+`,
+					},
+				},
+			},
+			checkContent: func(t *testing.T, content string) {
+				if !strings.HasPrefix(content, "Content-Type:") {
+					t.Error("MIME multi-part should start with Content-Type:")
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {

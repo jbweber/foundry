@@ -142,12 +142,20 @@ spec:
 
   # Optional: Cloud-init configuration
   cloudInit:
+    # Option 1: Use generated cloud-config (default)
     fqdn: my-vm.example.com   # FQDN (hostname derived from this, normalized to lowercase)
     sshAuthorizedKeys:        # SSH public keys to inject
       - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFoo..."
       - "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC..."
     passwordHash: "$6$..."    # Optional: Root password hash (mkpasswd --method=SHA-512)
-    sshPwauth: false          # Optional: Enable SSH password auth (default: false)
+    sshPasswordAuth: false    # Optional: Enable SSH password auth (default: false)
+
+    # Option 2: Use custom raw user-data (overrides generated config)
+    # rawUserData: |
+    #   #!/bin/bash
+    #   curl -sfL https://get.k3s.io | sh -
+    # When rawUserData is set, the fields above (fqdn, sshAuthorizedKeys, etc.) are ignored.
+    # Meta-data and network-config are still generated automatically.
 
   # Optional: Advanced settings
   cpuMode: host-model         # CPU mode: host-model (default), host-passthrough
