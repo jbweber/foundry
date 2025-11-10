@@ -8,7 +8,7 @@ require (
 	github.com/kdomanski/iso9660 v0.4.0
 	github.com/spf13/cobra v1.10.1
 	gopkg.in/yaml.v3 v3.0.1
-	libvirt.org/go/libvirtxml v1.11008.0
+	libvirt.org/go/libvirtxml v1.11009.0
 )
 
 require (
