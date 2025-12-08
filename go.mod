@@ -6,7 +6,7 @@ require (
 	github.com/digitalocean/go-libvirt v0.0.0-20251014225438-3d9fc6d90050
 	github.com/google/uuid v1.6.0
 	github.com/kdomanski/iso9660 v0.4.0
-	github.com/spf13/cobra v1.10.1
+	github.com/spf13/cobra v1.10.2
 	gopkg.in/yaml.v3 v3.0.1
 	libvirt.org/go/libvirtxml v1.11008.0
 )
