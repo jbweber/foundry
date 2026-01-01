@@ -12,7 +12,7 @@ Foundry is a Go-based CLI tool for managing libvirt VMs, replacing the Ansible-b
 - `github.com/digitalocean/go-libvirt` - Pure Go libvirt client (no CGo)
 - `github.com/libvirt/libvirt-go-xml` - Libvirt XML domain generation
 - `github.com/kdomanski/iso9660` - Pure Go ISO creation for cloud-init
-- `gopkg.in/yaml.v3` - YAML parsing
+- `go.yaml.in/yaml/v3` - YAML parsing
 
 **What libvirt handles directly:**
 - Create/delete/start/stop VMs

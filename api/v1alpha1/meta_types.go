@@ -10,7 +10,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 // TypeMeta describes an individual object's type and API version.

@@ -8,7 +8,7 @@ import (
 	"fmt"
 
 	"github.com/digitalocean/go-libvirt"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 
 	"github.com/jbweber/foundry/api/v1alpha1"
 )
