@@ -62,8 +62,9 @@ func GenerateDomainXML(vm *v1alpha1.VirtualMachine) (string, error) {
 		OS: &libvirtxml.DomainOS{
 			Firmware: "efi",
 			Type: &libvirtxml.DomainOSType{
-				Arch: "x86_64",
-				Type: "hvm",
+				Arch:    "x86_64",
+				Machine: "q35",
+				Type:    "hvm",
 			},
 			BIOS: &libvirtxml.DomainBIOS{
 				UseSerial: "yes",
@@ -96,7 +97,7 @@ func GenerateDomainXML(vm *v1alpha1.VirtualMachine) (string, error) {
 				{
 					Type:  "pci",
 					Index: func() *uint { i := uint(0); return &i }(),
-					Model: "pci-root",
+					Model: "pcie-root",
 				},
 			},
 			MemBalloon: &libvirtxml.DomainMemBalloon{
@@ -230,6 +231,14 @@ func GenerateDomainXML(vm *v1alpha1.VirtualMachine) (string, error) {
 			Target: &libvirtxml.DomainInterfaceTarget{
 				Dev: ifaceName,
 			},
+		}
+
+		if iface.Vlan != nil {
+			netIface.VLan = &libvirtxml.DomainInterfaceVLan{
+				Tags: []libvirtxml.DomainInterfaceVLanTag{
+					{ID: *iface.Vlan},
+				},
+			}
 		}
 
 		// Add boot order if PXE boot is enabled for this interface

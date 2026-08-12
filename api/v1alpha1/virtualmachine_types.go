@@ -140,6 +140,8 @@ type NetworkInterfaceSpec struct {
 	// Bridge is the bridge name to attach the interface to.
 	Bridge string `json:"bridge" yaml:"bridge"`
 
+	Vlan *uint `json:"vlan,omitempty" yaml:"vlan,omitempty"`
+
 	// DNSServers is the list of DNS server IP addresses.
 	// +optional
 	DNSServers []string `json:"dnsServers,omitempty" yaml:"dnsServers,omitempty"`
