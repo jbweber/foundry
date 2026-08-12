@@ -418,13 +418,13 @@ func validateDomainStructure(t *testing.T, domain *libvirtxml.Domain, vm *v1alph
 	} else {
 		pciFound := false
 		for _, ctrl := range domain.Devices.Controllers {
-			if ctrl.Type == "pci" && ctrl.Model == "pci-root" {
+			if ctrl.Type == "pci" && ctrl.Model == "pcie-root" {
 				pciFound = true
 				break
 			}
 		}
 		if !pciFound {
-			t.Error("pci-root controller not found")
+			t.Error("pcie-root controller not found")
 		}
 	}
 
