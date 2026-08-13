@@ -45,4 +45,3 @@ bin/
 .env.*.local
 
 /cmd/test*
-/examples

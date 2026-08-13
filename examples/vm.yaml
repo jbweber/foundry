@@ -1,0 +1,85 @@
+# Annotated reference showing every supported field.
+# All values are illustrative placeholders — replace them before use.
+apiVersion: foundry.cofront.xyz/v1alpha1
+kind: VirtualMachine
+metadata:
+  name: my-vm                 # VM name (libvirt domain name, normalized to lowercase)
+  labels:                     # Optional: key-value labels for organization
+    environment: example
+    role: example
+  annotations:                # Optional: arbitrary metadata
+    description: "Example VM definition"
+
+spec:
+  # Resource allocation
+  vcpus: 4                    # Number of virtual CPUs
+  memoryGiB: 8                # Memory in GiB
+
+  # Boot disk configuration
+  bootDisk:
+    sizeGB: 50                # Disk size in GB
+    image: fedora-43.qcow2    # Image reference (see DESIGN.md for accepted formats)
+    imagePool: foundry-images # Optional: pool containing base image (default: foundry-images)
+    # OR for empty boot disk:
+    # empty: true             # Create empty disk instead of snapshot
+
+  # Optional: Additional data disks
+  dataDisks:
+    - device: vdb             # Device name (vdb, vdc, etc.)
+      sizeGB: 100
+    - device: vdc
+      sizeGB: 200
+
+  # Network configuration
+  networkInterfaces:
+    - ip: 10.20.30.40/24      # IP with CIDR
+      gateway: 10.20.30.1     # Gateway IP
+      dnsServers:             # DNS servers
+        - 10.20.30.2
+        - 10.20.30.3
+      bridge: br0             # Bridge name to attach to
+
+      # Sets the guest's default route via this interface's gateway. Defaults to
+      # false and is NOT implied for the first interface — if no interface sets
+      # it, the guest gets no default route. At most one interface may set it.
+      defaultRoute: true
+
+    # Optional: Additional interfaces
+    - ip: 192.168.1.50/24
+      gateway: 192.168.1.1
+      dnsServers:
+        - 192.168.1.1
+      bridge: br1
+      defaultRoute: false
+
+      # Optional: 802.1Q VLAN ID (1-4094) applied to the bridge port.
+      # The guest sees untagged traffic; the host bridge must be VLAN-aware
+      # and trunk this ID. Omit for an untagged interface.
+      vlan: 100
+
+      # Optional: network boot from this interface (default: false).
+      # Gives the NIC boot order 1 and demotes the boot disk to order 2.
+      # Set on at most one interface.
+      pxeBoot: false
+
+  # Optional: Cloud-init configuration
+  cloudInit:
+    # Option 1: Use generated cloud-config (default)
+    fqdn: my-vm.example.com   # FQDN (hostname derived from this, normalized to lowercase)
+    sshAuthorizedKeys:        # SSH public keys to inject
+      - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI<replace-with-your-public-key>"
+      - "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC<replace-with-your-public-key>"
+    passwordHash: "$6$..."    # Optional: Root password hash (mkpasswd --method=SHA-512)
+    sshPasswordAuth: false    # Optional: Enable SSH password auth (default: false)
+
+    # Option 2: Use custom raw user-data (overrides generated config)
+    # rawUserData: |
+    #   #!/bin/bash
+    #   echo "provisioning" > /var/log/provision.log
+    # When rawUserData is set, the fields above (fqdn, sshAuthorizedKeys, etc.) are ignored.
+    # Meta-data and network-config are still generated automatically.
+
+  # Optional: Advanced settings
+  cpuMode: host-model         # CPU mode: host-model (default), host-passthrough
+  autostart: true             # Auto-start VM on host boot (default: true)
+  storagePool: foundry-vms    # Storage pool to use (default: foundry-vms)
