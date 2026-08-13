@@ -12,6 +12,11 @@ import (
 	"github.com/jbweber/foundry/api/v1alpha1"
 )
 
+// MaxVlanID is the highest assignable 802.1Q VLAN ID. The 12-bit VLAN field
+// spans 0-4095, but 0 denotes a priority-tagged frame and 4095 is reserved,
+// so the usable range is 1-4094.
+const MaxVlanID = 4094
+
 // LoadFromFile loads a VirtualMachine resource from a YAML file.
 // The file must be in the foundry.cofront.xyz/v1alpha1 format.
 func LoadFromFile(path string) (*v1alpha1.VirtualMachine, error) {
@@ -163,6 +168,8 @@ func validateSpec(vm *v1alpha1.VirtualMachine) error {
 	}
 
 	ipsSeen := make(map[string]bool)
+	defaultRouteIdx := -1
+	pxeBootIdx := -1
 	for i, iface := range vm.Spec.NetworkInterfaces {
 		if iface.IP == "" {
 			return fmt.Errorf("spec.networkInterfaces[%d].ip is required", i)
@@ -177,6 +184,26 @@ func validateSpec(vm *v1alpha1.VirtualMachine) error {
 			return fmt.Errorf("spec.networkInterfaces[%d].ip %q is duplicated", i, iface.IP)
 		}
 		ipsSeen[iface.IP] = true
+
+		// 802.1Q reserves 0 (priority-tagged frames) and 4095, leaving 1-4094 usable.
+		if iface.Vlan != nil && (*iface.Vlan == 0 || *iface.Vlan > MaxVlanID) {
+			return fmt.Errorf("spec.networkInterfaces[%d].vlan %d must be between 1 and %d", i, *iface.Vlan, MaxVlanID)
+		}
+
+		// Boot order and the default route are both domain-wide, so only one
+		// interface may claim either.
+		if iface.DefaultRoute {
+			if defaultRouteIdx >= 0 {
+				return fmt.Errorf("spec.networkInterfaces[%d].defaultRoute conflicts with spec.networkInterfaces[%d]: only one interface may set defaultRoute", i, defaultRouteIdx)
+			}
+			defaultRouteIdx = i
+		}
+		if iface.PXEBoot {
+			if pxeBootIdx >= 0 {
+				return fmt.Errorf("spec.networkInterfaces[%d].pxeBoot conflicts with spec.networkInterfaces[%d]: only one interface may set pxeBoot", i, pxeBootIdx)
+			}
+			pxeBootIdx = i
+		}
 	}
 
 	return nil
