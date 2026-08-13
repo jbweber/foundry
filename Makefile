@@ -1,4 +1,4 @@
-.PHONY: help build test test-unit test-integration coverage lint fmt vet clean install deps tidy check all goimports
+.PHONY: help build test test-unit test-integration coverage lint fmt fmt-check vet clean install deps tidy check all goimports
 
 # Default target
 .DEFAULT_GOAL := help
@@ -35,8 +35,8 @@ help:
 	@echo "Targets:"
 	@grep -E '^##' $(MAKEFILE_LIST) | sed 's/## /  /' | column -t -s ':'
 
-## all: Run all checks (goimports, fmt, vet, lint, test, build)
-all: goimports fmt vet lint test build
+## all: Run all checks (fmt-check, vet, lint, test, build)
+all: fmt-check vet lint test build
 
 ## build: Build the binary
 build:
@@ -79,23 +79,35 @@ lint:
 	@echo "Running golangci-lint..."
 	$(GOCMD) tool golangci-lint run --config .golangci.yml ./...
 
-## goimports: Run goimports to organize imports
+## goimports: Rewrite files to organize imports
 goimports:
 	@echo "Running goimports..."
 	$(GOCMD) tool goimports -w -local github.com/jbweber/foundry .
 
-## fmt: Format all Go files
+## fmt: Rewrite files to be gofmt-clean
 fmt:
 	@echo "Formatting Go files..."
 	$(GOFMT) ./...
+
+## fmt-check: Verify formatting and imports without modifying files
+fmt-check:
+	@echo "Checking formatting and imports..."
+	@unformatted=$$($(GOCMD) tool goimports -l -local github.com/jbweber/foundry .); \
+	if [ -n "$$unformatted" ]; then \
+		echo "The following files are not formatted correctly:"; \
+		echo "$$unformatted" | sed 's/^/  /'; \
+		echo ""; \
+		echo "Run 'make goimports' to fix them."; \
+		exit 1; \
+	fi
 
 ## vet: Run go vet
 vet:
 	@echo "Running go vet..."
 	$(GOVET) ./...
 
-## check: Run quick checks (goimports, fmt, vet, lint, test)
-check: goimports fmt vet lint test
+## check: Run quick checks (fmt-check, vet, lint, test) - never modifies files
+check: fmt-check vet lint test
 
 ## deps: Download dependencies
 deps:
