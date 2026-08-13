@@ -48,6 +48,7 @@ func init() {
 
 	// Subcommands will be added here
 	rootCmd.AddCommand(createCmd)
+	rootCmd.AddCommand(renderCmd)
 	rootCmd.AddCommand(destroyCmd)
 	rootCmd.AddCommand(listCmd)
 	rootCmd.AddCommand(getCmd)
