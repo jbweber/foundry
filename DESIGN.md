@@ -73,10 +73,7 @@ foundry/
 │       ├── get.go           # Get single VM with status
 │       └── interfaces.go    # Consumer-side LibvirtClient interface
 ├── examples/
-│   ├── simple-vm.yaml       # Basic VM config example
-│   ├── multi-disk-vm.yaml   # VM with data disks
-│   ├── custom-pool-vm.yaml  # VM using custom storage pool
-│   └── config.yaml          # Foundry configuration example
+│   └── vm.yaml              # Annotated config covering every supported field
 ├── go.mod
 ├── go.sum
 ├── DESIGN.md                # This file
@@ -130,7 +127,7 @@ spec:
         - 8.8.8.8
         - 1.1.1.1
       bridge: br0             # Bridge name to attach to
-      defaultRoute: true      # Set default route (optional, default: true for first interface)
+      defaultRoute: true      # Set default route (optional, default: false — must be set explicitly)
 
     # Optional: Additional interfaces
     - ip: 192.168.1.50/24
@@ -139,6 +136,8 @@ spec:
         - 192.168.1.1
       bridge: br1
       defaultRoute: false
+      vlan: 100               # Optional: 802.1Q VLAN ID (1-4094) to tag on the bridge
+      pxeBoot: false          # Optional: network boot from this interface (default: false)
 
   # Optional: Cloud-init configuration
   cloudInit:
@@ -192,15 +191,21 @@ status:
 - `metadata.name` → lowercase
 - `spec.cloudInit.fqdn` → lowercase (hostname derived from this)
 
-**Validation checks:**
-- `metadata.name` format: `^[a-z0-9][a-z0-9_-]*[a-z0-9]$` (after normalization)
-  - Must start and end with alphanumeric
-  - Can contain alphanumeric, hyphens, underscores
-- `spec.cloudInit.fqdn` format: valid FQDN (hostname + domain with dots)
+**Validation checks (enforced by `loader.validateSpec`):**
+- `metadata.name` is non-empty
 - VCPUs > 0, memoryGiB > 0, disk sizes > 0
-- IP addresses valid with CIDR notation
-- No duplicate device names in data disks
+- `spec.bootDisk` specifies exactly one of `image` or `empty: true`
+- Data disks have a device name, and no duplicate device names
+- At least one network interface, each with `ip`, `gateway`, `bridge`
 - No duplicate IP addresses in network interfaces
+- `networkInterfaces[].vlan` within 1-4094 when set (see [VLAN Tagging](#vlan-tagging))
+- At most one interface sets `defaultRoute`, and at most one sets `pxeBoot`
+
+**Not yet enforced** (documented intent, no implementation):
+- `metadata.name` format: `^[a-z0-9][a-z0-9_-]*[a-z0-9]$` (after normalization)
+- `spec.cloudInit.fqdn` format: valid FQDN (hostname + domain with dots)
+- IP addresses parse as valid CIDR — a malformed IP currently surfaces later, as a
+  MAC/interface-name generation error rather than a config validation error
 - SSH keys have valid format (ssh-rsa, ssh-ed25519, etc.)
 - Password hash starts with `$` (crypt format)
 
@@ -336,6 +341,74 @@ When a database/state store is available, consider migrating to a better naming 
 - Database-backed lookups for efficient reverse mapping
 
 A database would enable collision-free name generation and efficient interface-to-VM lookups.
+
+### VLAN Tagging
+
+Interfaces may carry an optional `vlan` field holding an 802.1Q VLAN ID (1-4094):
+
+```yaml
+networkInterfaces:
+  - ip: 10.20.30.40/24
+    gateway: 10.20.30.1
+    bridge: br0
+    vlan: 100
+```
+
+This emits a `<vlan>` element on the interface:
+
+```xml
+<interface type='bridge'>
+  <source bridge='br0'/>
+  <vlan>
+    <tag id='100'/>
+  </vlan>
+</interface>
+```
+
+**Semantics**:
+- Tagging happens on the **bridge port**, not inside the guest. The guest sees
+  untagged traffic on a normal virtio NIC.
+- Generated cloud-init network-config is unaffected — no VLAN sub-interface is
+  configured in the guest, and the IP is assigned to the NIC directly.
+- Only a single tag is supported (access-port semantics). Trunking multiple
+  VLANs into one guest interface is not exposed.
+- Omitting `vlan` leaves the interface untagged, matching prior behavior.
+
+**Requirements**:
+- The host bridge must be VLAN-aware and trunk the requested ID. Foundry does
+  not create or configure the VLAN on the host.
+
+**Limitations**:
+⚠️ The VLAN ID range is currently declared via kubebuilder markers but **not enforced at load time**. Reserved IDs (`0`, `4095`) and out-of-range values are passed straight through to libvirt, so the failure surfaces at define time as a libvirt error rather than as a config validation error.
+
+### PXE Boot
+
+Interfaces may set `pxeBoot: true` to network boot instead of booting from disk:
+
+```yaml
+networkInterfaces:
+  - ip: 10.20.30.40/24
+    gateway: 10.20.30.1
+    bridge: br0
+    pxeBoot: true
+```
+
+**Semantics**:
+- The interface is given `<boot order='1'/>` and the boot disk is demoted to
+  order 2, so the VM falls through to disk once provisioning has written one.
+- Only one interface should set this; the boot order is global to the domain.
+- Intended for bare-metal-style provisioning flows (Metal³/Ironic) where an
+  external service serves the network boot chain.
+
+### Default Route
+
+`defaultRoute` controls whether the generated cloud-init network-config gets a
+`0.0.0.0/0` route via that interface's gateway.
+
+⚠️ It defaults to **false** and is **not** implied for the first interface. A spec
+where no interface sets `defaultRoute: true` produces a guest with addresses and
+a gateway configured but no default route. Validation enforces that at most one
+interface sets it, but does not require that any interface does.
 
 ### Storage Management
 
@@ -504,7 +577,12 @@ Key elements (using volume-based disk sources):
     <interface type='bridge'>
       <mac address='be:ef:0a:37:16:16'/>
       <source bridge='br0'/>
+      <!-- Optional: emitted only when spec sets vlan -->
+      <vlan>
+        <tag id='100'/>
+      </vlan>
       <model type='virtio'/>
+      <target dev='vm0a371616'/>
     </interface>
     <serial type='pty'>
       <target type='isa-serial' port='0'/>
@@ -524,8 +602,12 @@ Key elements (using volume-based disk sources):
 ```bash
 # Create VM from config
 foundry create <config.yaml>
-foundry create examples/simple-vm.yaml
+foundry create examples/vm.yaml
 foundry create vm.yaml --pool foundry-ssd  # Use custom pool
+
+# Render the domain XML without creating anything (no libvirt connection)
+foundry render <config.yaml>
+foundry render examples/vm.yaml
 
 # Destroy VM
 foundry destroy <vm-name>

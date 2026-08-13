@@ -629,3 +629,113 @@ func TestValidateSpec_DuplicateIP(t *testing.T) {
 		t.Error("Expected error for duplicate IP")
 	}
 }
+
+// vmWithInterfaces builds an otherwise-valid VM around the given interfaces.
+func vmWithInterfaces(ifaces ...v1alpha1.NetworkInterfaceSpec) *v1alpha1.VirtualMachine {
+	return &v1alpha1.VirtualMachine{
+		ObjectMeta: v1alpha1.ObjectMeta{Name: "test"},
+		Spec: v1alpha1.VirtualMachineSpec{
+			VCPUs:     2,
+			MemoryGiB: 4,
+			BootDisk: v1alpha1.BootDiskSpec{
+				SizeGB: 50,
+				Image:  "fedora-43.qcow2",
+			},
+			NetworkInterfaces: ifaces,
+		},
+	}
+}
+
+func vlanPtr(id uint) *uint { return &id }
+
+func TestValidateSpec_VlanID(t *testing.T) {
+	tests := []struct {
+		name    string
+		vlan    *uint
+		wantErr bool
+	}{
+		{"unset is allowed", nil, false},
+		{"lowest valid", vlanPtr(1), false},
+		{"typical", vlanPtr(100), false},
+		{"highest valid", vlanPtr(MaxVlanID), false},
+		{"zero is priority-tag, reserved", vlanPtr(0), true},
+		{"4095 is reserved", vlanPtr(4095), true},
+		{"above 12-bit range", vlanPtr(4096), true},
+		{"far out of range", vlanPtr(65536), true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			vm := vmWithInterfaces(v1alpha1.NetworkInterfaceSpec{
+				IP:      "10.0.0.1/24",
+				Gateway: "10.0.0.254",
+				Bridge:  "br0",
+				Vlan:    tt.vlan,
+			})
+
+			err := validateSpec(vm)
+			if tt.wantErr && err == nil {
+				t.Errorf("Expected error for %s", tt.name)
+			}
+			if !tt.wantErr && err != nil {
+				t.Errorf("Unexpected error for %s: %v", tt.name, err)
+			}
+		})
+	}
+}
+
+func TestValidateSpec_DuplicateDefaultRoute(t *testing.T) {
+	vm := vmWithInterfaces(
+		v1alpha1.NetworkInterfaceSpec{IP: "10.0.0.1/24", Gateway: "10.0.0.254", Bridge: "br0", DefaultRoute: true},
+		v1alpha1.NetworkInterfaceSpec{IP: "10.0.1.1/24", Gateway: "10.0.1.254", Bridge: "br1", DefaultRoute: true},
+	)
+
+	if err := validateSpec(vm); err == nil {
+		t.Error("Expected error for two interfaces setting defaultRoute")
+	}
+}
+
+func TestValidateSpec_DuplicatePXEBoot(t *testing.T) {
+	vm := vmWithInterfaces(
+		v1alpha1.NetworkInterfaceSpec{IP: "10.0.0.1/24", Gateway: "10.0.0.254", Bridge: "br0", PXEBoot: true},
+		v1alpha1.NetworkInterfaceSpec{IP: "10.0.1.1/24", Gateway: "10.0.1.254", Bridge: "br1", PXEBoot: true},
+	)
+
+	if err := validateSpec(vm); err == nil {
+		t.Error("Expected error for two interfaces setting pxeBoot")
+	}
+}
+
+// The example shipped in examples/vm.yaml is referenced from the README and
+// DESIGN docs, so it must stay loadable as validation tightens.
+func TestLoadFromFile_ShippedExample(t *testing.T) {
+	vm, err := LoadFromFile(filepath.Join("..", "..", "examples", "vm.yaml"))
+	if err != nil {
+		t.Fatalf("examples/vm.yaml failed to load: %v", err)
+	}
+
+	if len(vm.Spec.NetworkInterfaces) < 2 {
+		t.Fatalf("Expected the example to exercise multiple interfaces, got %d", len(vm.Spec.NetworkInterfaces))
+	}
+
+	// The example is the only place vlan/pxeBoot are documented by example;
+	// make sure they actually parse into the spec.
+	tagged := vm.Spec.NetworkInterfaces[1]
+	if tagged.Vlan == nil {
+		t.Error("Expected the example's second interface to set vlan")
+	} else if *tagged.Vlan != 100 {
+		t.Errorf("Example vlan = %d, want 100", *tagged.Vlan)
+	}
+}
+
+func TestValidateSpec_SingleDefaultRouteAndPXEBoot(t *testing.T) {
+	// One of each, on different interfaces, is the normal provisioning shape.
+	vm := vmWithInterfaces(
+		v1alpha1.NetworkInterfaceSpec{IP: "10.0.0.1/24", Gateway: "10.0.0.254", Bridge: "br0", DefaultRoute: true},
+		v1alpha1.NetworkInterfaceSpec{IP: "10.0.1.1/24", Gateway: "10.0.1.254", Bridge: "br1", PXEBoot: true, Vlan: vlanPtr(100)},
+	)
+
+	if err := validateSpec(vm); err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+}

@@ -140,6 +140,13 @@ type NetworkInterfaceSpec struct {
 	// Bridge is the bridge name to attach the interface to.
 	Bridge string `json:"bridge" yaml:"bridge"`
 
+	// Vlan is the 802.1Q VLAN ID to tag this interface with on the bridge.
+	// When set, libvirt applies the tag to the bridge port, so the guest sees
+	// untagged traffic and the generated network-config is unaffected.
+	// The bridge must be VLAN-aware and trunk the given ID.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=4094
+	// +optional
 	Vlan *uint `json:"vlan,omitempty" yaml:"vlan,omitempty"`
 
 	// DNSServers is the list of DNS server IP addresses.

@@ -1056,3 +1056,98 @@ func TestGenerateDomainXML_PXEBoot(t *testing.T) {
 		})
 	}
 }
+
+func TestGenerateDomainXML_Vlan(t *testing.T) {
+	vlan := func(id uint) *uint { return &id }
+
+	tests := []struct {
+		name     string
+		ifaces   []v1alpha1.NetworkInterfaceSpec
+		wantTags []*uint // per interface: nil means no <vlan> element expected
+	}{
+		{
+			name: "no vlan leaves interface untagged",
+			ifaces: []v1alpha1.NetworkInterfaceSpec{
+				{IP: "10.20.30.40/24", Gateway: "10.20.30.1", Bridge: "br0"},
+			},
+			wantTags: []*uint{nil},
+		},
+		{
+			name: "tagged interface",
+			ifaces: []v1alpha1.NetworkInterfaceSpec{
+				{IP: "10.20.30.40/24", Gateway: "10.20.30.1", Bridge: "br0", Vlan: vlan(100)},
+			},
+			wantTags: []*uint{vlan(100)},
+		},
+		{
+			name: "boundary IDs are emitted verbatim",
+			ifaces: []v1alpha1.NetworkInterfaceSpec{
+				{IP: "10.20.30.40/24", Gateway: "10.20.30.1", Bridge: "br0", Vlan: vlan(1)},
+				{IP: "10.20.31.40/24", Gateway: "10.20.31.1", Bridge: "br0", Vlan: vlan(4094)},
+			},
+			wantTags: []*uint{vlan(1), vlan(4094)},
+		},
+		{
+			name: "tagged and untagged interfaces coexist",
+			ifaces: []v1alpha1.NetworkInterfaceSpec{
+				{IP: "10.20.30.40/24", Gateway: "10.20.30.1", Bridge: "br0", DefaultRoute: true},
+				{IP: "10.20.31.40/24", Gateway: "10.20.31.1", Bridge: "br1", Vlan: vlan(250)},
+			},
+			wantTags: []*uint{nil, vlan(250)},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			vm := &v1alpha1.VirtualMachine{
+				ObjectMeta: v1alpha1.ObjectMeta{Name: "vlan-vm"},
+				Spec: v1alpha1.VirtualMachineSpec{
+					VCPUs:     2,
+					MemoryGiB: 4,
+					BootDisk: v1alpha1.BootDiskSpec{
+						SizeGB: 50,
+						Image:  "fedora-43.qcow2",
+					},
+					NetworkInterfaces: tt.ifaces,
+				},
+			}
+
+			xml, err := GenerateDomainXML(vm)
+			if err != nil {
+				t.Fatalf("GenerateDomainXML() error = %v", err)
+			}
+
+			var domain libvirtxml.Domain
+			if err := domain.Unmarshal(xml); err != nil {
+				t.Fatalf("Failed to unmarshal generated XML: %v", err)
+			}
+
+			if len(domain.Devices.Interfaces) != len(tt.wantTags) {
+				t.Fatalf("Interface count = %d, want %d", len(domain.Devices.Interfaces), len(tt.wantTags))
+			}
+
+			for i, want := range tt.wantTags {
+				got := domain.Devices.Interfaces[i].VLan
+
+				if want == nil {
+					if got != nil {
+						t.Errorf("Interface %d has unexpected <vlan> element", i)
+					}
+					continue
+				}
+
+				if got == nil {
+					t.Errorf("Interface %d missing <vlan> element, want tag %d", i, *want)
+					continue
+				}
+				if len(got.Tags) != 1 {
+					t.Errorf("Interface %d has %d vlan tags, want exactly 1", i, len(got.Tags))
+					continue
+				}
+				if got.Tags[0].ID != *want {
+					t.Errorf("Interface %d vlan tag = %d, want %d", i, got.Tags[0].ID, *want)
+				}
+			}
+		})
+	}
+}

@@ -22,6 +22,8 @@ This project isn't suggested for general purpose use, and really exists because 
 - **Pure Go Implementation**: No CGo dependencies, easy to install and deploy
 - **Cloud-init Support**: Automatic SSH key injection and network configuration
 - **Bridge Networking**: Support for multiple network interfaces with bridge connectivity
+- **VLAN Tagging**: Optional 802.1Q tag applied per interface on the bridge port
+- **PXE Boot**: Optionally network boot an interface ahead of the boot disk
 - **Storage Management**: QCOW2 boot disks with backing images, plus additional data disks
 - **Pool Management**: Create, list, and manage libvirt storage pools
 - **Image Management**: Import, list, and manage base OS images
@@ -35,6 +37,7 @@ This project isn't suggested for general purpose use, and really exists because 
 
 - libvirt/libvirtd running locally
 - QEMU/KVM installed
+- Go 1.26+ (only to build from source; release binaries and the container image have no Go dependency)
 
 ### From GitHub Releases
 
@@ -76,8 +79,22 @@ make install
 ### Create a VM
 
 ```bash
-foundry create examples/simple-vm.yaml
+foundry create examples/vm.yaml
 ```
+
+### Preview the Domain XML
+
+Render the libvirt domain XML a config would produce, without connecting to
+libvirt or creating anything:
+
+```bash
+foundry render examples/vm.yaml
+```
+
+The config is loaded, defaulted, and validated exactly as `create` does, so the
+output matches what would be handed to libvirt — useful for checking boot order,
+VLAN tags, and disk targets while iterating on a config. Referenced pools,
+volumes, and base images are not checked for existence.
 
 ### List VMs
 
@@ -162,6 +179,7 @@ spec:
       dnsServers:
         - 8.8.8.8
       bridge: br0
+      vlan: 100               # Optional: 802.1Q VLAN ID (1-4094)
 
   cloudInit:
     fqdn: my-vm.example.com
@@ -179,7 +197,7 @@ status:
       status: "True"
 ```
 
-For complete configuration options, see [DESIGN.md](DESIGN.md#configuration-format).
+A fully annotated example covering every field lives in [examples/vm.yaml](examples/vm.yaml). For the complete configuration reference, see [DESIGN.md](DESIGN.md#configuration-format).
 
 ## Development
 
