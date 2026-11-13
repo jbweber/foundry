@@ -160,3 +160,38 @@ func TestVolumeNameCloudInit(t *testing.T) {
 		})
 	}
 }
+
+func TestVolumeNameVarstore(t *testing.T) {
+	if got, want := VolumeNameVarstore("my-keys", "x86_64"), "varstore_my-keys_x86_64.fd"; got != want {
+		t.Errorf("VolumeNameVarstore() = %q, want %q", got, want)
+	}
+}
+
+func TestParseVolumeNameVarstore(t *testing.T) {
+	tests := []struct {
+		volume      string
+		wantProfile string
+		wantArch    string
+		wantOK      bool
+	}{
+		{"varstore_my-keys_x86_64.fd", "my-keys", "x86_64", true},
+		{"varstore_k_aarch64.fd", "k", "aarch64", true},
+		{"fedora-43.qcow2", "", "", false},
+		{"varstore_my-keys_x86_64.raw", "", "", false},
+		{"varstore_my-keys.fd", "", "", false},
+		{"varstore__x86_64.fd", "", "", false},
+		{"varstore_k_.fd", "", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.volume, func(t *testing.T) {
+			profile, arch, ok := ParseVolumeNameVarstore(tt.volume)
+			if profile != tt.wantProfile || arch != tt.wantArch || ok != tt.wantOK {
+				t.Errorf("ParseVolumeNameVarstore(%q) = %q, %q, %v; want %q, %q, %v",
+					tt.volume, profile, arch, ok, tt.wantProfile, tt.wantArch, tt.wantOK)
+			}
+			if ok && VolumeNameVarstore(profile, arch) != tt.volume {
+				t.Errorf("round trip of %q failed", tt.volume)
+			}
+		})
+	}
+}

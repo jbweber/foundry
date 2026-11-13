@@ -5,6 +5,7 @@ package loader
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
@@ -149,6 +150,10 @@ func validateSpec(vm *v1alpha1.VirtualMachine) error {
 		return fmt.Errorf("spec.cpuMode host-model is not supported for aarch64; use host-passthrough (kvm) or maximum (emulation)")
 	}
 
+	if err := validateFirmware(vm); err != nil {
+		return err
+	}
+
 	// Validate boot disk
 	if vm.Spec.BootDisk.SizeGB <= 0 {
 		return fmt.Errorf("spec.bootDisk.sizeGB must be greater than 0")
@@ -222,4 +227,37 @@ func validateSpec(vm *v1alpha1.VirtualMachine) error {
 	}
 
 	return nil
+}
+
+// validateFirmware checks spec.firmware.
+func validateFirmware(vm *v1alpha1.VirtualMachine) error {
+	fw := vm.Spec.Firmware
+	if fw == nil {
+		return nil
+	}
+	if fw.Loader == "" {
+		return fmt.Errorf("spec.firmware.loader is required")
+	}
+	// Secure Boot needs SMM to protect the varstore, which only x86 has.
+	if fw.SecureBoot && vm.GetArch() != v1alpha1.ArchX86_64 {
+		return fmt.Errorf("spec.firmware.secureBoot is only supported for %s", v1alpha1.ArchX86_64)
+	}
+	if fw.Keys != "" {
+		if fw.NVRAMTemplate != "" {
+			return fmt.Errorf("spec.firmware.keys and spec.firmware.nvramTemplate are mutually exclusive")
+		}
+		if !ValidKeyProfileName(fw.Keys) {
+			return fmt.Errorf("spec.firmware.keys %q must be at most 63 lowercase letters, digits and dashes, starting and ending with a letter or digit", fw.Keys)
+		}
+	}
+	return nil
+}
+
+// keyProfileName is the form of a Secure Boot key profile name. It becomes
+// part of a volume name (naming.VolumeNameVarstore), so it has no "_" or "/".
+var keyProfileName = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
+
+// ValidKeyProfileName reports whether name can name a Secure Boot key profile.
+func ValidKeyProfileName(name string) bool {
+	return len(name) <= 63 && keyProfileName.MatchString(name)
 }

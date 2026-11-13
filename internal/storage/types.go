@@ -23,6 +23,7 @@ const (
 	VolumeTypeData      VolumeType = "data"       // Data disk volume
 	VolumeTypeCloudInit VolumeType = "cloudinit"  // Cloud-init ISO volume
 	VolumeTypeBaseImage VolumeType = "base-image" // Base OS image volume
+	VolumeTypeVarstore  VolumeType = "varstore"   // UEFI varstore template (a Secure Boot key profile)
 )
 
 // VolumeFormat represents the disk format.
@@ -39,6 +40,7 @@ type VolumeSpec struct {
 	Type          VolumeType   // Volume type
 	Format        VolumeFormat // Disk format (qcow2, raw)
 	CapacityGB    uint64       // Capacity in GB
+	CapacityBytes uint64       // Optional: exact capacity in bytes, used instead of CapacityGB (e.g. a UEFI varstore, which QEMU maps as a flash device of exactly its size)
 	BackingVolume string       // Optional: backing volume path for qcow2 snapshots (filesystem path, not pool:volume - required because backing images are typically in a different pool like foundry-images)
 }
 
@@ -56,7 +58,7 @@ func (v *VolumeSpec) Validate() error {
 	if v.Format != VolumeFormatQCOW2 && v.Format != VolumeFormatRaw {
 		return fmt.Errorf("invalid volume format: %s (must be qcow2 or raw)", v.Format)
 	}
-	if v.CapacityGB == 0 && v.Type != VolumeTypeCloudInit {
+	if v.CapacityGB == 0 && v.CapacityBytes == 0 && v.Type != VolumeTypeCloudInit {
 		return fmt.Errorf("volume capacity must be greater than 0")
 	}
 	if v.BackingVolume != "" && v.Format != VolumeFormatQCOW2 {

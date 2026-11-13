@@ -27,7 +27,7 @@ This project isn't suggested for general purpose use, and really exists because 
 - **Storage Management**: QCOW2 boot disks with backing images, plus additional data disks
 - **Pool Management**: Create, list, and manage libvirt storage pools
 - **Image Management**: Import, list, and manage base OS images
-- **UEFI Boot**: Modern UEFI firmware support
+- **UEFI Boot**: Modern UEFI firmware support, with pinned firmware files and Secure Boot key profiles
 - **x86_64 and aarch64 Guests**: KVM when the guest matches the hypervisor's architecture, QEMU emulation otherwise
 - **Deterministic MACs**: MAC addresses automatically calculated from IP addresses
 - **Metadata Persistence**: VM specs stored in libvirt domain metadata for state recovery
@@ -108,6 +108,37 @@ QEMU emulation, which is much slower but lets an x86_64 host boot an aarch64
 image, for example. Emulation needs the QEMU system emulator and UEFI firmware
 for the guest's architecture installed on the hypervisor. A config without
 `spec.arch` is an x86_64 guest under KVM, as before.
+
+### UEFI Firmware and Secure Boot
+
+Without `spec.firmware`, libvirt picks the UEFI firmware for the guest's
+architecture, as before. `spec.firmware` pins it instead:
+
+```yaml
+spec:
+  firmware:
+    loader: /usr/share/edk2/ovmf/OVMF_CODE.secboot.fd  # firmware code on the hypervisor
+    secureBoot: true        # secure loader and SMM; x86_64 only
+    keys: my-keys           # a Secure Boot key profile, or:
+    # nvramTemplate: /usr/share/edk2/ovmf/OVMF_VARS.secboot.fd
+```
+
+A key profile is a UEFI varstore with your own PK, KEK, db and dbx enrolled
+(built, for example, with `virt-fw-vars` from
+[virt-firmware](https://gitlab.com/kraxel/virt-firmware)), imported once per
+architecture into the `foundry-images` pool:
+
+```bash
+foundry varstore import my-keys.fd my-keys                  # x86_64 (default)
+foundry varstore import - my-keys --arch aarch64 < arm.fd   # from stdin
+foundry varstore list
+foundry varstore delete my-keys --arch aarch64
+```
+
+`create` looks up the profile's varstore for `spec.arch` and fails before
+making anything if it is missing. libvirt copies the template into each VM's
+own varstore on its first start, so replacing or deleting a profile leaves
+existing VMs alone.
 
 ### List VMs
 

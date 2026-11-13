@@ -86,6 +86,47 @@ type VirtualMachineSpec struct {
 	// +optional
 	// +kubebuilder:default=true
 	Autostart *bool `json:"autostart,omitempty" yaml:"autostart,omitempty"`
+
+	// Firmware pins the UEFI firmware and its varstore template instead of
+	// letting libvirt auto-select them (firmware='efi'), and can turn on
+	// Secure Boot. Without it the VM gets libvirt's auto-selected UEFI
+	// firmware, as before.
+	// +optional
+	Firmware *FirmwareSpec `json:"firmware,omitempty" yaml:"firmware,omitempty"`
+}
+
+// FirmwareSpec defines an explicit UEFI firmware (pflash) configuration.
+//
+// +k8s:deepcopy-gen=true
+type FirmwareSpec struct {
+	// Loader is the path of the firmware code image on the hypervisor, for
+	// the guest's architecture (e.g. "/usr/share/edk2/ovmf/OVMF_CODE.secboot.fd"
+	// for x86_64, "/usr/share/edk2/aarch64/QEMU_EFI-silent-pflash.raw" for
+	// aarch64).
+	Loader string `json:"loader" yaml:"loader"`
+
+	// SecureBoot marks the loader as secure (only the guest's SMM code may
+	// write the varstore) and turns SMM on, as Secure Boot requires.
+	// x86_64 only. Defaults to false.
+	// +optional
+	SecureBoot bool `json:"secureBoot,omitempty" yaml:"secureBoot,omitempty"`
+
+	// NVRAMTemplate is the varstore file on the hypervisor copied to the
+	// VM's own varstore on first start (e.g. one with a custom Secure Boot
+	// db enrolled). Defaults to the template libvirt pairs with the loader.
+	// Mutually exclusive with Keys.
+	// +optional
+	NVRAMTemplate string `json:"nvramTemplate,omitempty" yaml:"nvramTemplate,omitempty"`
+
+	// Keys names a Secure Boot key profile: a varstore with a set of PK, KEK,
+	// db and dbx entries enrolled, imported once with 'foundry varstore
+	// import' and kept as a volume of the foundry-images pool. foundry looks
+	// the volume up for the guest architecture (spec.arch) and uses it as
+	// the VM's varstore template. Lowercase letters, digits and dashes, at
+	// most 63 characters. Mutually exclusive with NVRAMTemplate.
+	// +optional
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`
+	Keys string `json:"keys,omitempty" yaml:"keys,omitempty"`
 }
 
 // BootDiskSpec defines the boot disk configuration.

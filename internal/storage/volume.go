@@ -171,6 +171,9 @@ func (m *Manager) VolumeExists(_ context.Context, poolName, volumeName string) (
 func generateVolumeXML(_ string, spec VolumeSpec, _ *Manager) (string, error) {
 	// Convert capacity from GB to bytes
 	capacityBytes := spec.CapacityGB * 1024 * 1024 * 1024
+	if spec.CapacityBytes != 0 {
+		capacityBytes = spec.CapacityBytes
+	}
 
 	// Get the QEMU user/group IDs for this system
 	uid, gid, _ := GetQEMUUserGroup()

@@ -45,6 +45,7 @@ foundry/
 │   ├── get.go               # VM get command (single VM details)
 │   ├── pool.go              # Pool management commands
 │   ├── image.go             # Image management commands
+│   ├── varstore.go          # Secure Boot key profile commands
 │   └── storage.go           # Storage status command
 ├── api/
 │   └── v1alpha1/
@@ -68,7 +69,8 @@ foundry/
 │   │   ├── manager.go       # Storage manager + consumer interface
 │   │   ├── pool.go          # Pool operations (create, list, delete)
 │   │   ├── volume.go        # Volume operations (create, delete, upload)
-│   │   └── image.go         # Base image management (import, pull, list)
+│   │   ├── image.go         # Base image management (import, pull, list)
+│   │   └── varstore.go      # Secure Boot key profiles (validate, import, list, delete)
 │   ├── cloudinit/
 │   │   ├── generator.go     # Generate user-data, meta-data, network-config
 │   │   └── iso.go           # Create ISO using iso9660
@@ -215,6 +217,10 @@ status:
 - At most one interface sets `defaultRoute`, and at most one sets `pxeBoot`
 - `spec.arch`, when set, is `x86_64` or `aarch64` (see [Guest Architecture](#guest-architecture))
 - `spec.cpuMode` is not `host-model` for an `aarch64` guest
+- `spec.firmware`, when set, has a `loader`; `secureBoot` only for x86_64;
+  `keys` and `nvramTemplate` not both; `keys` is 1-63 lowercase letters,
+  digits and dashes, starting and ending with a letter or digit (see
+  [UEFI Firmware and Secure Boot](#uefi-firmware-and-secure-boot))
 
 **Not yet enforced** (documented intent, no implementation):
 - `metadata.name` format: `^[a-z0-9][a-z0-9_-]*[a-z0-9]$` (after normalization)
@@ -431,9 +437,10 @@ or `--host-arch`.
 |---|---|---|
 | Machine | `q35` | `virt` |
 | Features | ACPI, APIC, PAE | ACPI, GICv3 (works under both KVM and TCG) |
-| Firmware | UEFI, auto-selected (OVMF) | UEFI, auto-selected (AAVMF) |
+| Firmware | UEFI, auto-selected (OVMF) unless `spec.firmware` pins it | UEFI, auto-selected (AAVMF) unless `spec.firmware` pins it |
 | `<bios useserial>` | yes | no (libvirt refuses it off x86) |
 | Clock timers | rtc, pit, hpet | none (architected generic timer) |
+| Secure Boot (`spec.firmware.secureBoot`) | yes, with SMM | no (no SMM) |
 | Cloud-init CD-ROM | SATA (`sda`) | SCSI (`sda`) on a virtio-scsi controller; `virt` has no AHCI |
 | Serial console | isa-serial, guest `ttyS0` | system-serial (pl011), guest `ttyAMA0` |
 
@@ -449,6 +456,71 @@ The SCSI CD-ROM follows virt-install's default bus for non-x86 guests
 - Any emulated guest: `maximum`. `host-model` and `host-passthrough` describe
   the host's CPU, which an emulated guest of another architecture cannot have,
   so domain XML generation refuses them under emulation.
+
+### UEFI Firmware and Secure Boot
+
+Without `spec.firmware` the domain keeps `<os firmware='efi'>`: libvirt picks
+OVMF (x86_64) or AAVMF (aarch64) and its varstore template from the firmware
+descriptors it finds ([BIOS bootloader](https://libvirt.org/formatdomain.html#bios-bootloader)).
+On x86_64 that is often a template with Microsoft's keys enrolled.
+
+`spec.firmware` replaces auto-selection with explicit elements:
+
+```yaml
+firmware:
+  loader: /usr/share/edk2/ovmf/OVMF_CODE.secboot.fd
+  secureBoot: true
+  keys: my-keys            # or nvramTemplate: /path/to/VARS.fd
+```
+
+```xml
+<os>
+  <loader readonly='yes' secure='yes' type='pflash'>/usr/share/edk2/ovmf/OVMF_CODE.secboot.fd</loader>
+  <nvram template='/var/lib/libvirt/images/foundry/images/varstore_my-keys_x86_64.fd'/>
+</os>
+<features>
+  <smm state='on'/>
+</features>
+```
+
+- `loader` is the firmware code image on the hypervisor, for the guest's
+  architecture. It is mapped read-only as pflash.
+- `nvramTemplate` is a varstore file libvirt copies into the VM's own
+  varstore (`/var/lib/libvirt/qemu/nvram/<name>_VARS.fd`) on first start.
+  Without it libvirt uses the template it pairs with the loader. `destroy`
+  undefines with the NVRAM flag, so the VM's own varstore goes with it.
+- `secureBoot` marks the loader secure: only SMM code may write the varstore,
+  so the guest OS cannot change the enrolled keys. libvirt refuses
+  `secure='yes'` without `<smm state='on'/>`
+  ([hypervisor features](https://libvirt.org/formatdomain.html#hypervisor-features)),
+  so foundry turns SMM on with it. SMM is x86-only, so validation refuses
+  `secureBoot` for aarch64; an aarch64 guest can still pin its loader and a
+  key profile.
+- `keys` names a **Secure Boot key profile**: a varstore with a PK, KEK, db
+  and dbx enrolled, stored as the volume `varstore_<profile>_<arch>.fd` of the
+  `foundry-images` pool. The architecture comes from `spec.arch` (x86_64 when
+  unset). At create time foundry checks the volume exists before making any
+  storage, asks libvirt for its path, and uses that path as the
+  `nvramTemplate`; libvirt takes a template only as a host path, not as a pool
+  volume. The stored spec keeps the profile name. `foundry render` does not
+  connect to libvirt and shows the path under the default pool directory.
+
+**Key profile commands** (`foundry varstore`):
+- `import <file|-> <profile> [--arch x86_64|aarch64] [--replace]` checks the
+  file is a raw edk2 varstore before uploading it: an
+  `EFI_FIRMWARE_VOLUME_HEADER` with the `_FVH` signature at offset 40, the
+  variable store file system GUID (`gEfiSystemNvDataFvGuid`), a firmware
+  volume length that fits the file, a whole number of 4 KiB blocks, and at
+  most 64 MiB (the aarch64 flash size). A qcow2 varstore is refused. The
+  volume is created raw at exactly the file's size, since QEMU maps it as a
+  flash device of that size, and filled with `StorageVolUpload`. An existing
+  profile is replaced only with `--replace`.
+- `list` shows every profile and architecture in the pool. `foundry image
+  list` leaves these volumes out.
+- `delete <profile> [--arch ...]` removes one architecture's varstore.
+
+Replacing or deleting a profile does not affect existing VMs: each has its own
+copy of the varstore from its first start.
 
 ### Default Route
 
@@ -713,6 +785,18 @@ foundry image delete <image-name>
 
 # Show image details and usage
 foundry image info <image-name>
+```
+
+**Secure Boot Key Profiles:**
+```bash
+# Import a varstore as a key profile (--arch defaults to x86_64; "-" reads stdin)
+foundry varstore import <file|-> <profile> [--arch aarch64] [--replace]
+
+# List key profiles
+foundry varstore list
+
+# Delete a key profile's varstore for one architecture
+foundry varstore delete <profile> [--arch aarch64]
 ```
 
 **Storage Overview:**
