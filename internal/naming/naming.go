@@ -91,3 +91,32 @@ func VolumeNameData(vmName, device string) string {
 func VolumeNameCloudInit(vmName string) string {
 	return fmt.Sprintf("%s_cloudinit.iso", vmName)
 }
+
+// VarstorePrefix starts the name of every Secure Boot key profile volume.
+const VarstorePrefix = "varstore_"
+
+// VolumeNameVarstore returns the volume name of a Secure Boot key profile's
+// varstore for a guest architecture (libvirt's name, e.g. "x86_64").
+// Format: varstore_{profile}_{arch}.fd (e.g., "varstore_my-keys_x86_64.fd")
+func VolumeNameVarstore(profile, arch string) string {
+	return fmt.Sprintf("%s%s_%s.fd", VarstorePrefix, profile, arch)
+}
+
+// ParseVolumeNameVarstore splits a varstore volume name into its profile and
+// architecture; ok is false for any other volume name. Profile names have no
+// "_" (an architecture may: "x86_64"), so the first "_" ends the profile.
+func ParseVolumeNameVarstore(volume string) (profile, arch string, ok bool) {
+	rest, found := strings.CutPrefix(volume, VarstorePrefix)
+	if !found {
+		return "", "", false
+	}
+	rest, found = strings.CutSuffix(rest, ".fd")
+	if !found {
+		return "", "", false
+	}
+	profile, arch, found = strings.Cut(rest, "_")
+	if !found || profile == "" || arch == "" {
+		return "", "", false
+	}
+	return profile, arch, true
+}

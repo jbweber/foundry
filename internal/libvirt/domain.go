@@ -7,6 +7,7 @@ import (
 
 	"github.com/jbweber/foundry/api/v1alpha1"
 	"github.com/jbweber/foundry/internal/naming"
+	"github.com/jbweber/foundry/internal/storage"
 )
 
 const (
@@ -195,6 +196,9 @@ func GenerateDomainXML(vm *v1alpha1.VirtualMachine, hostArch string) (string, er
 	if vm.GetArch() == v1alpha1.ArchAarch64 {
 		applyAarch64(domain)
 	}
+	if vm.Spec.Firmware != nil {
+		applyFirmware(domain, vm.Spec.Firmware, vm.GetArch())
+	}
 
 	// Add cloud-init ISO if configured (volume-based)
 	if vm.Spec.CloudInit != nil {
@@ -315,6 +319,50 @@ func addCdrom(domain *libvirtxml.Domain, cdrom libvirtxml.DomainDisk) {
 		})
 	}
 	domain.Devices.Disks = append(domain.Devices.Disks, cdrom)
+}
+
+// applyFirmware replaces UEFI auto-selection (firmware='efi') with an explicit
+// pflash loader and, if given, the varstore template, so the VM gets exactly
+// the firmware and enrolled keys asked for. libvirt copies the template to the
+// VM's own varstore (/var/lib/libvirt/qemu/nvram/<name>_VARS.fd) on first
+// start and keeps it until the domain is undefined with its NVRAM, as
+// destroy does (https://libvirt.org/formatdomain.html#bios-bootloader).
+//
+// A secure loader lets only SMM code write the varstore, which is what keeps
+// Secure Boot's keys out of the guest OS's reach; libvirt refuses
+// secure='yes' without <smm state='on'/>
+// (https://libvirt.org/formatdomain.html#hypervisor-features). SMM exists
+// only on x86, so the loader validates secureBoot as x86_64 only.
+func applyFirmware(domain *libvirtxml.Domain, fw *v1alpha1.FirmwareSpec, arch string) {
+	domain.OS.Firmware = ""
+	domain.OS.Loader = &libvirtxml.DomainLoader{
+		Path:     fw.Loader,
+		Readonly: "yes",
+		Type:     "pflash",
+	}
+	if template := nvramTemplate(fw, arch); template != "" {
+		domain.OS.NVRam = &libvirtxml.DomainNVRam{Template: template}
+	}
+	if fw.SecureBoot {
+		domain.OS.Loader.Secure = "yes"
+		domain.Features.SMM = &libvirtxml.DomainFeatureSMM{State: "on"}
+	}
+}
+
+// nvramTemplate returns the varstore template for a firmware spec: the
+// nvramTemplate path, or for a key profile (spec.firmware.keys) the path its
+// varstore volume has in the default foundry-images pool. create does not
+// rely on that default: it asks libvirt for the volume's path and passes it
+// as NVRAMTemplate (resolveKeyProfile in internal/vm), so this path is what
+// render shows and what create gets with the default pool layout.
+//
+// libvirt takes the template only as a host path, not as a pool volume
+// (https://libvirt.org/formatdomain.html#bios-bootloader).
+func nvramTemplate(fw *v1alpha1.FirmwareSpec, arch string) string {
+	if fw.NVRAMTemplate != "" || fw.Keys == "" {
+		return fw.NVRAMTemplate
+	}
+	return storage.DefaultImagesPath + "/" + naming.VolumeNameVarstore(fw.Keys, arch)
 }
 
 // applyAarch64 adjusts an x86_64 (q35) domain definition for an aarch64 guest

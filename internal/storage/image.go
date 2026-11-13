@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/jbweber/foundry/internal/naming"
 )
 
 // ImportImage imports a base image from a local file into the foundry-images pool.
@@ -81,9 +83,21 @@ func (m *Manager) PullImage(ctx context.Context, url, imageName, checksum string
 	return fmt.Errorf("pull image is not yet implemented")
 }
 
-// ListImages lists all base images in the foundry-images pool.
+// ListImages lists all base images in the foundry-images pool. Secure Boot
+// key profile varstores share the pool but are not images; ListVarstores
+// lists them.
 func (m *Manager) ListImages(ctx context.Context) ([]VolumeInfo, error) {
-	return m.ListVolumes(ctx, DefaultImagesPool)
+	vols, err := m.ListVolumes(ctx, DefaultImagesPool)
+	if err != nil {
+		return nil, err
+	}
+	images := vols[:0]
+	for _, v := range vols {
+		if _, _, ok := naming.ParseVolumeNameVarstore(v.Name); !ok {
+			images = append(images, v)
+		}
+	}
+	return images, nil
 }
 
 // DeleteImage deletes a base image from the foundry-images pool.

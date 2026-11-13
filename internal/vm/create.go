@@ -171,6 +171,14 @@ func createFromConfigWithDeps(ctx context.Context, vm *v1alpha1.VirtualMachine, 
 		return createErr
 	}
 
+	// Step 2b: Find the Secure Boot key profile's varstore, before any
+	// storage is created, so a missing profile fails without cleanup
+	var domainVM *v1alpha1.VirtualMachine
+	domainVM, createErr = resolveKeyProfile(ctx, vm, sm)
+	if createErr != nil {
+		return createErr
+	}
+
 	// Step 3: Parse image reference and get backing image path (if specified)
 	var backingVolume string
 	if vm.Spec.BootDisk.Image != "" && !vm.Spec.BootDisk.Empty {
@@ -283,7 +291,7 @@ func createFromConfigWithDeps(ctx context.Context, vm *v1alpha1.VirtualMachine, 
 		log.Printf("Guest %s on a %s hypervisor: domain type %s", vm.Spec.Arch, hostArch, vm.GetDomainType(hostArch))
 	}
 	var domainXML string
-	domainXML, createErr = foundrylibvirt.GenerateDomainXML(vm, hostArch)
+	domainXML, createErr = foundrylibvirt.GenerateDomainXML(domainVM, hostArch)
 	if createErr != nil {
 		return fmt.Errorf("failed to generate domain XML: %w", createErr)
 	}
@@ -322,6 +330,43 @@ func createFromConfigWithDeps(ctx context.Context, vm *v1alpha1.VirtualMachine, 
 
 	log.Printf("VM '%s' created successfully!", vm.Name)
 	return nil
+}
+
+// resolveKeyProfile returns the VM to generate the domain XML from. Without
+// spec.firmware.keys that is vm itself. With it, it is a copy whose
+// nvramTemplate is the host path libvirt reports for the profile's varstore
+// volume in the foundry-images pool: libvirt takes a varstore template only
+// as a path, not as a pool volume, and copies it to the VM's own varstore on
+// first start. vm itself, with the profile name, is what gets stored as the
+// VM's spec.
+func resolveKeyProfile(ctx context.Context, vm *v1alpha1.VirtualMachine, sm storageManager) (*v1alpha1.VirtualMachine, error) {
+	fw := vm.Spec.Firmware
+	if fw == nil || fw.Keys == "" {
+		return vm, nil
+	}
+	arch := vm.GetArch()
+	name := naming.VolumeNameVarstore(fw.Keys, arch)
+	log.Printf("Looking up Secure Boot key profile %q (%s:%s)...", fw.Keys, storage.DefaultImagesPool, name)
+	exists, err := sm.VolumeExists(ctx, storage.DefaultImagesPool, name)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check key profile varstore: %w", err)
+	}
+	if !exists {
+		return nil, fmt.Errorf("key profile %q has no %s varstore in %s (import it with 'foundry varstore import <file> %s --arch %s')",
+			fw.Keys, arch, storage.DefaultImagesPool, fw.Keys, arch)
+	}
+	path, err := sm.GetImagePath(ctx, name)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get key profile varstore path: %w", err)
+	}
+	log.Printf("Using varstore template (volume): %s", path)
+
+	resolved := *vm
+	resolvedFW := *fw
+	resolvedFW.NVRAMTemplate = path
+	resolvedFW.Keys = ""
+	resolved.Spec.Firmware = &resolvedFW
+	return &resolved, nil
 }
 
 // cleanupWithDeps attempts to clean up all VM resources on failure.

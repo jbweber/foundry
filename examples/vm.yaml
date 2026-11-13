@@ -85,4 +85,9 @@ spec:
   cpuMode: host-model         # CPU mode: host-model, host-passthrough, maximum (default
                               # by arch and KVM vs emulation; host-model is x86_64 only)
   autostart: true             # Auto-start VM on host boot (default: true)
+  # firmware:                 # Pin the UEFI firmware (default: libvirt auto-selects it)
+  #   loader: /usr/share/edk2/ovmf/OVMF_CODE.secboot.fd  # Firmware code image on the hypervisor
+  #   secureBoot: true        # Secure loader + SMM (x86_64 only)
+  #   keys: my-keys           # Secure Boot key profile ('foundry varstore import'), or
+  #   nvramTemplate: /path/VARS.fd  # a varstore template path (not both)
   storagePool: foundry-vms    # Storage pool to use (default: foundry-vms)
