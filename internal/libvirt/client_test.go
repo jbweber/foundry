@@ -37,7 +37,7 @@ func TestConnect_CustomSocket(t *testing.T) {
 	}
 
 	// Try explicit socket path
-	c, err := Connect("/var/run/libvirt/libvirt-sock", 5*time.Second)
+	c, err := Connect(DefaultSocket(), 5*time.Second)
 	if err != nil {
 		t.Skipf("libvirt not available: %v", err)
 	}

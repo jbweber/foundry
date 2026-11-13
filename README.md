@@ -150,6 +150,27 @@ foundry pool delete my-pool
 foundry storage status
 ```
 
+### Choose the libvirt Socket
+
+Foundry talks to `qemu:///system` over a UNIX socket. By default it uses
+virtqemud's socket (`/var/run/libvirt/virtqemud-sock`) when it exists, as
+virsh does on hosts that run libvirt's modular daemons, and the legacy
+`/var/run/libvirt/libvirt-sock` otherwise.
+
+`--socket` picks another socket for any command. To manage a libvirt on
+another machine, forward its socket over SSH and point foundry at the local
+end:
+
+```bash
+ssh -N -L /tmp/libvirt.sock:/run/libvirt/virtqemud-sock user@hypervisor &
+foundry --socket /tmp/libvirt.sock list
+```
+
+Domains and volumes live on the far end. Files foundry reads itself (the VM
+config, an image to import) come from the machine foundry runs on. Volume
+ownership comes from the local `/etc/libvirt/qemu.conf` and QEMU user, so the
+QEMU user's UID and GID should match on both machines.
+
 ## Configuration
 
 See [examples/](examples/) directory for sample configurations.
