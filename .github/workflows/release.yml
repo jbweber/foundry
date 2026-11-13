@@ -21,7 +21,9 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version-file: go.mod
+          # Newest 1.27 patch release (security fixes); go.mod's go line is only the minimum.
+          go-version: '1.27'
+          check-latest: true
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4

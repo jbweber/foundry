@@ -38,7 +38,7 @@ This project isn't suggested for general purpose use, and really exists because 
 
 - libvirt/libvirtd running locally
 - QEMU/KVM installed
-- Go 1.26+ (only to build from source; release binaries and the container image have no Go dependency)
+- Go 1.27+ (only to build from source; release binaries and the container image have no Go dependency)
 
 ### From GitHub Releases
 
