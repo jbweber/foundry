@@ -37,11 +37,22 @@ type VirtualMachineSpec struct {
 	// +kubebuilder:validation:Minimum=1
 	VCPUs int `json:"vcpus" yaml:"vcpus"`
 
-	// CPUMode defines the CPU model exposure mode.
-	// Valid values: "host-model" (default), "host-passthrough".
+	// Arch is the guest CPU architecture, using libvirt's names.
+	// Valid values: "x86_64" (default), "aarch64".
+	// A guest of the hypervisor's own architecture runs under KVM; any other
+	// runs under QEMU emulation (TCG), which is slow but needs no matching
+	// hardware.
 	// +optional
-	// +kubebuilder:validation:Enum=host-model;host-passthrough
-	// +kubebuilder:default=host-model
+	// +kubebuilder:validation:Enum=x86_64;aarch64
+	Arch string `json:"arch,omitempty" yaml:"arch,omitempty"`
+
+	// CPUMode defines the CPU model exposure mode.
+	// Valid values: "host-model", "host-passthrough", "maximum".
+	// Defaults to "host-model" for an x86_64 guest under KVM,
+	// "host-passthrough" for an aarch64 guest under KVM, and "maximum" for
+	// an emulated guest, which cannot use the host's CPU.
+	// +optional
+	// +kubebuilder:validation:Enum=host-model;host-passthrough;maximum
 	CPUMode string `json:"cpuMode,omitempty" yaml:"cpuMode,omitempty"`
 
 	// MemoryGiB is the amount of memory to allocate in gibibytes (GiB).

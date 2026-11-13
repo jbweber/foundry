@@ -16,41 +16,47 @@ type mockLibvirtClient struct {
 	mu sync.Mutex
 
 	// Configurable behavior
-	connectListAllDomainsFunc func(needResults int32, flags libvirt.ConnectListAllDomainsFlags) ([]libvirt.Domain, uint32, error)
-	domainGetInfoFunc         func(dom libvirt.Domain) (uint8, uint64, uint64, uint16, uint64, error)
-	domainGetAutostartFunc    func(dom libvirt.Domain) (int32, error)
-	domainLookupByNameFunc    func(name string) (libvirt.Domain, error)
-	domainDefineXMLFunc       func(xml string) (libvirt.Domain, error)
-	domainSetAutostartFunc    func(dom libvirt.Domain, autostart int32) error
-	domainCreateFunc          func(dom libvirt.Domain) error
-	domainGetStateFunc        func(dom libvirt.Domain, flags uint32) (int32, int32, error)
-	domainShutdownFunc        func(dom libvirt.Domain) error
-	domainDestroyFunc         func(dom libvirt.Domain) error
-	domainUndefineFlagsFunc   func(dom libvirt.Domain, flags libvirt.DomainUndefineFlagsValues) error
-	domainUndefineFunc        func(dom libvirt.Domain) error
-	domainSetMetadataFunc     func(dom libvirt.Domain, typ int32, metadata libvirt.OptString, key libvirt.OptString, uri libvirt.OptString, flags libvirt.DomainModificationImpact) error
-	domainGetMetadataFunc     func(dom libvirt.Domain, typ int32, uri libvirt.OptString, flags libvirt.DomainModificationImpact) (string, error)
+	connectListAllDomainsFunc  func(needResults int32, flags libvirt.ConnectListAllDomainsFlags) ([]libvirt.Domain, uint32, error)
+	domainGetInfoFunc          func(dom libvirt.Domain) (uint8, uint64, uint64, uint16, uint64, error)
+	domainGetAutostartFunc     func(dom libvirt.Domain) (int32, error)
+	domainLookupByNameFunc     func(name string) (libvirt.Domain, error)
+	domainDefineXMLFunc        func(xml string) (libvirt.Domain, error)
+	domainSetAutostartFunc     func(dom libvirt.Domain, autostart int32) error
+	domainCreateFunc           func(dom libvirt.Domain) error
+	domainGetStateFunc         func(dom libvirt.Domain, flags uint32) (int32, int32, error)
+	domainShutdownFunc         func(dom libvirt.Domain) error
+	domainDestroyFunc          func(dom libvirt.Domain) error
+	domainUndefineFlagsFunc    func(dom libvirt.Domain, flags libvirt.DomainUndefineFlagsValues) error
+	domainUndefineFunc         func(dom libvirt.Domain) error
+	domainSetMetadataFunc      func(dom libvirt.Domain, typ int32, metadata libvirt.OptString, key libvirt.OptString, uri libvirt.OptString, flags libvirt.DomainModificationImpact) error
+	domainGetMetadataFunc      func(dom libvirt.Domain, typ int32, uri libvirt.OptString, flags libvirt.DomainModificationImpact) (string, error)
+	connectGetCapabilitiesFunc func() (string, error)
 
 	// Call tracking
-	connectListAllDomainsCalls int
-	domainGetInfoCalls         []libvirt.Domain
-	domainGetAutostartCalls    []libvirt.Domain
-	domainLookupByNameCalls    []string
-	domainDefineXMLCalls       []string
-	domainSetAutostartCalls    []libvirt.Domain
-	domainCreateCalls          []libvirt.Domain
-	domainGetStateCalls        []libvirt.Domain
-	domainShutdownCalls        []libvirt.Domain
-	domainDestroyCalls         []libvirt.Domain
-	domainUndefineFlagsCalls   []libvirt.Domain
-	domainUndefineCalls        []libvirt.Domain
-	domainSetMetadataCalls     []libvirt.Domain
-	domainGetMetadataCalls     []libvirt.Domain
+	connectListAllDomainsCalls  int
+	domainGetInfoCalls          []libvirt.Domain
+	domainGetAutostartCalls     []libvirt.Domain
+	domainLookupByNameCalls     []string
+	domainDefineXMLCalls        []string
+	domainSetAutostartCalls     []libvirt.Domain
+	domainCreateCalls           []libvirt.Domain
+	domainGetStateCalls         []libvirt.Domain
+	domainShutdownCalls         []libvirt.Domain
+	domainDestroyCalls          []libvirt.Domain
+	domainUndefineFlagsCalls    []libvirt.Domain
+	domainUndefineCalls         []libvirt.Domain
+	domainSetMetadataCalls      []libvirt.Domain
+	domainGetMetadataCalls      []libvirt.Domain
+	connectGetCapabilitiesCalls int
 }
 
 // newMockLibvirtClient creates a new mock libvirt client with default behavior.
 func newMockLibvirtClient() *mockLibvirtClient {
 	m := &mockLibvirtClient{}
+
+	m.connectGetCapabilitiesFunc = func() (string, error) {
+		return `<capabilities><host><cpu><arch>x86_64</arch></cpu></host></capabilities>`, nil
+	}
 
 	// Default: no domains
 	m.connectListAllDomainsFunc = func(needResults int32, flags libvirt.ConnectListAllDomainsFlags) ([]libvirt.Domain, uint32, error) {
@@ -352,4 +358,11 @@ func (m *mockStorageManager) ListVolumes(ctx context.Context, poolName string) (
 // Uses metadata.NewClient with our mock which implements metadata.LibvirtClient.
 func newMockMetadataClient(lv *mockLibvirtClient) *metadata.Client {
 	return metadata.NewClient(lv)
+}
+
+func (m *mockLibvirtClient) ConnectGetCapabilities() (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.connectGetCapabilitiesCalls++
+	return m.connectGetCapabilitiesFunc()
 }

@@ -37,7 +37,7 @@
 //	    },
 //	}
 //
-//	xml, err := libvirt.GenerateDomainXML(vm, "foundry-vms")
+//	xml, err := libvirt.GenerateDomainXML(vm, hostArch) // hostArch from client.HostArch()
 //	if err != nil {
 //	    return err
 //	}

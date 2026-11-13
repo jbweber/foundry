@@ -40,16 +40,29 @@ func GetCloudInitVolumeName(vm *v1alpha1.VirtualMachine) string {
 	return naming.VolumeNameCloudInit(vm.Name)
 }
 
-// GenerateDomainXML generates libvirt domain XML from VM configuration
-func GenerateDomainXML(vm *v1alpha1.VirtualMachine) (string, error) {
-	// Get CPU mode with default
-	cpuMode := vm.Spec.CPUMode
-	if cpuMode == "" {
-		cpuMode = "host-model"
+// GenerateDomainXML generates libvirt domain XML from VM configuration.
+//
+// hostArch is the architecture of the machine libvirt runs on, in libvirt's
+// names (see HostArch). A guest of that architecture runs under KVM, any
+// other under QEMU emulation. A spec without spec.arch is an x86_64 guest
+// under KVM whatever hostArch is, as before spec.arch existed.
+//
+// x86_64 guests use the q35 machine; aarch64 guests use the virt machine,
+// with the differences applied by applyAarch64.
+func GenerateDomainXML(vm *v1alpha1.VirtualMachine, hostArch string) (string, error) {
+	domainType := vm.GetDomainType(hostArch)
+	cpuMode := vm.CPUModeFor(domainType)
+
+	// host-model and host-passthrough describe the host's CPU, which an
+	// emulated guest of another architecture cannot have; libvirt would
+	// refuse the domain at start time.
+	if domainType == v1alpha1.DomainTypeQEMU && cpuMode != v1alpha1.CPUModeMaximum {
+		return "", fmt.Errorf("spec.cpuMode %s is not supported for an emulated %s guest on a %s host; use %s or leave it unset",
+			cpuMode, vm.GetArch(), hostArch, v1alpha1.CPUModeMaximum)
 	}
 
 	domain := &libvirtxml.Domain{
-		Type: "kvm",
+		Type: domainType,
 		Name: vm.Name,
 		Memory: &libvirtxml.DomainMemory{
 			Value: uint(vm.Spec.MemoryGiB),
@@ -179,6 +192,10 @@ func GenerateDomainXML(vm *v1alpha1.VirtualMachine) (string, error) {
 		domain.Devices.Disks = append(domain.Devices.Disks, disk)
 	}
 
+	if vm.GetArch() == v1alpha1.ArchAarch64 {
+		applyAarch64(domain)
+	}
+
 	// Add cloud-init ISO if configured (volume-based)
 	if vm.Spec.CloudInit != nil {
 		cdrom := libvirtxml.DomainDisk{
@@ -199,7 +216,7 @@ func GenerateDomainXML(vm *v1alpha1.VirtualMachine) (string, error) {
 			},
 			ReadOnly: &libvirtxml.DomainDiskReadOnly{},
 		}
-		domain.Devices.Disks = append(domain.Devices.Disks, cdrom)
+		addCdrom(domain, cdrom)
 	}
 
 	// Add network interfaces
@@ -281,4 +298,57 @@ func GenerateDomainXML(vm *v1alpha1.VirtualMachine) (string, error) {
 	}
 
 	return xml, nil
+}
+
+// addCdrom adds a CD-ROM to a domain, on the bus its machine has: SATA on
+// x86_64 (q35). The aarch64 virt machine has no AHCI controller, so SATA is
+// unavailable there; it gets a SCSI cdrom on a virtio-scsi controller, as
+// virt-install does for every non-x86 guest that supports virtio-scsi:
+// https://github.com/virt-manager/virt-manager/blob/main/virtinst/devices/disk.py (_default_bus)
+func addCdrom(domain *libvirtxml.Domain, cdrom libvirtxml.DomainDisk) {
+	if domain.OS.Type.Arch == v1alpha1.ArchAarch64 {
+		cdrom.Target.Bus = "scsi"
+		domain.Devices.Controllers = append(domain.Devices.Controllers, libvirtxml.DomainController{
+			Type:  "scsi",
+			Index: func() *uint { i := uint(0); return &i }(),
+			Model: "virtio-scsi",
+		})
+	}
+	domain.Devices.Disks = append(domain.Devices.Disks, cdrom)
+}
+
+// applyAarch64 adjusts an x86_64 (q35) domain definition for an aarch64 guest
+// on QEMU's virt machine. Everything not touched here (UEFI firmware
+// auto-selection, pcie-root, virtio devices, serial console) is common to
+// both: libvirt picks the AAVMF firmware for aarch64 as it picks OVMF for
+// x86_64 (https://libvirt.org/formatdomain.html#bios-bootloader).
+//
+// The serial device keeps no explicit target type: libvirt picks
+// system-serial (pl011) for aarch64/virt, as it picks isa-serial for x86_64
+// (https://libvirt.org/formatdomain.html#consoles-serial-parallel-channel-devices).
+// The guest's console is ttyAMA0 instead of ttyS0.
+func applyAarch64(domain *libvirtxml.Domain) {
+	domain.OS.Type.Arch = v1alpha1.ArchAarch64
+	domain.OS.Type.Machine = "virt"
+
+	// <bios useserial> drives the x86 Serial Graphics Adapter; libvirt rejects
+	// it on other architectures ("BIOS serial console only supported on x86
+	// architectures", qemuValidateDomainDef in
+	// https://gitlab.com/libvirt/libvirt/-/blob/master/src/qemu/qemu_validate.c).
+	domain.OS.BIOS = nil
+
+	// Arm uses a GIC rather than an APIC, and has no PAE. GICv3 works under
+	// both KVM on current Arm servers and TCG; "host" would fail under TCG
+	// (https://libvirt.org/formatdomain.html#hypervisor-features).
+	domain.Features = &libvirtxml.DomainFeatureList{
+		ACPI: &libvirtxml.DomainFeature{},
+		GIC:  &libvirtxml.DomainFeatureGIC{Version: "3"},
+	}
+
+	// The model fallback only matters for x86 named CPU models.
+	domain.CPU.Model = nil
+
+	// rtc, pit and hpet are x86 timers; the Arm guest uses the architected
+	// generic timer, which needs no configuration.
+	domain.Clock.Timer = nil
 }

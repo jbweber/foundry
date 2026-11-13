@@ -19,6 +19,50 @@ const (
 	VirtualMachineKind = "VirtualMachine"
 )
 
+// Guest architectures, using libvirt's names.
+const (
+	// ArchX86_64 is the 64-bit x86 architecture, and the default.
+	ArchX86_64 = "x86_64"
+
+	// ArchAarch64 is the 64-bit Arm architecture.
+	ArchAarch64 = "aarch64"
+)
+
+// Libvirt domain types.
+const (
+	// DomainTypeKVM runs the guest with KVM hardware virtualization.
+	DomainTypeKVM = "kvm"
+
+	// DomainTypeQEMU runs the guest under QEMU TCG emulation.
+	DomainTypeQEMU = "qemu"
+)
+
+// CPU modes.
+const (
+	// CPUModeHostModel gives the guest a named CPU model close to the host's.
+	CPUModeHostModel = "host-model"
+
+	// CPUModeHostPassthrough gives the guest the host's CPU as it is.
+	CPUModeHostPassthrough = "host-passthrough"
+
+	// CPUModeMaximum gives the guest every feature the hypervisor can offer;
+	// under emulation, everything QEMU implements.
+	CPUModeMaximum = "maximum"
+)
+
+// ArchFromGOARCH maps a Go architecture name to libvirt's name for it.
+// Unknown values are returned unchanged.
+func ArchFromGOARCH(goarch string) string {
+	switch goarch {
+	case "amd64":
+		return ArchX86_64
+	case "arm64":
+		return ArchAarch64
+	default:
+		return goarch
+	}
+}
+
 // NewVirtualMachine creates a new VirtualMachine with TypeMeta and ObjectMeta defaults.
 func NewVirtualMachine(name string) *VirtualMachine {
 	now := Time{Time: time.Now()}
@@ -70,12 +114,58 @@ func (vm *VirtualMachine) IsAutostart() bool {
 	return *vm.Spec.Autostart
 }
 
-// GetCPUMode returns the CPU mode with default fallback.
+// GetArch returns the guest architecture, x86_64 when spec.arch is unset.
+func (vm *VirtualMachine) GetArch() string {
+	if vm.Spec.Arch == "" {
+		return ArchX86_64
+	}
+	return vm.Spec.Arch
+}
+
+// GetDomainType returns the libvirt domain type for running the VM on a
+// hypervisor of architecture hostArch (libvirt's name): KVM when the guest
+// has the host's architecture, QEMU emulation otherwise. A spec without
+// spec.arch always gets KVM, as before spec.arch existed.
+func (vm *VirtualMachine) GetDomainType(hostArch string) string {
+	if vm.Spec.Arch == "" || vm.Spec.Arch == hostArch {
+		return DomainTypeKVM
+	}
+	return DomainTypeQEMU
+}
+
+// GetCPUMode returns the CPU mode with default fallback, for the guest
+// running under KVM on a host of its own architecture. CPUModeFor gives the
+// mode for a given domain type.
 func (vm *VirtualMachine) GetCPUMode() string {
+	return vm.CPUModeFor(DomainTypeKVM)
+}
+
+// CPUModeFor returns the CPU mode with default fallback for a domain type.
+// See defaultCPUMode.
+func (vm *VirtualMachine) CPUModeFor(domainType string) string {
 	if vm.Spec.CPUMode == "" {
-		return "host-model"
+		return defaultCPUMode(vm.GetArch(), domainType)
 	}
 	return vm.Spec.CPUMode
+}
+
+// defaultCPUMode picks the CPU mode for an architecture and domain type.
+//
+// An emulated guest gets maximum: host-model and host-passthrough describe
+// the host's CPU, which TCG does not offer. Under KVM, x86_64 keeps
+// host-model. QEMU implements host-model only for x86 (and ppc64), so an
+// aarch64 guest gets host-passthrough, the mode RHEL supports for Arm guests:
+// https://libvirt.org/formatdomain.html#cpu-model-and-topology
+// https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/10/html/configuring_and_managing_linux_virtual_machines/feature-support-and-limitations-in-rhel-10-virtualization
+func defaultCPUMode(arch, domainType string) string {
+	switch {
+	case domainType == DomainTypeQEMU:
+		return CPUModeMaximum
+	case arch == ArchAarch64:
+		return CPUModeHostPassthrough
+	default:
+		return CPUModeHostModel
+	}
 }
 
 // GetStoragePool returns the storage pool with default fallback.
