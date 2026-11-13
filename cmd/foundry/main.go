@@ -22,6 +22,9 @@ var (
 	// Global flags for output formatting
 	outputFormat string
 	noHeaders    bool
+
+	// socketPath is --socket: the libvirt socket every command connects to
+	socketPath string
 )
 
 func main() {
@@ -39,12 +42,18 @@ var rootCmd = &cobra.Command{
 It provides commands to create, destroy, and list virtual machines using
 declarative configuration files.`,
 	Version: fmt.Sprintf("%s (commit: %s)", version, commit),
+	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		libvirt.SetSocket(socketPath)
+	},
 }
 
 func init() {
 	// Global persistent flags for output formatting
 	rootCmd.PersistentFlags().StringVarP(&outputFormat, "output", "o", "table", "Output format (table|yaml|json)")
 	rootCmd.PersistentFlags().BoolVar(&noHeaders, "no-headers", false, "Omit headers in table output")
+	rootCmd.PersistentFlags().StringVar(&socketPath, "socket", "",
+		"libvirt socket to connect to (default: virtqemud's socket if it exists, else libvirt-sock); "+
+			"for a libvirt on another machine, a local socket forwarded over SSH")
 
 	// Subcommands will be added here
 	rootCmd.AddCommand(createCmd)
@@ -166,7 +175,7 @@ var testConnCmd = &cobra.Command{
 			}
 		}()
 
-		fmt.Println("✓ Connected to libvirt daemon")
+		fmt.Printf("✓ Connected to libvirt daemon at %s\n", libvirt.Socket())
 
 		// Ping the connection
 		if err := client.Ping(); err != nil {

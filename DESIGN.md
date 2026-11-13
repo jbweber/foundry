@@ -20,6 +20,16 @@ Foundry is a Go-based CLI tool for managing libvirt VMs, replacing the Ansible-b
 - Network interface management
 - Volume upload/download
 
+**Connecting to libvirt:**
+- One `qemu:///system` connection over a UNIX socket. Without `--socket`,
+  foundry follows libvirt's own client rule: virtqemud's socket when it
+  exists, else `libvirt-sock`. Talking to virtqemud directly matters under
+  SELinux, where virtproxyd may refuse a confined caller (a service or a
+  container). virtqemud forwards storage calls to virtstoraged itself, so
+  one connection serves both.
+- `--socket` replaces that choice for every command, for example with a
+  socket forwarded over SSH from another machine.
+
 **External tools (only if needed):**
 - `qemu-img` - Only for advanced operations like resize/convert (optional)
 
@@ -597,6 +607,12 @@ Key elements (using volume-based disk sources):
 ## CLI Interface
 
 ### Commands
+
+**Global flags:**
+```bash
+# Connect to a specific libvirt socket (default: virtqemud's, else libvirt-sock)
+foundry --socket /tmp/libvirt.sock list
+```
 
 **VM Management:**
 ```bash
