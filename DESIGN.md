@@ -167,7 +167,10 @@ spec:
     # Meta-data and network-config are still generated automatically.
 
   # Optional: Advanced settings
-  cpuMode: host-model         # CPU mode: host-model (default), host-passthrough
+  # arch: aarch64             # Guest architecture: x86_64 (default), aarch64; KVM when it
+                              # matches the hypervisor, QEMU emulation otherwise
+  cpuMode: host-model         # CPU mode: host-model, host-passthrough, maximum (default
+                              # by arch and KVM vs emulation; host-model is x86_64 only)
   autostart: true             # Auto-start VM on host boot (default: true)
   storagePool: foundry-vms    # Storage pool to use (default: foundry-vms)
 
@@ -210,6 +213,8 @@ status:
 - No duplicate IP addresses in network interfaces
 - `networkInterfaces[].vlan` within 1-4094 when set (see [VLAN Tagging](#vlan-tagging))
 - At most one interface sets `defaultRoute`, and at most one sets `pxeBoot`
+- `spec.arch`, when set, is `x86_64` or `aarch64` (see [Guest Architecture](#guest-architecture))
+- `spec.cpuMode` is not `host-model` for an `aarch64` guest
 
 **Not yet enforced** (documented intent, no implementation):
 - `metadata.name` format: `^[a-z0-9][a-z0-9_-]*[a-z0-9]$` (after normalization)
@@ -409,6 +414,41 @@ networkInterfaces:
 - Only one interface should set this; the boot order is global to the domain.
 - Intended for bare-metal-style provisioning flows (Metal³/Ironic) where an
   external service serves the network boot chain.
+
+### Guest Architecture
+
+`spec.arch` is the guest CPU architecture, in libvirt's names: `x86_64` (the
+default) or `aarch64`. At create time foundry reads the hypervisor's
+architecture from libvirt's host capabilities
+([formatcaps](https://libvirt.org/formatcaps.html)): a guest of that
+architecture runs as `<domain type='kvm'>`, any other as `<domain type='qemu'>`
+(TCG emulation). A spec without `spec.arch` is x86_64 under KVM and never asks
+libvirt, so it produces exactly the XML it did before the field existed.
+`foundry render` does not connect to libvirt; it assumes the machine it runs on,
+or `--host-arch`.
+
+| | x86_64 | aarch64 |
+|---|---|---|
+| Machine | `q35` | `virt` |
+| Features | ACPI, APIC, PAE | ACPI, GICv3 (works under both KVM and TCG) |
+| Firmware | UEFI, auto-selected (OVMF) | UEFI, auto-selected (AAVMF) |
+| `<bios useserial>` | yes | no (libvirt refuses it off x86) |
+| Clock timers | rtc, pit, hpet | none (architected generic timer) |
+| Cloud-init CD-ROM | SATA (`sda`) | SCSI (`sda`) on a virtio-scsi controller; `virt` has no AHCI |
+| Serial console | isa-serial, guest `ttyS0` | system-serial (pl011), guest `ttyAMA0` |
+
+The serial target type is left to libvirt, which picks the right one per
+machine ([serial devices](https://libvirt.org/formatdomain.html#consoles-serial-parallel-channel-devices)).
+The SCSI CD-ROM follows virt-install's default bus for non-x86 guests
+([disk.py](https://github.com/virt-manager/virt-manager/blob/main/virtinst/devices/disk.py)).
+
+**CPU mode default** (when `spec.cpuMode` is unset):
+- x86_64 under KVM: `host-model`
+- aarch64 under KVM: `host-passthrough`. QEMU implements host-model only for
+  x86 (and ppc64), so validation refuses `host-model` for aarch64.
+- Any emulated guest: `maximum`. `host-model` and `host-passthrough` describe
+  the host's CPU, which an emulated guest of another architecture cannot have,
+  so domain XML generation refuses them under emulation.
 
 ### Default Route
 

@@ -139,7 +139,7 @@ func TestGenerateDomainXML(t *testing.T) {
 			// Normalize config to set default storage pools
 			tt.vm.Normalize()
 
-			xml, err := GenerateDomainXML(tt.vm)
+			xml, err := GenerateDomainXML(tt.vm, v1alpha1.ArchX86_64)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("GenerateDomainXML() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -501,7 +501,7 @@ func TestGenerateDomainXML_XMLFormat(t *testing.T) {
 		},
 	}
 
-	xml, err := GenerateDomainXML(vm)
+	xml, err := GenerateDomainXML(vm, v1alpha1.ArchX86_64)
 	if err != nil {
 		t.Fatalf("GenerateDomainXML() error = %v", err)
 	}
@@ -842,7 +842,7 @@ func TestGenerateDomainXML_EdgeCases(t *testing.T) {
 			// Normalize config to set defaults
 			tt.vm.Normalize()
 
-			xml, err := GenerateDomainXML(tt.vm)
+			xml, err := GenerateDomainXML(tt.vm, v1alpha1.ArchX86_64)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("GenerateDomainXML() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -998,7 +998,7 @@ func TestGenerateDomainXML_PXEBoot(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			xml, err := GenerateDomainXML(tt.vm)
+			xml, err := GenerateDomainXML(tt.vm, v1alpha1.ArchX86_64)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("GenerateDomainXML() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -1112,7 +1112,7 @@ func TestGenerateDomainXML_Vlan(t *testing.T) {
 				},
 			}
 
-			xml, err := GenerateDomainXML(vm)
+			xml, err := GenerateDomainXML(vm, v1alpha1.ArchX86_64)
 			if err != nil {
 				t.Fatalf("GenerateDomainXML() error = %v", err)
 			}

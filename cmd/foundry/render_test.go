@@ -37,7 +37,7 @@ func writeConfig(t *testing.T, contents string) string {
 }
 
 func TestRenderDomainXML(t *testing.T) {
-	xml, err := renderDomainXML(writeConfig(t, renderTestConfig))
+	xml, err := renderDomainXML(writeConfig(t, renderTestConfig), "x86_64")
 	if err != nil {
 		t.Fatalf("renderDomainXML() error = %v", err)
 	}
@@ -83,7 +83,7 @@ spec:
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if _, err := renderDomainXML(tt.path); err == nil {
+			if _, err := renderDomainXML(tt.path, "x86_64"); err == nil {
 				t.Errorf("Expected error for %s", tt.name)
 			}
 		})
@@ -107,5 +107,41 @@ func TestRenderCmd_WritesXMLToStdout(t *testing.T) {
 	}
 	if !strings.HasSuffix(out, "\n") {
 		t.Error("Expected trailing newline after XML")
+	}
+}
+
+func TestRenderDomainXML_Arch(t *testing.T) {
+	armConfig := strings.Replace(renderTestConfig, "spec:\n", "spec:\n  arch: aarch64\n", 1)
+
+	tests := []struct {
+		name     string
+		config   string
+		hostArch string
+		wants    []string
+	}{
+		{"no arch on aarch64 host", renderTestConfig, "aarch64", []string{`<domain type="kvm">`, `arch="x86_64" machine="q35"`}},
+		{"aarch64 on aarch64 host", armConfig, "aarch64", []string{`<domain type="kvm">`, `arch="aarch64" machine="virt"`, `mode="host-passthrough"`}},
+		{"aarch64 on x86_64 host", armConfig, "x86_64", []string{`<domain type="qemu">`, `arch="aarch64" machine="virt"`, `mode="maximum"`}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			xml, err := renderDomainXML(writeConfig(t, tt.config), tt.hostArch)
+			if err != nil {
+				t.Fatalf("renderDomainXML() error = %v", err)
+			}
+			for _, want := range tt.wants {
+				if !strings.Contains(xml, want) {
+					t.Errorf("Rendered XML missing %q\nGot:\n%s", want, xml)
+				}
+			}
+		})
+	}
+}
+
+func TestRenderDomainXML_BadHostArch(t *testing.T) {
+	_, err := renderDomainXML(writeConfig(t, renderTestConfig), "arm64")
+	if err == nil || !strings.Contains(err.Error(), "--host-arch") {
+		t.Fatalf("renderDomainXML() error = %v, want a --host-arch error", err)
 	}
 }

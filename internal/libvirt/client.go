@@ -9,6 +9,7 @@ import (
 
 	"github.com/digitalocean/go-libvirt"
 	"github.com/digitalocean/go-libvirt/socket/dialers"
+	"libvirt.org/go/libvirtxml"
 )
 
 // Client wraps a go-libvirt connection and provides high-level operations
@@ -193,4 +194,34 @@ func (c *Client) Ping() error {
 	}
 
 	return nil
+}
+
+// HostArch returns the architecture of the machine libvirt runs on, in
+// libvirt's names (its capabilities' <host><cpu><arch>,
+// https://libvirt.org/formatcaps.html). With a socket forwarded from another
+// machine that is not the machine foundry runs on.
+func (c *Client) HostArch() (string, error) {
+	return HostArch(c.libvirt)
+}
+
+// CapabilitiesReader reads libvirt's host capabilities.
+type CapabilitiesReader interface {
+	ConnectGetCapabilities() (string, error)
+}
+
+// HostArch returns the architecture of the machine the libvirt behind lv
+// runs on, as Client.HostArch.
+func HostArch(lv CapabilitiesReader) (string, error) {
+	xml, err := lv.ConnectGetCapabilities()
+	if err != nil {
+		return "", fmt.Errorf("failed to read host capabilities: %w", err)
+	}
+	var caps libvirtxml.Caps
+	if err := caps.Unmarshal(xml); err != nil {
+		return "", fmt.Errorf("failed to parse host capabilities: %w", err)
+	}
+	if caps.Host.CPU == nil || caps.Host.CPU.Arch == "" {
+		return "", fmt.Errorf("host capabilities name no architecture")
+	}
+	return caps.Host.CPU.Arch, nil
 }

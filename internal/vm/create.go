@@ -270,10 +270,20 @@ func createFromConfigWithDeps(ctx context.Context, vm *v1alpha1.VirtualMachine, 
 		log.Printf("Skipping cloud-init (not configured)")
 	}
 
-	// Step 9: Generate domain XML
+	// Step 9: Generate domain XML. A spec with spec.arch runs under KVM or
+	// emulation depending on the hypervisor's architecture; one without is
+	// x86_64 under KVM and needs no lookup.
 	log.Printf("Generating domain XML...")
+	var hostArch string
+	if vm.Spec.Arch != "" {
+		hostArch, createErr = foundrylibvirt.HostArch(lv)
+		if createErr != nil {
+			return fmt.Errorf("failed to determine hypervisor architecture: %w", createErr)
+		}
+		log.Printf("Guest %s on a %s hypervisor: domain type %s", vm.Spec.Arch, hostArch, vm.GetDomainType(hostArch))
+	}
 	var domainXML string
-	domainXML, createErr = foundrylibvirt.GenerateDomainXML(vm)
+	domainXML, createErr = foundrylibvirt.GenerateDomainXML(vm, hostArch)
 	if createErr != nil {
 		return fmt.Errorf("failed to generate domain XML: %w", createErr)
 	}

@@ -85,9 +85,11 @@ func SaveToFile(vm *v1alpha1.VirtualMachine, path string) error {
 
 // applyDefaults sets default values for optional fields.
 func applyDefaults(vm *v1alpha1.VirtualMachine) {
-	// Apply defaults from helpers
-	if vm.Spec.CPUMode == "" {
-		vm.Spec.CPUMode = "host-model"
+	// Apply defaults from helpers. With spec.arch set, the CPU mode default
+	// depends on the hypervisor's architecture (KVM or emulation), so it is
+	// picked when the domain XML is generated.
+	if vm.Spec.CPUMode == "" && vm.Spec.Arch == "" {
+		vm.Spec.CPUMode = v1alpha1.CPUModeHostModel
 	}
 	if vm.Spec.StoragePool == "" {
 		vm.Spec.StoragePool = "foundry-vms"
@@ -132,6 +134,19 @@ func validateSpec(vm *v1alpha1.VirtualMachine) error {
 	// Validate memory
 	if vm.Spec.MemoryGiB <= 0 {
 		return fmt.Errorf("spec.memoryGiB must be greater than 0")
+	}
+
+	// Validate architecture
+	switch vm.Spec.Arch {
+	case "", v1alpha1.ArchX86_64, v1alpha1.ArchAarch64:
+	default:
+		return fmt.Errorf("spec.arch %q is not supported (expected %s or %s)", vm.Spec.Arch, v1alpha1.ArchX86_64, v1alpha1.ArchAarch64)
+	}
+
+	// QEMU implements host-model only for x86 (and ppc64), so libvirt refuses
+	// it for an Arm guest at start time; fail early instead.
+	if vm.GetArch() == v1alpha1.ArchAarch64 && vm.Spec.CPUMode == v1alpha1.CPUModeHostModel {
+		return fmt.Errorf("spec.cpuMode host-model is not supported for aarch64; use host-passthrough (kvm) or maximum (emulation)")
 	}
 
 	// Validate boot disk

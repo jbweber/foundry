@@ -80,6 +80,9 @@ spec:
     # Meta-data and network-config are still generated automatically.
 
   # Optional: Advanced settings
-  cpuMode: host-model         # CPU mode: host-model (default), host-passthrough
+  # arch: aarch64             # Guest architecture: x86_64 (default), aarch64; KVM when it
+                              # matches the hypervisor, QEMU emulation otherwise
+  cpuMode: host-model         # CPU mode: host-model, host-passthrough, maximum (default
+                              # by arch and KVM vs emulation; host-model is x86_64 only)
   autostart: true             # Auto-start VM on host boot (default: true)
   storagePool: foundry-vms    # Storage pool to use (default: foundry-vms)

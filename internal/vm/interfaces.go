@@ -82,6 +82,9 @@ type LibvirtClient interface {
 
 	// DomainGetMetadata retrieves custom metadata from a domain
 	DomainGetMetadata(dom libvirt.Domain, typ int32, uri libvirt.OptString, flags libvirt.DomainModificationImpact) (string, error)
+
+	// ConnectGetCapabilities returns the host capabilities XML (for the host architecture)
+	ConnectGetCapabilities() (string, error)
 }
 
 // storageManager defines the storage operations needed for VM management.

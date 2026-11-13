@@ -28,6 +28,7 @@ This project isn't suggested for general purpose use, and really exists because 
 - **Pool Management**: Create, list, and manage libvirt storage pools
 - **Image Management**: Import, list, and manage base OS images
 - **UEFI Boot**: Modern UEFI firmware support
+- **x86_64 and aarch64 Guests**: KVM when the guest matches the hypervisor's architecture, QEMU emulation otherwise
 - **Deterministic MACs**: MAC addresses automatically calculated from IP addresses
 - **Metadata Persistence**: VM specs stored in libvirt domain metadata for state recovery
 
@@ -95,6 +96,18 @@ The config is loaded, defaulted, and validated exactly as `create` does, so the
 output matches what would be handed to libvirt — useful for checking boot order,
 VLAN tags, and disk targets while iterating on a config. Referenced pools,
 volumes, and base images are not checked for existence.
+
+A config with `spec.arch` renders for the machine `render` runs on; use
+`--host-arch aarch64` (or `x86_64`) to see what another hypervisor would get.
+
+### Guest Architecture
+
+`spec.arch` picks the guest architecture: `x86_64` (the default) or `aarch64`.
+A guest of the hypervisor's architecture runs under KVM; any other runs under
+QEMU emulation, which is much slower but lets an x86_64 host boot an aarch64
+image, for example. Emulation needs the QEMU system emulator and UEFI firmware
+for the guest's architecture installed on the hypervisor. A config without
+`spec.arch` is an x86_64 guest under KVM, as before.
 
 ### List VMs
 
