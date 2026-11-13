@@ -122,6 +122,25 @@ func (vm *VirtualMachine) GetArch() string {
 	return vm.Spec.Arch
 }
 
+// SerialPrefix starts the default SMBIOS system serial: SerialPrefix + metadata.name.
+const SerialPrefix = "foundry-"
+
+// HasSMBIOS reports whether the VM gets SMBIOS system information: only when
+// spec.serial or spec.smbios is set, so a spec with neither renders the same
+// domain as before these fields existed.
+func (vm *VirtualMachine) HasSMBIOS() bool {
+	return vm.Spec.Serial != "" || vm.Spec.SMBIOS != nil
+}
+
+// GetSerial returns the VM's SMBIOS system serial: spec.serial, or
+// SerialPrefix + metadata.name. It is used only when HasSMBIOS is true.
+func (vm *VirtualMachine) GetSerial() string {
+	if vm.Spec.Serial != "" {
+		return vm.Spec.Serial
+	}
+	return SerialPrefix + vm.Name
+}
+
 // GetDomainType returns the libvirt domain type for running the VM on a
 // hypervisor of architecture hostArch (libvirt's name): KVM when the guest
 // has the host's architecture, QEMU emulation otherwise. A spec without

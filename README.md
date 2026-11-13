@@ -28,6 +28,7 @@ This project isn't suggested for general purpose use, and really exists because 
 - **Pool Management**: Create, list, and manage libvirt storage pools
 - **Image Management**: Import, list, and manage base OS images
 - **UEFI Boot**: Modern UEFI firmware support, with pinned firmware files and Secure Boot key profiles
+- **SMBIOS and fw_cfg**: Optional SMBIOS system serial and identity, and QEMU fw_cfg entries for the guest
 - **x86_64 and aarch64 Guests**: KVM when the guest matches the hypervisor's architecture, QEMU emulation otherwise
 - **Deterministic MACs**: MAC addresses automatically calculated from IP addresses
 - **Metadata Persistence**: VM specs stored in libvirt domain metadata for state recovery
@@ -139,6 +140,31 @@ foundry varstore delete my-keys --arch aarch64
 making anything if it is missing. libvirt copies the template into each VM's
 own varstore on its first start, so replacing or deleting a profile leaves
 existing VMs alone.
+
+### SMBIOS and fw_cfg
+
+A guest that binds something to its machine needs an SMBIOS system serial
+that is set and stable; QEMU sets none. `spec.serial` sets one, and
+`spec.smbios` sets the rest of the system information (unset fields keep
+QEMU's values). With `spec.smbios` and no `spec.serial`, the serial is
+`foundry-<name>`. A spec with neither gets no SMBIOS information, as before.
+
+```yaml
+spec:
+  serial: SN-0001           # /sys/class/dmi/id/product_serial (default with smbios: foundry-<name>)
+  smbios:                   # "smbios: {}" for just the default serial
+    manufacturer: Example Corp
+    product: Model 9
+    version: "1.0"
+    sku: SKU-42
+    family: Servers
+    uuid: 4c4c4544-0042-3510-8051-b4c04f4e3532  # also becomes the domain UUID
+  fwCfg:                    # QEMU fw_cfg entries, read from /sys/firmware/qemu_fw_cfg/by_name/<name>/raw
+    - name: opt/org.tianocore/EnableLegacyLoader
+      string: "no"
+    - name: opt/com.example/config
+      file: /srv/config.json  # a file on the hypervisor
+```
 
 ### List VMs
 

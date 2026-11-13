@@ -118,6 +118,11 @@ func applyDefaults(vm *v1alpha1.VirtualMachine) {
 	if vm.Spec.CloudInit != nil && vm.Spec.CloudInit.FQDN != "" {
 		vm.Spec.CloudInit.FQDN = strings.ToLower(vm.Spec.CloudInit.FQDN)
 	}
+
+	// Normalize the SMBIOS UUID to lowercase, the form libvirt reports a domain UUID in
+	if vm.Spec.SMBIOS != nil {
+		vm.Spec.SMBIOS.UUID = strings.ToLower(vm.Spec.SMBIOS.UUID)
+	}
 }
 
 // validateSpec validates the VirtualMachine spec for required fields and consistency.
@@ -151,6 +156,12 @@ func validateSpec(vm *v1alpha1.VirtualMachine) error {
 	}
 
 	if err := validateFirmware(vm); err != nil {
+		return err
+	}
+	if err := validateSMBIOS(vm); err != nil {
+		return err
+	}
+	if err := validateFwCfg("spec.fwCfg", vm.Spec.FwCfg); err != nil {
 		return err
 	}
 
@@ -260,4 +271,73 @@ var keyProfileName = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
 // ValidKeyProfileName reports whether name can name a Secure Boot key profile.
 func ValidKeyProfileName(name string) bool {
 	return len(name) <= 63 && keyProfileName.MatchString(name)
+}
+
+// serialRE is the form of spec.serial and of the default serial.
+var serialRE = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
+
+// smbiosStringRE is the form of a spec.smbios string: the characters vendors
+// use in these fields, without leading or trailing space (which tools that
+// read SMBIOS strip, so the guest would see a different value) and without
+// quotes, commas or '=', which would need escaping on QEMU's -smbios option.
+var smbiosStringRE = regexp.MustCompile(`^[A-Za-z0-9._+()/:-]([A-Za-z0-9 ._+()/:-]{0,62}[A-Za-z0-9._+()/:-])?$`)
+
+// uuidRE is the 8-4-4-4-12 hexadecimal UUID form (after lower-casing).
+var uuidRE = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+// validateSMBIOS checks spec.serial and spec.smbios. The serial goes into
+// SMBIOS through libvirt's sysinfo; a narrow character set keeps it a plain
+// token on every side (libvirt XML, QEMU's -smbios option, the guest's sysfs).
+func validateSMBIOS(vm *v1alpha1.VirtualMachine) error {
+	if !vm.HasSMBIOS() {
+		return nil
+	}
+	if s := vm.GetSerial(); !serialRE.MatchString(s) {
+		return fmt.Errorf("spec.serial %q must be 1 to 64 characters from A-Z a-z 0-9 . _ - (the default is %q + metadata.name)", s, v1alpha1.SerialPrefix)
+	}
+	s := vm.Spec.SMBIOS
+	if s == nil {
+		return nil
+	}
+	for _, f := range []struct{ field, value string }{
+		{"manufacturer", s.Manufacturer},
+		{"product", s.Product},
+		{"version", s.Version},
+		{"sku", s.SKU},
+		{"family", s.Family},
+	} {
+		if f.value != "" && !smbiosStringRE.MatchString(f.value) {
+			return fmt.Errorf("spec.smbios.%s %q must be 1 to 64 characters from A-Z a-z 0-9, space and . _ - + ( ) / :, not starting or ending with a space", f.field, f.value)
+		}
+	}
+	if s.UUID != "" && !uuidRE.MatchString(s.UUID) {
+		return fmt.Errorf("spec.smbios.uuid %q is not a UUID in the form xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", s.UUID)
+	}
+	return nil
+}
+
+// validateFwCfg checks a list of fw_cfg entries.
+//
+// libvirt only accepts names under "opt/" and reserves "opt/ovmf/" and
+// "opt/org.qemu/" for itself (<sysinfo type='fwcfg'>,
+// https://libvirt.org/formatdomain.html#smbios-system-information); checking
+// here fails at load time rather than at define time.
+func validateFwCfg(field string, entries []v1alpha1.FwCfgEntrySpec) error {
+	seen := make(map[string]bool)
+	for i, e := range entries {
+		if !strings.HasPrefix(e.Name, "opt/") {
+			return fmt.Errorf("%s[%d].name %q must start with \"opt/\"", field, i, e.Name)
+		}
+		if strings.HasPrefix(e.Name, "opt/ovmf/") || strings.HasPrefix(e.Name, "opt/org.qemu/") {
+			return fmt.Errorf("%s[%d].name %q is reserved by libvirt", field, i, e.Name)
+		}
+		if (e.File == "") == (e.String == "") {
+			return fmt.Errorf("%s[%d] requires exactly one of file or string", field, i)
+		}
+		if seen[e.Name] {
+			return fmt.Errorf("%s[%d].name %q is duplicated", field, i, e.Name)
+		}
+		seen[e.Name] = true
+	}
+	return nil
 }

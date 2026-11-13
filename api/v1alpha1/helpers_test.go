@@ -585,3 +585,31 @@ func TestConstants(t *testing.T) {
 func boolPtr(b bool) *bool {
 	return &b
 }
+
+func TestSMBIOSSerial(t *testing.T) {
+	tests := []struct {
+		name       string
+		serial     string
+		smbios     *SMBIOSSpec
+		wantHas    bool
+		wantSerial string
+	}{
+		{name: "neither set", wantSerial: "foundry-vm1"},
+		{name: "serial set", serial: "SN-1", wantHas: true, wantSerial: "SN-1"},
+		{name: "empty smbios", smbios: &SMBIOSSpec{}, wantHas: true, wantSerial: "foundry-vm1"},
+		{name: "both set", serial: "SN-2", smbios: &SMBIOSSpec{Product: "p"}, wantHas: true, wantSerial: "SN-2"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			vm := NewVirtualMachine("vm1")
+			vm.Spec.Serial = tt.serial
+			vm.Spec.SMBIOS = tt.smbios
+			if got := vm.HasSMBIOS(); got != tt.wantHas {
+				t.Errorf("HasSMBIOS() = %v, want %v", got, tt.wantHas)
+			}
+			if got := vm.GetSerial(); got != tt.wantSerial {
+				t.Errorf("GetSerial() = %q, want %q", got, tt.wantSerial)
+			}
+		})
+	}
+}

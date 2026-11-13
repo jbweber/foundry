@@ -93,6 +93,86 @@ type VirtualMachineSpec struct {
 	// firmware, as before.
 	// +optional
 	Firmware *FirmwareSpec `json:"firmware,omitempty" yaml:"firmware,omitempty"`
+
+	// Serial is the VM's SMBIOS system serial number (type 1), what the guest
+	// reads as /sys/class/dmi/id/product_serial. A guest that binds something
+	// to its machine (an installer that checks which machine it runs on)
+	// needs one that is set and stable; QEMU sets none by default. 1 to 64
+	// characters from A-Z a-z 0-9 . _ -. When SMBIOS is set and Serial is
+	// not, the serial is "foundry-" followed by metadata.name, so it is known
+	// before the VM exists and stays the same when the VM is recreated. With
+	// neither set the VM gets no SMBIOS system information, as before.
+	// +optional
+	Serial string `json:"serial,omitempty" yaml:"serial,omitempty"`
+
+	// SMBIOS sets the rest of the VM's SMBIOS system information (type 1)
+	// next to Serial: manufacturer, product, version, SKU, family and UUID,
+	// e.g. to make a test guest report the same machine identity as the
+	// hardware it stands in for. Unset fields keep QEMU's values. An empty
+	// SMBIOS ("smbios: {}") gives the VM just the default serial.
+	// +optional
+	SMBIOS *SMBIOSSpec `json:"smbios,omitempty" yaml:"smbios,omitempty"`
+
+	// FwCfg lists QEMU fw_cfg entries given to the guest on every boot. The
+	// guest reads each from /sys/firmware/qemu_fw_cfg/by_name/<name>/raw.
+	// +optional
+	FwCfg []FwCfgEntrySpec `json:"fwCfg,omitempty" yaml:"fwCfg,omitempty"`
+}
+
+// SMBIOSSpec defines SMBIOS system information (type 1) entries, rendered as
+// libvirt <sysinfo type='smbios'><system> entries
+// (https://libvirt.org/formatdomain.html#smbios-system-information).
+// Strings are 1 to 64 characters from A-Z a-z 0-9, space and . _ - + ( ) / :,
+// with no leading or trailing space.
+//
+// +k8s:deepcopy-gen=true
+type SMBIOSSpec struct {
+	// Manufacturer is the system manufacturer (/sys/class/dmi/id/sys_vendor).
+	// +optional
+	Manufacturer string `json:"manufacturer,omitempty" yaml:"manufacturer,omitempty"`
+
+	// Product is the product name (/sys/class/dmi/id/product_name).
+	// +optional
+	Product string `json:"product,omitempty" yaml:"product,omitempty"`
+
+	// Version is the product version (/sys/class/dmi/id/product_version).
+	// +optional
+	Version string `json:"version,omitempty" yaml:"version,omitempty"`
+
+	// SKU is the SKU number (/sys/class/dmi/id/product_sku).
+	// +optional
+	SKU string `json:"sku,omitempty" yaml:"sku,omitempty"`
+
+	// Family is the product family (/sys/class/dmi/id/product_family).
+	// +optional
+	Family string `json:"family,omitempty" yaml:"family,omitempty"`
+
+	// UUID is the system UUID (/sys/class/dmi/id/product_uuid), in the
+	// 8-4-4-4-12 hexadecimal form. libvirt requires the SMBIOS UUID to match
+	// the domain's own UUID, so this also becomes the domain UUID: a VM that
+	// is destroyed and created again keeps the same identity. Default: the
+	// UUID libvirt gives the domain when it is defined.
+	// +optional
+	UUID string `json:"uuid,omitempty" yaml:"uuid,omitempty"`
+}
+
+// FwCfgEntrySpec defines a named QEMU fw_cfg entry.
+// Exactly one of File or String must be set.
+//
+// +k8s:deepcopy-gen=true
+type FwCfgEntrySpec struct {
+	// Name is the fw_cfg item name; it must start with "opt/"
+	// (e.g. "opt/org.tianocore/EnableLegacyLoader"). libvirt reserves
+	// "opt/ovmf/" and "opt/org.qemu/".
+	Name string `json:"name" yaml:"name"`
+
+	// File is a file on the hypervisor whose content becomes the entry.
+	// +optional
+	File string `json:"file,omitempty" yaml:"file,omitempty"`
+
+	// String is the entry's content, given inline.
+	// +optional
+	String string `json:"string,omitempty" yaml:"string,omitempty"`
 }
 
 // FirmwareSpec defines an explicit UEFI firmware (pflash) configuration.
