@@ -161,5 +161,8 @@ git history.
   stops before the domain is undefined. A second Ctrl-C ends foundry at once. Before, an interrupted create left
   volumes behind and `foundry destroy` answered that the VM did not exist; it now removes the `<vm>_...` volumes
   left in foundry-vms of a name that has no domain.
+- A volume check that fails for another reason than "no such volume" (a lost connection, a stopped pool) is an
+  error; it was taken as "absent", so create could go ahead over a volume that was there. `image list` and
+  `image info` show the image's format, which was blank.
 
 [Unreleased]: https://github.com/jbweber/foundry/compare/v0.6.1...HEAD

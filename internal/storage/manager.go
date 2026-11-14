@@ -52,6 +52,7 @@ type LibvirtClient interface {
 	StorageVolDelete(Vol libvirt.StorageVol, Flags libvirt.StorageVolDeleteFlags) error
 	StorageVolGetPath(Vol libvirt.StorageVol) (string, error)
 	StorageVolGetInfo(Vol libvirt.StorageVol) (rType int8, rCapacity uint64, rAllocation uint64, err error)
+	StorageVolGetXMLDesc(Vol libvirt.StorageVol, Flags uint32) (string, error)
 	StorageVolUpload(Vol libvirt.StorageVol, outStream io.Reader, Offset uint64, Length uint64, Flags libvirt.StorageVolUploadFlags) error
 	StorageVolDownload(Vol libvirt.StorageVol, inStream io.Writer, Offset uint64, Length uint64, Flags libvirt.StorageVolDownloadFlags) error
 	ConnectListAllStoragePools(NeedResults int32, Flags libvirt.ConnectListAllStoragePoolsFlags) ([]libvirt.StoragePool, uint32, error)
