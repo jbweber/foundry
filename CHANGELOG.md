@@ -106,15 +106,15 @@ git history.
   volumes the spec names. Volumes in a pool other than the two default ones were not deleted before; they
   are now.
 - `foundry destroy` of a VM `web` leaves the volumes of another VM `web_2`, which also start with `web_`.
+- `foundry destroy` lists the domains before it changes anything, and stops with nothing changed when it
+  can't, also with `--force`. It listed them after the undefine, to spare the volumes of another VM whose name
+  starts with the destroyed VM's name and `_`, and when the listing failed it only warned and went on with
+  none spared: destroying `web` deleted the volumes of a VM `web_2`.
 - `foundry destroy` stops the VM in every state but shut off before it undefines it: a paused, suspended or
   crashed VM is destroyed at once, any other gets the graceful shutdown first. It stopped only a running VM,
   and turned a failed forced stop, or a state it could not read, into a warning; undefining an active domain
   only makes it transient, so such a VM kept running on disks destroy had deleted. A VM that cannot be
   stopped, or whose state cannot be read, is now an error with nothing undefined or deleted, also with
   `--force`.
-- `foundry destroy` lists the domains before it changes anything, and stops with nothing changed when it
-  can't, also with `--force`. It listed them after the undefine, to spare the volumes of another VM whose name
-  starts with the destroyed VM's name and `_`, and when the listing failed it only warned and went on with
-  none spared: destroying `web` deleted the volumes of a VM `web_2`.
 
 [Unreleased]: https://github.com/jbweber/foundry/compare/v0.6.1...HEAD
