@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/digitalocean/go-libvirt"
 	libvirtxml "libvirt.org/go/libvirtxml"
 )
 
