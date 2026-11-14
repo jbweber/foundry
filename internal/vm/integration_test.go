@@ -291,7 +291,7 @@ func destroyAtEnd(t *testing.T, lv *libvirt.Libvirt, name string, done *bool) {
 		if _, err := lv.DomainLookupByName(name); libvirt.IsNotFound(err) {
 			return
 		}
-		if err := vm.Destroy(context.Background(), name); err != nil {
+		if err := vm.Destroy(context.Background(), name, false); err != nil {
 			t.Errorf("clean-up: destroy VM %s: %v", name, err)
 		}
 	})
@@ -445,7 +445,7 @@ func TestIntegrationLifecycle(t *testing.T) {
 	})
 
 	t.Run("destroy", func(t *testing.T) {
-		if err := vm.Destroy(ctxT(t), name); err != nil {
+		if err := vm.Destroy(ctxT(t), name, false); err != nil {
 			t.Fatalf("Destroy: %v", err)
 		}
 		destroyed = true

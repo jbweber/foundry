@@ -317,6 +317,12 @@ foundry list
 foundry destroy my-vm
 ```
 
+Destroy deletes the VM's volumes: those named `my-vm_...` in foundry-vms and, when the spec puts its disks in
+another pool (`spec.storagePool`), the boot, cloud-init, data and input volumes the spec names there. Images are
+never deleted by name prefix, so an image called `my-vm_base.qcow2` stays. Only VMs foundry made are destroyed: a
+domain without foundry's spec in its metadata is refused with nothing changed, and `foundry destroy --force
+my-vm` destroys it anyway (its `my-vm_...` volumes in foundry-vms only).
+
 ### Manage Images
 
 ```bash

@@ -58,6 +58,9 @@ func init() {
 		"libvirt socket to connect to (default: virtqemud's socket if it exists, else libvirt-sock); "+
 			"for a libvirt on another machine, a local socket forwarded over SSH")
 
+	destroyCmd.Flags().BoolVar(&destroyForce, "force", false,
+		"destroy a domain foundry did not make (no foundry spec in its metadata, or one that cannot be read)")
+
 	// Subcommands will be added here
 	rootCmd.AddCommand(createCmd)
 	rootCmd.AddCommand(renderCmd)
@@ -93,6 +96,9 @@ network settings, and cloud-init configuration.`,
 	},
 }
 
+// destroyForce is 'destroy --force'.
+var destroyForce bool
+
 var destroyCmd = &cobra.Command{
 	Use:   "destroy <vm-name>",
 	Short: "Destroy a VM",
@@ -102,14 +108,21 @@ This will:
 - Gracefully shutdown the VM if running (5s timeout)
 - Force destroy if still running
 - Undefine the domain (with NVRAM cleanup)
-- Delete all storage volumes`,
+- Delete the VM's storage volumes: those named <vm>_... in foundry-vms and,
+  when its spec puts its disks in another pool (spec.storagePool), the boot,
+  cloud-init, data and input volumes the spec names there. Images are never
+  deleted by name prefix.
+
+Only VMs foundry made are destroyed: a domain without foundry's spec in its
+metadata, or whose spec cannot be read, is refused with nothing changed.
+--force destroys it anyway (its <vm>_* volumes in foundry-vms only).`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		vmName := args[0]
 		fmt.Printf("Destroying VM: %s\n", vmName)
 
 		ctx := context.Background()
-		if err := vm.Destroy(ctx, vmName); err != nil {
+		if err := vm.Destroy(ctx, vmName, destroyForce); err != nil {
 			return fmt.Errorf("failed to destroy VM: %w", err)
 		}
 
