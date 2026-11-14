@@ -250,12 +250,17 @@ pool's directory. It costs reading the whole image once per create.
 - `spec.inputDisks[].files[].file` → absolute, a relative path taken from the YAML file's directory
 
 **Validation checks (enforced by `loader.validateSpec`):**
-- `metadata.name` is non-empty
+- `metadata.name` is 1-63 characters from `a-z 0-9 . -`, starting with a letter or digit (after
+  lower-casing). No `_`: the name is the prefix of the VM's volume names (`<vm>_boot.qcow2`, ...),
+  and destroy takes the `<vm>_` volumes, so `<vm>_` must name exactly one VM. Only specs loaded
+  for create (and `render`) are checked; existing VMs, whatever their name, are still listed, shown
+  and destroyed by their domain name
 - VCPUs > 0, memoryGiB > 0, disk sizes > 0
 - `spec.bootDisk` specifies exactly one of `image` or `empty: true`
 - `spec.bootDisk.imageSHA256`, when set, is 64 lower-case hex digits, with an image volume
   (not a file path or an empty disk) in `foundry-images` (see Image digest above)
-- Data disks have a device name, and no duplicate device names
+- Data disks have a device name matching `^vd[b-z]{1,2}$` (a virtio disk after `vda`, the boot
+  disk; the device is part of the volume name, so no `_` or `/`), and no duplicate device names
 - `serial` (boot disk and data disks) is 1-20 characters from `A-Z a-z 0-9 - _ .`, unique
   among the VM's disks (see [Disk Serials](#disk-serials))
 - At least one network interface, each with `ip`, `gateway`, `bridge`
@@ -291,7 +296,6 @@ pool's directory. It costs reading the whole image once per create.
   [Input Disks](#input-disks))
 
 **Not yet enforced** (documented intent, no implementation):
-- `metadata.name` format: `^[a-z0-9][a-z0-9_-]*[a-z0-9]$` (after normalization)
 - `spec.cloudInit.fqdn` format: valid FQDN (hostname + domain with dots)
 - IP addresses parse as valid CIDR — a malformed IP currently surfaces later, as a
   MAC/interface-name generation error rather than a config validation error
@@ -302,8 +306,9 @@ pool's directory. It costs reading the whole image once per create.
 - VM name doesn't conflict with existing domain
 - The spec as stored in the domain's metadata takes at most 1.5 MiB, checked before anything
   is made (see [Spec size](#spec-size))
-- No input disk volume exists yet; each `inputDisks` `file` is a regular file, and the files of
-  one disk hold at most 16 MiB
+- None of the VM's volumes (boot, data, cloud-init, input) exists yet in its pool: a leftover or
+  a volume made by other means fails the create, naming the volume, before anything is made;
+  each `inputDisks` `file` is a regular file, and the files of one disk hold at most 16 MiB
 - Boot disk image exists (unless empty: true)
 - Boot disk image volume has the sha256 `spec.bootDisk.imageSHA256` states, when it states one
 - Bridge exists on hypervisor (future: fuzzy match)
@@ -853,9 +858,9 @@ through the libvirt API: foundry writes no file on the hypervisor.
 - **Failure and recreate.** Files are read, the images built and the input
   volumes checked before any storage is created, so a missing file or a
   volume left over from an earlier VM of the same name fails the create
-  without cleanup; foundry neither reuses nor deletes a leftover volume. After
-  that check, every input volume of the spec that exists is one this create
-  made, so a later failure deletes them by name with the VM's other volumes.
+  without cleanup; foundry neither reuses nor deletes a leftover volume. A
+  later failure deletes the input volumes this create made with the VM's
+  other volumes.
   `foundry destroy` deletes them with the rest (as for the boot disk: the
   `<vm>_` prefix in foundry-vms, the exact names the spec gives in another
   pool), and the
@@ -1364,7 +1369,8 @@ commit it with the fix, so it stays a regression test.
 
 ### Graceful Failures
 - VM creation fails → clean up partial resources
-- Storage creation fails → delete created volumes
+- Storage creation fails → delete created volumes: create records each volume as it makes it
+  and deletes only those, never a volume of the spec's names that it did not make
 - Domain definition fails → clean up storage
 - Shutdown timeout → force destroy
 

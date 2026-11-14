@@ -63,6 +63,11 @@ git history.
 - `foundry destroy` destroys only VMs foundry made: a domain without foundry's spec in its metadata, or whose
   spec cannot be read, is refused with nothing changed. `--force` destroys it anyway, deleting its `<vm>_...`
   volumes in foundry-vms only.
+- New VM names follow a rule: 1 to 63 characters from `a-z 0-9 . -`, starting with a letter or digit
+  (after lower-casing). `_` is no longer allowed, since the name followed by `_` is the prefix of the VM's
+  volume names. A data disk's `device` must be `vdb` to `vdzz` (`^vd[b-z]{1,2}$`). Both are checked when a
+  spec is loaded for `create` and `render`; existing VMs are listed, shown and destroyed as before,
+  whatever their name.
 
 ### Fixed
 
@@ -112,5 +117,10 @@ git history.
   only makes it transient, so such a VM kept running on disks destroy had deleted. A VM that cannot be
   stopped, or whose state cannot be read, is now an error with nothing undefined or deleted, also with
   `--force`.
+- A failed `foundry create` deletes only the volumes it made. It deleted every data and cloud-init volume
+  name the spec gives, so a volume of such a name that existed already (a leftover, an image in the pool
+  `spec.storagePool` names) was deleted. Create now also checks, before it makes anything, that none of the
+  VM's boot, data and cloud-init volumes exists, as it did for the boot and input volumes, and names the one
+  that does.
 
 [Unreleased]: https://github.com/jbweber/foundry/compare/v0.6.1...HEAD

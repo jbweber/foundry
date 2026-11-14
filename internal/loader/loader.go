@@ -158,11 +158,29 @@ func applyDefaults(vm *v1alpha1.VirtualMachine) {
 	}
 }
 
+// vmNameRE is the form of a new VM's name. The name is the prefix of every
+// volume name the VM gets ("<name>_boot.qcow2", "<name>_data-vdb.qcow2", ...),
+// and destroy finds a VM's volumes by that prefix, so the name has no "_":
+// otherwise VM "a" with data disk "b_boot" would name VM "a_data-b"'s boot
+// volume, and "<name>_" would match the volumes of another VM. It has no "/"
+// and no leading ".", so it can't name another directory in the pool's path.
+// Only specs loaded for create (and render) are checked; existing VMs are
+// listed, shown and destroyed by their domain name, whatever it is.
+var vmNameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]{0,62}$`)
+
+// dataDeviceRE is the form of a data disk's device: a virtio disk target
+// after vda (the boot disk), as libvirt names them. The device becomes part of
+// the volume name, so this also keeps "_" and "/" out of it.
+var dataDeviceRE = regexp.MustCompile(`^vd[b-z]{1,2}$`)
+
 // validateSpec validates the VirtualMachine spec for required fields and consistency.
 func validateSpec(vm *v1alpha1.VirtualMachine) error {
 	// Validate metadata.name
 	if vm.Name == "" {
 		return fmt.Errorf("metadata.name is required")
+	}
+	if !vmNameRE.MatchString(vm.Name) {
+		return fmt.Errorf("metadata.name %q must be 1 to 63 characters from a-z 0-9 . -, starting with a letter or digit", vm.Name)
 	}
 
 	// Validate VCPUs
@@ -222,6 +240,9 @@ func validateSpec(vm *v1alpha1.VirtualMachine) error {
 	for i, disk := range vm.Spec.DataDisks {
 		if disk.Device == "" {
 			return fmt.Errorf("spec.dataDisks[%d].device is required", i)
+		}
+		if !dataDeviceRE.MatchString(disk.Device) {
+			return fmt.Errorf("spec.dataDisks[%d].device %q must be a virtio disk name from vdb to vdzz (vd and one or two of b-z); vda is the boot disk", i, disk.Device)
 		}
 		if disk.SizeGB <= 0 {
 			return fmt.Errorf("spec.dataDisks[%d].sizeGB must be greater than 0", i)
