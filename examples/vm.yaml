@@ -22,11 +22,16 @@ spec:
     imagePool: foundry-images # Optional: pool containing base image (default: foundry-images)
     # OR for empty boot disk:
     # empty: true             # Create empty disk instead of snapshot
+    # serial: root            # Optional: disk serial; the guest sees /dev/disk/by-id/virtio-root
 
   # Optional: Additional data disks
   dataDisks:
     - device: vdb             # Device name (vdb, vdc, etc.)
       sizeGB: 100
+      # Optional: disk serial, 1-20 of A-Z a-z 0-9 - _ ., unique among the VM's
+      # disks. The guest finds the disk as /dev/disk/by-id/virtio-data-0
+      # whatever order it probes the disks in.
+      serial: data-0
     - device: vdc
       sizeGB: 200
 

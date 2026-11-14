@@ -123,11 +123,13 @@ spec:
     imagePool: foundry-images # Optional: pool containing base image (default: foundry-images)
     # OR for empty boot disk:
     # empty: true             # Create empty disk instead of snapshot
+    # serial: root            # Optional: disk serial (/dev/disk/by-id/virtio-root)
 
   # Optional: Additional data disks
   dataDisks:
     - device: vdb             # Device name (vdb, vdc, etc.)
       sizeGB: 100
+      serial: data-0          # Optional: disk serial (/dev/disk/by-id/virtio-data-0)
     - device: vdc
       sizeGB: 200
 
@@ -221,6 +223,8 @@ status:
 - VCPUs > 0, memoryGiB > 0, disk sizes > 0
 - `spec.bootDisk` specifies exactly one of `image` or `empty: true`
 - Data disks have a device name, and no duplicate device names
+- `serial` (boot disk and data disks) is 1-20 characters from `A-Z a-z 0-9 - _ .`, unique
+  among the VM's disks (see [Disk Serials](#disk-serials))
 - At least one network interface, each with `ip`, `gateway`, `bridge`
 - No duplicate IP addresses in network interfaces
 - `networkInterfaces[].vlan` within 1-4094 when set (see [VLAN Tagging](#vlan-tagging))
@@ -709,6 +713,26 @@ way to change a VM, and it rebuilds the disks).
 where no interface sets `defaultRoute: true` produces a guest with addresses and
 a gateway configured but no default route. Validation enforces that at most one
 interface sets it, but does not require that any interface does.
+
+### Disk Serials
+
+`bootDisk.serial` and `dataDisks[].serial` set the disk's serial number,
+rendered as libvirt's `<serial>` element in that `<disk>`
+([libvirt: hard drives, floppy disks, CDROMs](https://libvirt.org/formatdomain.html#hard-drives-floppy-disks-cdroms)).
+A Linux guest lists a virtio disk with a serial as
+`/dev/disk/by-id/virtio-<serial>`, so it can find a data disk by a name the VM
+file chose instead of by device probe order (`vdb`, `vdc`, ...), which a guest
+is not bound to keep.
+
+Validation: 1-20 characters from `A-Z a-z 0-9 - _ .`, unique among the VM's
+disks. A virtio-blk serial holds at most 20 bytes and QEMU truncates a longer
+one without error, so two longer serials could reach the guest as the same
+name; the character set passes unchanged through libvirt, QEMU and udev's
+by-id names. No serial (the default) renders no element, as before.
+
+The disk serial is not the SMBIOS system serial (`spec.serial`, see
+[SMBIOS and fw_cfg](#smbios-and-fw_cfg)), and the CD-ROMs (the cloud-init seed
+and the input disks) carry none: a guest finds those by their volume label.
 
 ### Storage Management
 

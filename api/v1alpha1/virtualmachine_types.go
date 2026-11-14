@@ -291,6 +291,13 @@ type BootDiskSpec struct {
 	// Mutually exclusive with Image.
 	// +optional
 	Empty bool `json:"empty,omitempty" yaml:"empty,omitempty"`
+
+	// Serial is the disk serial number the guest sees (libvirt <serial>),
+	// e.g. in /dev/disk/by-id. 1-20 characters from A-Z a-z 0-9 - _ .;
+	// unique among the VM's disks.
+	// +optional
+	// +kubebuilder:validation:Pattern=`^[A-Za-z0-9._-]{1,20}$`
+	Serial string `json:"serial,omitempty" yaml:"serial,omitempty"`
 }
 
 // DataDiskSpec defines an additional data disk configuration.
@@ -304,6 +311,15 @@ type DataDiskSpec struct {
 	// SizeGB is the size of the data disk in gigabytes.
 	// +kubebuilder:validation:Minimum=1
 	SizeGB int `json:"sizeGB" yaml:"sizeGB"`
+
+	// Serial is the disk serial number the guest sees (libvirt <serial>),
+	// so the guest can find the disk by a stable name in /dev/disk/by-id
+	// rather than by probe order. 1-20 characters from A-Z a-z 0-9 - _ .
+	// (a virtio-blk serial holds at most 20 bytes; QEMU cuts longer ones);
+	// unique among the VM's disks.
+	// +optional
+	// +kubebuilder:validation:Pattern=`^[A-Za-z0-9._-]{1,20}$`
+	Serial string `json:"serial,omitempty" yaml:"serial,omitempty"`
 }
 
 // NetworkInterfaceSpec defines a network interface configuration.

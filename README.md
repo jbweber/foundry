@@ -25,6 +25,7 @@ This project isn't suggested for general purpose use, and really exists because 
 - **VLAN Tagging**: Optional 802.1Q tag applied per interface on the bridge port
 - **PXE Boot**: Optionally network boot an interface ahead of the boot disk
 - **Storage Management**: QCOW2 boot disks with backing images, plus additional data disks
+- **Disk Serials**: Optional serial per disk, so the guest finds it in `/dev/disk/by-id`
 - **Pool Management**: Create, list, and manage libvirt storage pools
 - **Image Management**: Import, list, and manage base OS images
 - **UEFI Boot**: Modern UEFI firmware support, with pinned firmware files and Secure Boot key profiles
@@ -209,6 +210,28 @@ read that file as that user. `CIDATA` is the label of the cloud-init seed, so it
 is refused next to `spec.cloudInit`; without `spec.cloudInit`, an input disk
 labelled `CIDATA` is a hand-made NoCloud seed. A spec without `inputDisks`
 gets no input disks, as before. `foundry destroy` deletes them with the VM.
+
+### Disk Serials
+
+A guest is not bound to probe its disks in the same order at every boot, so
+`vdb` may not stay the same disk. A `serial` on the boot disk or a data disk
+gives the guest a stable name for it:
+
+```yaml
+spec:
+  dataDisks:
+    - device: vdb
+      sizeGB: 100
+      serial: data-0              # 1-20 of A-Z a-z 0-9 - _ ., unique per VM
+```
+
+```sh
+# In the guest
+mkfs.xfs /dev/disk/by-id/virtio-data-0
+```
+
+The limit is 20 characters because a virtio disk's serial holds 20 bytes and
+QEMU cuts a longer one without a word.
 
 ### List VMs
 

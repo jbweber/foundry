@@ -173,6 +173,7 @@ func GenerateDomainXML(vm *v1alpha1.VirtualMachine, hostArch string) (string, er
 		Boot: &libvirtxml.DomainDeviceBoot{
 			Order: diskBootOrder,
 		},
+		Serial: vm.Spec.BootDisk.Serial,
 	}
 	domain.Devices.Disks = append(domain.Devices.Disks, bootDisk)
 
@@ -195,6 +196,7 @@ func GenerateDomainXML(vm *v1alpha1.VirtualMachine, hostArch string) (string, er
 				Dev: dataDisk.Device,
 				Bus: "virtio",
 			},
+			Serial: dataDisk.Serial,
 		}
 		domain.Devices.Disks = append(domain.Devices.Disks, disk)
 	}

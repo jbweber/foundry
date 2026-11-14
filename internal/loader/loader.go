@@ -221,6 +221,11 @@ func validateSpec(vm *v1alpha1.VirtualMachine) error {
 		devicesSeen[disk.Device] = true
 	}
 
+	// Validate disk serials (boot disk and data disks share one namespace)
+	if err := validateDiskSerials(vm); err != nil {
+		return err
+	}
+
 	// Validate network interfaces
 	if len(vm.Spec.NetworkInterfaces) == 0 {
 		return fmt.Errorf("spec.networkInterfaces must have at least one interface")
@@ -265,6 +270,48 @@ func validateSpec(vm *v1alpha1.VirtualMachine) error {
 		}
 	}
 
+	return nil
+}
+
+// maxDiskSerialLen is the longest disk serial accepted: a virtio-blk serial
+// holds at most 20 bytes, and QEMU silently truncates a longer one, which
+// would let two distinct serials reach the guest as the same name.
+const maxDiskSerialLen = 20
+
+// diskSerialRE is the character set accepted in a disk serial: letters,
+// digits, '-', '_' and '.', which pass unchanged through libvirt, QEMU and
+// the guest's /dev/disk/by-id names.
+var diskSerialRE = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+
+// validateDiskSerials checks spec.bootDisk.serial and spec.dataDisks[].serial:
+// each set serial is 1-20 characters from A-Z a-z 0-9 - _ . and no two disks
+// of the VM share one.
+func validateDiskSerials(vm *v1alpha1.VirtualMachine) error {
+	seen := make(map[string]string)
+	check := func(field, serial string) error {
+		if serial == "" {
+			return nil
+		}
+		if len(serial) > maxDiskSerialLen {
+			return fmt.Errorf("%s %q is longer than %d characters", field, serial, maxDiskSerialLen)
+		}
+		if !diskSerialRE.MatchString(serial) {
+			return fmt.Errorf("%s %q may only contain the characters [A-Za-z0-9._-]", field, serial)
+		}
+		if other, ok := seen[serial]; ok {
+			return fmt.Errorf("%s %q is already used by %s", field, serial, other)
+		}
+		seen[serial] = field
+		return nil
+	}
+	if err := check("spec.bootDisk.serial", vm.Spec.BootDisk.Serial); err != nil {
+		return err
+	}
+	for i, disk := range vm.Spec.DataDisks {
+		if err := check(fmt.Sprintf("spec.dataDisks[%d].serial", i), disk.Serial); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
