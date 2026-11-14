@@ -11,8 +11,23 @@ git history.
 
 ## [Unreleased]
 
+### Added
+
+- Serial console log: every VM's serial console is written, appended across boots, to `<vm>-serial.log` in a new
+  default pool, `foundry-logs` (built at `/var/log/libvirt/qemu/foundry`, directory 0711; virtlogd creates the
+  files 0600 and root's, and rotates them at its `max_size`). The file goes in the directory libvirt reports
+  for the pool, so a `foundry-logs` pool defined elsewhere is used where it is; create checks that the pool is
+  a running dir pool with an absolute, clean path, and refuses a name whose log is still there. See DESIGN.md,
+  Serial Console Log.
+- `foundry logs <vm-name> [serial]` prints a VM's serial console log, virtlogd's rotated copies first. It reads
+  through libvirt only, so it works with `--socket` against a libvirt on another machine.
+
 ### Changed
 
+- `foundry destroy` also deletes the VM's serial log and its rotated copies, by exact name, and removes a log
+  left of a VM whose domain is gone. A create that fails after defining the domain deletes the log too.
+- `pool delete` refuses foundry-logs as it refuses the other default pools; `pool list` and `storage status`
+  mark it as a default pool.
 - Every dependency is updated to its newest release, the tools (golangci-lint, goimports, govulncheck) and
   their dependencies included (`go get -u ./...`, `go get -u tool`, `go mod tidy`). Among them go-libvirt
   moves to `v0.0.0-20261013170128-efbbdf578ac8` and golang.org/x/crypto to v0.59.0.

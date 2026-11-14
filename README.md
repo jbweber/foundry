@@ -350,10 +350,33 @@ never deleted by name prefix, so an image called `my-vm_base.qcow2` stays. Only 
 domain without foundry's spec in its metadata is refused with nothing changed, and `foundry destroy --force
 my-vm` destroys it anyway (its `my-vm_...` volumes in foundry-vms only).
 
+Destroy also deletes the VM's serial console log, `my-vm-serial.log` in foundry-logs, with the copies virtlogd
+rotated it into (`my-vm-serial.log.0`, ...), by exact name.
+
 With no domain of that name, destroy removes the `my-vm_...` volumes left in
-foundry-vms, as after a create that was killed before it defined the domain.
+foundry-vms, and a serial log left in foundry-logs, as after a create that was
+killed before it defined the domain.
 Ctrl-C during a create removes what it made so far; during a destroy, it stops
 before the domain is undefined. A second Ctrl-C ends foundry at once.
+
+### Read a VM's Serial Console Log
+
+```bash
+foundry logs my-vm            # the serial console, oldest first
+foundry logs my-vm serial     # the same: serial is the only log
+```
+
+Everything a VM prints on its serial console (firmware, boot loader, kernel, login prompt) is written to
+`my-vm-serial.log` in the foundry-logs pool, appended across boots, from its creation until `foundry destroy`
+deletes it. libvirt's log daemon, virtlogd, writes the file and rotates it at its `max_size` (2 MiB by default,
+`/etc/libvirt/virtlogd.conf`); `foundry logs` prints the rotated copies first, then the current file. The
+interactive console stays as it was (`virsh console my-vm`).
+
+foundry reads the log through libvirt, never from the hypervisor's file system, so `foundry --socket ... logs`
+works against a libvirt on another machine. The pool directory is 0711 and the files 0600, root's: other local
+users on the hypervisor can neither list nor read the logs. VMs created before foundry logged the serial
+console have no log until they are created again. A create refuses a name whose serial log is still in the pool
+(left of an earlier VM): `foundry destroy <name>` removes it.
 
 ### Manage Images
 

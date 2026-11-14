@@ -93,6 +93,7 @@ func init() {
 	rootCmd.AddCommand(createCmd)
 	rootCmd.AddCommand(renderCmd)
 	rootCmd.AddCommand(destroyCmd)
+	rootCmd.AddCommand(logsCmd)
 	rootCmd.AddCommand(listCmd)
 	rootCmd.AddCommand(getCmd)
 	rootCmd.AddCommand(testConnCmd)
@@ -139,6 +140,8 @@ This will:
   when its spec puts its disks in another pool (spec.storagePool), the boot,
   cloud-init, data and input volumes the spec names there. Images are never
   deleted by name prefix.
+- Delete its serial console log, <vm>-serial.log in foundry-logs, and the
+  copies virtlogd rotated it into (<vm>-serial.log.N)
 
 Only VMs foundry made are destroyed: a domain without foundry's spec in its
 metadata, or whose spec cannot be read, is refused with nothing changed.
@@ -154,6 +157,30 @@ metadata, or whose spec cannot be read, is refused with nothing changed.
 
 		fmt.Println("✓ VM destroyed successfully!")
 		return nil
+	},
+}
+
+var logsCmd = &cobra.Command{
+	Use:   "logs <vm-name> [serial]",
+	Short: "Print a VM's serial console log",
+	Long: `Print a VM's serial console log, oldest first, including the copies
+virtlogd rotated away.
+
+The serial console is logged to <vm>-serial.log in the foundry-logs pool,
+appended across boots, from the VM's creation until destroy deletes it with
+the VM. It is read through libvirt (a pool refresh and a volume download), so
+it works with --socket against a libvirt on another machine.
+
+serial is the only log and the default. VMs created before foundry logged the
+serial console have no log.`,
+	Args:         cobra.RangeArgs(1, 2),
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		kind := vm.LogSerial
+		if len(args) == 2 {
+			kind = args[1]
+		}
+		return vm.Logs(cmd.Context(), args[0], kind, cmd.OutOrStdout())
 	},
 }
 

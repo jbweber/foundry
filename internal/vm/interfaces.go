@@ -2,6 +2,7 @@ package vm
 
 import (
 	"context"
+	"io"
 
 	"github.com/digitalocean/go-libvirt"
 
@@ -93,8 +94,18 @@ type LibvirtClient interface {
 // In production, this is satisfied by *storage.Manager.
 // In tests, this is satisfied by mock implementations.
 type storageManager interface {
-	// EnsureDefaultPools ensures the default foundry-images and foundry-vms pools exist
+	// EnsureDefaultPools ensures the default foundry-images, foundry-vms and foundry-logs pools exist
 	EnsureDefaultPools(ctx context.Context) error
+
+	// RefreshPool rescans a pool's directory, so files made behind libvirt's
+	// back (virtlogd's console logs) show as volumes
+	RefreshPool(ctx context.Context, name string) error
+
+	// LogsDir returns the logs pool's directory, checked (see storage.Manager.LogsDir)
+	LogsDir(ctx context.Context) (string, error)
+
+	// DownloadVolume writes a volume's bytes to w, read through libvirt
+	DownloadVolume(ctx context.Context, poolName, volumeName string, w io.Writer) error
 
 	// VolumeExists checks if a volume exists in a pool
 	VolumeExists(ctx context.Context, poolName, volumeName string) (bool, error)

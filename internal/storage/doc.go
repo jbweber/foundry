@@ -8,9 +8,10 @@
 //
 // Storage Architecture:
 //
-// Foundry uses a pool-based storage architecture with two default pools:
+// Foundry uses a pool-based storage architecture with three default pools:
 //   - foundry-images: Base OS images shared across VMs
 //   - foundry-vms: VM-specific volumes (boot disks, data disks, cloud-init ISOs)
+//   - foundry-logs: the VMs' serial console logs, written by virtlogd (LogsDir)
 //
 // Volume Naming Convention:
 //

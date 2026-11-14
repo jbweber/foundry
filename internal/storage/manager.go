@@ -71,7 +71,10 @@ func NewManager(client LibvirtClient) *Manager {
 	}
 }
 
-// EnsureDefaultPools ensures that the default foundry-images and foundry-vms pools exist.
+// EnsureDefaultPools ensures that the default foundry-images, foundry-vms and
+// foundry-logs pools exist, building each that does not at its default path.
+// A pool that exists is left as it is, wherever its directory is: the VMs'
+// serial logs go where the logs pool is (LogsDir checks it).
 // This is called automatically during VM creation if needed.
 func (m *Manager) EnsureDefaultPools(ctx context.Context) error {
 	// Ensure foundry-images pool exists
@@ -82,6 +85,11 @@ func (m *Manager) EnsureDefaultPools(ctx context.Context) error {
 	// Ensure foundry-vms pool exists
 	if err := m.EnsurePool(ctx, DefaultVMsPool, PoolTypeDir, DefaultVMsPath); err != nil {
 		return fmt.Errorf("failed to ensure VMs pool: %w", err)
+	}
+
+	// Ensure foundry-logs pool exists
+	if err := m.EnsurePool(ctx, DefaultLogsPool, PoolTypeDir, DefaultLogsPath); err != nil {
+		return fmt.Errorf("failed to ensure logs pool: %w", err)
 	}
 
 	return nil

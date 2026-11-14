@@ -9,6 +9,7 @@ package naming
 import (
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 )
 
@@ -139,4 +140,37 @@ func ParseVolumeNameVarstore(volume string) (profile, arch string, ok bool) {
 		return "", "", false
 	}
 	return profile, arch, true
+}
+
+// serialLogSuffix ends the name of every VM's serial console log.
+const serialLogSuffix = "-serial.log"
+
+// SerialLogName returns the name of a VM's serial console log, a file (and
+// volume) of the logs pool. Not {vmName}.log: libvirt's own QEMU log for the
+// domain has that name.
+// Format: {vmName}-serial.log
+func SerialLogName(vmName string) string {
+	return vmName + serialLogSuffix
+}
+
+// SerialLogCopy reports whether volume is one of the VM's serial console log
+// files: the log itself (copy -1), or one of the copies virtlogd rotates it
+// into when it reaches its maximum size, {log}.0 (the newest) to {log}.N
+// (copy N). Only these exact names match: "web-serial.log.bak", or the log
+// of a VM "web-2", is not one of VM "web"'s.
+func SerialLogCopy(volume, vmName string) (copyNumber int, ok bool) {
+	base := SerialLogName(vmName)
+	if volume == base {
+		return -1, true
+	}
+	// virtlogd names the copies "%s.%zu": decimal, no sign, no leading zero
+	rest, found := strings.CutPrefix(volume, base+".")
+	if !found || rest == "" || strings.Trim(rest, "0123456789") != "" || (len(rest) > 1 && rest[0] == '0') {
+		return 0, false
+	}
+	n, err := strconv.Atoi(rest)
+	if err != nil {
+		return 0, false
+	}
+	return n, true
 }

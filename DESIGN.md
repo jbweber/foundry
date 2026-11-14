@@ -353,7 +353,9 @@ pool's directory. It costs reading the whole image once per create.
    - Disk devices (virtio)
    - Network interfaces (bridge, virtio)
    - Cloud-init CDROM, input disk CDROMs
-   - Serial console
+   - Serial console, logged to `<vm>-serial.log` in the logs pool's directory as libvirt reports it
+     (checked before anything is made: a running dir pool with an absolute, clean path; and no log of an
+     earlier VM of the name there; see Serial Console Log)
 7. Define domain in libvirt
 7b. Store the spec in the domain's metadata (persistent definition); a failed
    store fails the create, and the domain and volumes are removed
@@ -409,6 +411,8 @@ or an image.
    - Data disks
    - Cloud-init ISO
    - Input disks
+6. Delete the serial console log (foundry-logs, `<vm>-serial.log` and its rotated
+   copies `<vm>-serial.log.N`, exact names), also for a name with no domain
 ```
 
 Step 1 refuses a domain foundry did not make: one without foundry's spec in
@@ -899,6 +903,56 @@ where no interface sets `defaultRoute: true` produces a guest with addresses and
 a gateway configured but no default route. Validation enforces that at most one
 interface sets it, but does not require that any interface does.
 
+### Serial Console Log
+
+Every VM's serial console is logged to a file on the hypervisor, so what the guest printed (firmware, boot
+loader, kernel, login prompt) can be read after the fact, by a person or a test, with `foundry logs <vm>`. The
+domain's `<serial>` keeps its pty, the interactive console (`virsh console`), and gets a
+[`<log file=... append='on'/>`](https://libvirt.org/formatdomain.html#consoles-serial-parallel-channel-devices):
+libvirt writes everything the console carries to the file, appended across boots. The `<console>` is the same
+device (port 0) and needs no log of its own.
+
+**Who writes it.** With virtlogd as QEMU's stdio handler (`stdio_handler = "logd"` in qemu.conf, the default),
+QEMU does not open the file: virtlogd, running as root, does, and rotates it when it reaches `max_size`
+(2 MiB by default) into `<log>.0`, `<log>.1`, ... up to `max_backups` copies
+([virtlogd](https://libvirt.org/manpages/virtlogd.html), `/etc/libvirt/virtlogd.conf`). Measured with libvirt
+11.0.0 on Fedora 42 (QEMU running as `qemu`, virtlogd as root, `max_size` lowered to 4096 to force a rotation):
+the log and its rotated copy are created `-rw------- root root`; the copy is named `<log>.0`; `foundry logs`
+printed the copy and then the current file, byte for byte their concatenation. With `stdio_handler = "file"`
+QEMU opens the file itself and it is the QEMU user's; that setup was not measured and foundry does not depend on
+it.
+
+**Where it is.** The file is `<vm>-serial.log` (not `<vm>.log`: libvirt's own QEMU log for the domain has that
+name) in the directory of the `foundry-logs` pool, and so a volume of that pool. The directory is not fixed in
+foundry: create asks libvirt for the logs pool's target path and names the file there, so a `foundry-logs`
+pool defined elsewhere before foundry first ran is used where it is, and the domain XML and the pool always
+agree. Create checks the pool before it makes anything: it must be a `dir` pool (libvirt can only be told a file
+path), running (a pool that is not running cannot be refreshed, so new logs would not show as volumes), with an
+absolute, clean target path. When foundry builds the pool it puts it at `/var/log/libvirt/qemu/foundry`,
+inside libvirt's QEMU log directory, so that on an SELinux host the files get that directory's type
+(`virt_log_t`), which virtlogd may write; on Fedora and RHEL `/var/log/libvirt/qemu` is itself `0700 root`. The
+SELinux labelling was not measured (the measurement ran in a container); `render` shows the default directory.
+
+**Modes.** foundry builds the logs pool's directory 0711, like foundry-vms: the console shows what the guest
+prints, including anything typed at a login prompt, so other local users must not list or read the logs. The
+files are virtlogd's, 0600 and root's (measured above); libvirt has no call to change a volume's mode, and
+foundry needs none.
+
+**Reading it.** `foundry logs` refreshes the logs pool (virtlogd creates and rotates the files behind libvirt's
+back, and a dir pool shows only what its last refresh found), lists the VM's files by exact name
+(`<vm>-serial.log` and `<vm>-serial.log.N`, N decimal), and downloads the rotated copies from the highest
+number down, then the current file, with `StorageVolDownload`. Everything goes through the libvirt connection,
+so it works with `--socket` against a libvirt on another machine exactly as on the hypervisor; foundry never
+opens a file on the hypervisor. It does not need the domain, and creates no pool. A rotation between the
+listing and the reads can make a read fail; running `logs` again reads the new set. There is no follow mode.
+
+**Lifetime.** Destroy deletes the VM's log and rotated copies (exact names, so VM `web` never takes `web-2`'s
+log), after the domain is stopped and undefined, when virtlogd has closed them; with no domain of the name it
+removes a log left behind, as it removes leftover volumes. A create that fails after defining the domain
+deletes the log the start may have made. A create refuses a name whose log (or a rotated copy) is still in the
+pool: the new VM would append to another VM's output. VMs created before foundry logged the serial console
+have no log.
+
 ### Disk Serials
 
 `bootDisk.serial` and `dataDisks[].serial` set the disk's serial number,
@@ -923,7 +977,7 @@ and the input disks) carry none: a guest finds those by their volume label.
 
 **Architecture**: Unified libvirt storage pool approach with separate pools for images and VMs.
 
-**Two Default Pools** (auto-created on first use):
+**Three Default Pools** (auto-created on first use):
 - `foundry-images` - Base OS images at `/var/lib/libvirt/images/foundry/images/`
   - Read-mostly, shared across VMs
   - Small total size (few GB)
@@ -931,6 +985,7 @@ and the input disks) carry none: a guest finds those by their volume label.
   - Read-write active disks
   - Most I/O happens here
   - Default pool for VM creation
+- `foundry-logs` - the VMs' serial console logs at `/var/log/libvirt/qemu/foundry/` (see Serial Console Log)
 
 **Custom Pools** (user-managed):
 - Users can add pools for specific storage needs (SSD, bulk, network storage)
@@ -943,7 +998,8 @@ after. A VM's own volumes (boot, data, cloud-init, input) are 0600: they hold it
 and secrets such as the password hash. Base images and Secure Boot key profiles are 0644:
 shared backing files and varstore templates (certificates, no private keys). The
 foundry-vms directory is 0711, so QEMU can open a volume by path but other users can't
-list the VMs' disks; other pools, foundry-images included, are 0755. libvirt applies a
+list the VMs' disks; so is the foundry-logs directory, whose files virtlogd creates 0600 and root's;
+other pools, foundry-images included, are 0755. libvirt applies a
 mode only when it makes the volume or builds the pool, so older ones keep theirs.
 
 **Volume Naming Convention** (flat namespace within pools):
@@ -1151,6 +1207,7 @@ Key elements (using volume-based disk sources):
       <target dev='vm0a371616'/>
     </interface>
     <serial type='pty'>
+      <log file='/var/log/libvirt/qemu/foundry/my-vm-serial.log' append='on'/>
       <target type='isa-serial' port='0'/>
     </serial>
     <console type='pty'>
@@ -1184,6 +1241,10 @@ foundry render examples/vm.yaml
 foundry destroy <vm-name>
 foundry destroy my-vm
 
+# Print a VM's serial console log, oldest first (serial is the only log)
+foundry logs <vm-name> [serial]
+foundry logs my-vm
+
 # List all VMs, running or not (-o yaml|json, --no-headers)
 foundry list
 
@@ -1206,7 +1267,7 @@ foundry pool info <pool-name>
 foundry pool add <name> <type> <path>
 foundry pool add my-pool dir /mnt/ssd/foundry
 
-# Delete custom pool (prevents deleting foundry-images, foundry-vms)
+# Delete custom pool (prevents deleting foundry-images, foundry-vms, foundry-logs)
 foundry pool delete <name> [--force]
 
 # Refresh pool state
@@ -1345,14 +1406,16 @@ accident.
   a backing file and a failing reader leaving no volume; one VM through create (image digest, data disk with
   serial, cloud-init, input disk), get, list and destroy, with user data and an input file holding characters
   that are special in XML, read back unchanged from the stored spec, and no volume left after destroy; a
-  create whose image differs from its digest (other content, or cut short) failing before it makes anything.
+  create whose image differs from its digest (other content, or cut short) failing before it makes anything;
+  a VM's serial console log, read with `logs` once the firmware has printed to it, a 0600 file in the logs
+  pool's directory, and gone after destroy.
 - What they need: a libvirt with the QEMU driver, its network and storage drivers, UEFI firmware for x86_64
   (OVMF), and KVM: a VM without `spec.arch` runs under KVM, so the lifecycle test fails, saying so, when
   libvirt offers none. Inside a VM that means nested virtualization. `go test -race` needs a C compiler.
 - What they create, they remove: VMs, an isolated transient network (no uplink, no addresses) and images, all
   named `foundry-it-…` (bridges `fdryit…`, tap devices `fdryvm…`), and foundry's default pools,
-  `foundry-images` and `foundry-vms`, when the libvirt did not have them before the test, directories
-  included. The parent directory `/var/lib/libvirt/images/foundry` stays. Use a disposable libvirt all the
+  `foundry-images`, `foundry-vms` and `foundry-logs`, when the libvirt did not have them before the test,
+  directories included. The parent directory `/var/lib/libvirt/images/foundry` stays. Use a disposable libvirt all the
   same, such as a throwaway VM's.
 - Without the socket every test is skipped, with a message that names the missing libvirt, and
   `make test-integration` fails: a lane that ran no test proves nothing (`tools/test-integration.sh` counts the

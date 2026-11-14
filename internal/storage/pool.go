@@ -76,7 +76,7 @@ func (m *Manager) CreatePool(ctx context.Context, name string, poolType PoolType
 // Returns an error if the pool doesn't exist or if deletion fails.
 func (m *Manager) DeletePool(ctx context.Context, name string, force bool) error {
 	// Prevent deletion of default pools
-	if name == DefaultImagesPool || name == DefaultVMsPool {
+	if IsDefaultPool(name) {
 		return fmt.Errorf("cannot delete default pool: %s", name)
 	}
 
@@ -262,12 +262,16 @@ func generateDirPoolXML(name, path string) (string, error) {
 // PoolMode is the mode of a pool's directory when foundry builds it. QEMU
 // only needs to traverse it to open a volume by path, so the VMs pool,
 // whose volumes are private (VolumeMode), is 0711: other local users
-// cannot list which VMs and disks it holds. Other pools, the images pool
-// among them, are 0755: base images are shared, not secret. libvirt applies
-// the mode only when it builds the pool: a pool that exists keeps its
+// cannot list which VMs and disks it holds. The logs pool is 0711 too: a
+// VM's console shows what the guest prints, boot messages and anything
+// typed at a login prompt included, and virtlogd, which creates the log
+// files, makes them 0600 and root's. Other pools, the images pool among
+// them, are 0755: base images are shared, not secret. libvirt applies the
+// mode only when it builds the pool: a pool that exists keeps its
 // directory's mode.
 func PoolMode(name string) string {
-	if name == DefaultVMsPool {
+	switch name {
+	case DefaultVMsPool, DefaultLogsPool:
 		return "0711"
 	}
 	return "0755"

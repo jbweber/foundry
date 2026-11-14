@@ -7,6 +7,7 @@ import (
 	"libvirt.org/go/libvirtxml"
 
 	"github.com/jbweber/foundry/api/v1alpha1"
+	"github.com/jbweber/foundry/internal/storage"
 )
 
 func TestGenerateDomainXML(t *testing.T) {
@@ -1147,6 +1148,50 @@ func TestGenerateDomainXML_Vlan(t *testing.T) {
 				if got.Tags[0].ID != *want {
 					t.Errorf("Interface %d vlan tag = %d, want %d", i, got.Tags[0].ID, *want)
 				}
+			}
+		})
+	}
+}
+
+// TestGenerateDomainXML_SerialLog: the serial console is logged to
+// {dir}/{vm}-serial.log, appended across boots; GenerateDomainXML uses the
+// default logs directory, GenerateDomainXMLWithLogDir the one it is given.
+// The console, the same device, gets no second log.
+func TestGenerateDomainXML_SerialLog(t *testing.T) {
+	vm := &v1alpha1.VirtualMachine{
+		ObjectMeta: v1alpha1.ObjectMeta{Name: "log-vm"},
+		Spec: v1alpha1.VirtualMachineSpec{
+			VCPUs:     1,
+			MemoryGiB: 1,
+			BootDisk:  v1alpha1.BootDiskSpec{SizeGB: 10, Image: "fedora.qcow2"},
+		},
+	}
+	for _, tt := range []struct {
+		name string
+		gen  func() (string, error)
+		want string
+	}{
+		{"default", func() (string, error) { return GenerateDomainXML(vm, "x86_64") }, storage.DefaultLogsPath + "/log-vm-serial.log"},
+		{"pool elsewhere", func() (string, error) { return GenerateDomainXMLWithLogDir(vm, "x86_64", "/srv/logs") }, "/srv/logs/log-vm-serial.log"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			xml, err := tt.gen()
+			if err != nil {
+				t.Fatalf("generate: %v", err)
+			}
+			var domain libvirtxml.Domain
+			if err := domain.Unmarshal(xml); err != nil {
+				t.Fatalf("parse: %v", err)
+			}
+			if len(domain.Devices.Serials) != 1 {
+				t.Fatalf("serials = %d, want 1", len(domain.Devices.Serials))
+			}
+			l := domain.Devices.Serials[0].Log
+			if l == nil || l.File != tt.want || l.Append != "on" {
+				t.Errorf("serial log = %+v, want file %s, append on", l, tt.want)
+			}
+			if len(domain.Devices.Consoles) != 1 || domain.Devices.Consoles[0].Log != nil {
+				t.Errorf("console = %+v, want one without a log of its own", domain.Devices.Consoles)
 			}
 		})
 	}

@@ -3,6 +3,7 @@ package vm
 import (
 	"context"
 	"fmt"
+	"io"
 	"sync"
 
 	"github.com/digitalocean/go-libvirt"
@@ -250,6 +251,9 @@ type mockStorageManager struct {
 	writeVolumeDataFunc    func(ctx context.Context, poolName, volumeName string, data []byte) error
 	listVolumesFunc        func(ctx context.Context, poolName string) ([]storage.VolumeInfo, error)
 	volumeSHA256Func       func(ctx context.Context, poolName, volumeName string) (string, error)
+	refreshPoolFunc        func(ctx context.Context, name string) error
+	logsDirFunc            func(ctx context.Context) (string, error)
+	downloadVolumeFunc     func(ctx context.Context, poolName, volumeName string, w io.Writer) error
 
 	// Call tracking
 	ensureDefaultPoolsCalls int
@@ -261,6 +265,8 @@ type mockStorageManager struct {
 	writeVolumeDataCalls    []string // format: "pool/volume"
 	listVolumesCalls        []string // pool names
 	volumeSHA256Calls       []string // format: "pool/volume"
+	refreshPoolCalls        []string // pool names
+	downloadVolumeCalls     []string // format: "pool/volume"
 }
 
 // newMockStorageManager creates a new mock storage manager with default behavior.
@@ -305,6 +311,18 @@ func newMockStorageManager() *mockStorageManager {
 		// Default: every volume hashes as the empty input
 		volumeSHA256Func: func(ctx context.Context, poolName, volumeName string) (string, error) {
 			return "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", nil
+		},
+		// Default: refresh succeeds
+		refreshPoolFunc: func(ctx context.Context, name string) error {
+			return nil
+		},
+		// Default: the logs pool at its default path
+		logsDirFunc: func(ctx context.Context) (string, error) {
+			return storage.DefaultLogsPath, nil
+		},
+		// Default: every volume is empty
+		downloadVolumeFunc: func(ctx context.Context, poolName, volumeName string, w io.Writer) error {
+			return nil
 		},
 	}
 }
@@ -376,6 +394,26 @@ func (m *mockStorageManager) VolumeSHA256(ctx context.Context, poolName, volumeN
 	defer m.mu.Unlock()
 	m.volumeSHA256Calls = append(m.volumeSHA256Calls, poolName+"/"+volumeName)
 	return m.volumeSHA256Func(ctx, poolName, volumeName)
+}
+
+func (m *mockStorageManager) RefreshPool(ctx context.Context, name string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.refreshPoolCalls = append(m.refreshPoolCalls, name)
+	return m.refreshPoolFunc(ctx, name)
+}
+
+func (m *mockStorageManager) LogsDir(ctx context.Context) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.logsDirFunc(ctx)
+}
+
+func (m *mockStorageManager) DownloadVolume(ctx context.Context, poolName, volumeName string, w io.Writer) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.downloadVolumeCalls = append(m.downloadVolumeCalls, poolName+"/"+volumeName)
+	return m.downloadVolumeFunc(ctx, poolName, volumeName, w)
 }
 
 // newMockMetadataClient creates a mock metadata.Client for testing.

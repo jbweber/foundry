@@ -216,6 +216,17 @@ func createFromConfigWithDeps(ctx context.Context, vm *v1alpha1.VirtualMachine, 
 		return createErr
 	}
 
+	// Step 2a: The logs pool's directory, where the serial console log will
+	// be, and no log of an earlier VM of this name in it
+	var logDir string
+	logDir, createErr = sm.LogsDir(ctx)
+	if createErr != nil {
+		return createErr
+	}
+	if createErr = checkSerialLogAbsent(ctx, vm.Name, sm); createErr != nil {
+		return createErr
+	}
+
 	// Step 2b: Find the Secure Boot key profile's varstore, before any
 	// storage is created, so a missing profile fails without cleanup
 	var domainVM *v1alpha1.VirtualMachine
@@ -404,7 +415,7 @@ func createFromConfigWithDeps(ctx context.Context, vm *v1alpha1.VirtualMachine, 
 		log.Printf("Guest %s on a %s hypervisor: domain type %s", vm.Spec.Arch, hostArch, vm.GetDomainType(hostArch))
 	}
 	var domainXML string
-	domainXML, createErr = foundrylibvirt.GenerateDomainXML(domainVM, hostArch)
+	domainXML, createErr = foundrylibvirt.GenerateDomainXMLWithLogDir(domainVM, hostArch, logDir)
 	if createErr != nil {
 		return fmt.Errorf("failed to generate domain XML: %w", createErr)
 	}
@@ -493,8 +504,8 @@ func resolveKeyProfile(ctx context.Context, vm *v1alpha1.VirtualMachine, sm stor
 }
 
 // cleanupWithDeps removes the VM resources a failed create made: the
-// domain, if it was defined, and the volumes in made (names in the VM's
-// pool). This version accepts interfaces for testing.
+// domain, if it was defined, with its serial log, and the volumes in made
+// (names in the VM's pool). This version accepts interfaces for testing.
 //
 // It carries on past a failure where that is safe, and returns an error that
 // says what was left behind. A domain that may still be running (it could
@@ -527,6 +538,17 @@ func cleanupWithDeps(ctx context.Context, vm *v1alpha1.VirtualMachine, sm storag
 			if err := sm.DeleteVolume(ctx, getStoragePool(vm), name); err != nil {
 				log.Printf("Warning: failed to delete volume %s: %v", name, err)
 				left = append(left, fmt.Sprintf("volume %s/%s not deleted: %v", getStoragePool(vm), name, err))
+			}
+		}
+	}
+
+	// The serial log, which virtlogd made if the domain started: create
+	// checked that the VM had none before, so any there now is this VM's
+	if domainDefined && sm != nil {
+		for _, v := range serialLogVolumes(ctx, sm, vm.Name) {
+			if err := sm.DeleteVolume(ctx, v.pool, v.name); err != nil {
+				log.Printf("Warning: failed to delete serial log %s: %v", v.name, err)
+				left = append(left, fmt.Sprintf("serial log %s/%s not deleted: %v", v.pool, v.name, err))
 			}
 		}
 	}
