@@ -619,6 +619,12 @@ func (in *NetworkInterfaceSpec) DeepCopy() *NetworkInterfaceSpec {
 	out := new(NetworkInterfaceSpec)
 	*out = *in
 
+	// Deep copy Vlan pointer
+	if in.Vlan != nil {
+		vlan := *in.Vlan
+		out.Vlan = &vlan
+	}
+
 	// Deep copy DNSServers slice
 	if in.DNSServers != nil {
 		out.DNSServers = make([]string, len(in.DNSServers))
