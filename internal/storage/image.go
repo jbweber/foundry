@@ -35,9 +35,11 @@ func CheckImageName(imageName string) error {
 // The name's extension says what the file must be: .qcow2 a QCOW2 image,
 // .raw a bootable raw disk image. A qcow2 image that would make qemu read
 // another file (a backing file, an external data file) is refused
-// (checkQCOW2Header). The file must be a regular file (a symlink
-// to one is followed): a directory or a device is refused, as its size is not
-// the size of what it would stream. The file is streamed to libvirt, not read
+// (checkQCOW2Header). The file must be a regular file (a symlink to one is
+// followed) or a pipe, which is read as ImportImageFromReader reads. A
+// directory or a device is refused before it is opened: its size is not the
+// size of what it would stream, and opening some devices does something. The
+// file is streamed to libvirt, not read
 // into memory, and if it ends before the size it had when it was opened, the
 // import fails. On any failure after the volume is created, the volume is
 // deleted.
@@ -45,21 +47,90 @@ func (m *Manager) ImportImage(ctx context.Context, filePath, imageName string) e
 	if err := CheckImageName(imageName); err != nil {
 		return err
 	}
+	if err := checkImageSource(filePath); err != nil {
+		return err
+	}
 	f, err := os.Open(filePath)
 	if err != nil {
 		return fmt.Errorf("failed to open image file: %w", err)
 	}
 	defer func() { _ = f.Close() }()
-	// Stat the open file, not the path, so the checks and the upload see the
-	// same file even if the path is replaced meanwhile
+	// Stat the open file as well, so the checks and the upload see the file
+	// that was opened even if the path was replaced meanwhile
 	info, err := f.Stat()
 	if err != nil {
 		return fmt.Errorf("failed to stat image file: %w", err)
 	}
-	if !info.Mode().IsRegular() {
-		return fmt.Errorf("image file %s is not a regular file (%s)", filePath, info.Mode().Type())
+	switch {
+	case info.Mode().IsRegular():
+		return m.importImageFile(ctx, f, info.Size(), imageName)
+	case info.Mode().Type() == os.ModeNamedPipe:
+		// A pipe (such as a shell's <(...)) has no size and cannot seek:
+		// read it as standard input is read
+		return m.ImportImageFromReader(ctx, f, imageName)
 	}
-	return m.importImageFile(ctx, f, info.Size(), imageName)
+	return notImageSource(filePath, info)
+}
+
+// checkImageSource refuses a path that is neither a regular file nor a pipe
+// (after symlinks).
+func checkImageSource(filePath string) error {
+	info, err := os.Stat(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to stat image file: %w", err)
+	}
+	if info.Mode().IsRegular() || info.Mode().Type() == os.ModeNamedPipe {
+		return nil
+	}
+	return notImageSource(filePath, info)
+}
+
+func notImageSource(filePath string, info os.FileInfo) error {
+	return fmt.Errorf("image file %s is not a regular file or a pipe (%s)", filePath, info.Mode().Type())
+}
+
+// ImportImageFromReader imports a base image read from r (e.g. standard
+// input) into the foundry-images pool, with the same checks as ImportImage.
+//
+// The image is spooled to a temporary file (in os.TempDir, i.e. $TMPDIR or
+// /tmp) and imported from it, rather than streamed straight into the
+// volume: libvirt needs the volume, with its capacity, before the upload
+// (StorageVolCreateXML, then StorageVolUpload), and a stream's length is
+// only known at its end; the format checks also read at offsets of a
+// seekable file. Spooling needs no size from the caller. The cost is a
+// temporary copy of the image on the machine foundry runs on, as large as
+// the image: a $TMPDIR without the room fails the import before any volume
+// is made.
+//
+// The spool file is removed from its directory as soon as it is created and
+// used through its open descriptor, so it is gone however foundry ends,
+// killed included; its space is freed when foundry exits.
+func (m *Manager) ImportImageFromReader(ctx context.Context, r io.Reader, imageName string) error {
+	// Check the name before reading anything: a bad name should not cost a
+	// copy of the image
+	if err := CheckImageName(imageName); err != nil {
+		return err
+	}
+
+	f, err := os.CreateTemp("", "foundry-image-*")
+	if err != nil {
+		return fmt.Errorf("failed to create temporary file for the image: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+	if err := os.Remove(f.Name()); err != nil {
+		// Not unlinked now: remove it when the import ends instead
+		defer func() { _ = os.Remove(f.Name()) }()
+	}
+
+	src := &sizedReader{ctx: ctx, r: r, left: -1}
+	size, err := io.Copy(f, src)
+	if readErr := src.failure(); readErr != nil {
+		return fmt.Errorf("failed to read image: %w", readErr)
+	}
+	if err != nil {
+		return fmt.Errorf("failed to write the image to a temporary file in %s: %w", os.TempDir(), err)
+	}
+	return m.importImageFile(ctx, f, size, imageName)
 }
 
 // importImageFile checks the first size bytes of f against imageName,
@@ -139,10 +210,11 @@ func imageVolumeSpec(imageName string, content *io.SectionReader, size int64) (V
 	return spec, nil
 }
 
-// sizedReader reads exactly left bytes from r, and remembers why reading
-// failed: go-libvirt reports a failed upload with libvirt's answer to the
-// aborted stream, not the reader's error. Content that ends early is
-// io.ErrUnexpectedEOF; a ctx that ends stops the read with ctx's error.
+// sizedReader reads exactly left bytes from r (all of r when left is
+// negative), and remembers why reading failed: go-libvirt reports a failed
+// upload with libvirt's answer to the aborted stream, not the reader's
+// error. Content that ends early is io.ErrUnexpectedEOF; a ctx that ends
+// stops the read with ctx's error.
 type sizedReader struct {
 	ctx  context.Context
 	r    io.Reader
@@ -156,14 +228,16 @@ func (s *sizedReader) Read(p []byte) (int, error) {
 	if err := s.ctx.Err(); err != nil {
 		return 0, s.fail(err)
 	}
-	if s.left <= 0 {
+	if s.left == 0 {
 		return 0, io.EOF
 	}
-	if int64(len(p)) > s.left {
+	if s.left > 0 && int64(len(p)) > s.left {
 		p = p[:s.left]
 	}
 	n, err := s.r.Read(p)
-	s.left -= int64(n)
+	if s.left > 0 {
+		s.left -= int64(n)
+	}
 	switch {
 	case errors.Is(err, io.EOF) && s.left > 0:
 		return n, s.fail(io.ErrUnexpectedEOF)

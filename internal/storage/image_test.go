@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -409,8 +410,8 @@ func TestManager_ImportImage_FileTypes(t *testing.T) {
 		name, path, wantErr string
 	}{
 		{"symlink to a regular file", link, ""},
-		{"directory", dir, "not a regular file"},
-		{"character device", "/dev/null", "not a regular file"},
+		{"directory", dir, "not a regular file or a pipe"},
+		{"character device", "/dev/null", "not a regular file or a pipe"},
 		{"missing", filepath.Join(dir, "none.raw"), "no such file"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -477,4 +478,129 @@ func TestManager_ImportImage_PartialUploadDeleted(t *testing.T) {
 			t.Errorf("uploaded %d bytes, want 1024", got)
 		}
 	})
+}
+
+func TestManager_ImportImageFromReader(t *testing.T) {
+	qcow2 := qcow2Fixture(512)
+	raw := bootableRaw(1536)
+	backed := qcow2Fixture(512)
+	backed[15] = 1 // backing_file_offset
+
+	tests := []struct {
+		name      string
+		input     []byte
+		imageName string
+		noPool    bool
+		wantErr   string // substring; empty means success
+		wantRead  bool   // whether the input should have been consumed
+	}{
+		{name: "qcow2 from reader", input: qcow2, imageName: "fedora-43.qcow2", wantRead: true},
+		{name: "raw from reader", input: raw, imageName: "ubuntu-24.04.raw", wantRead: true},
+		{name: "format mismatch", input: qcow2, imageName: "fedora-43.raw", wantErr: "format mismatch", wantRead: true},
+		{name: "non-bootable raw", input: make([]byte, 512), imageName: "blank.raw", wantErr: "unsupported or invalid image", wantRead: true},
+		{name: "qcow2 with a backing file", input: backed, imageName: "x.qcow2", wantErr: "backing file", wantRead: true},
+		{name: "empty input", input: nil, imageName: "empty.qcow2", wantErr: "too small", wantRead: true},
+		{name: "bad name fails before reading", input: qcow2, imageName: "fedora-43", wantErr: "must have .qcow2 or .raw extension", wantRead: false},
+		{name: "pool not found", input: qcow2, imageName: "fedora-43.qcow2", noPool: true, wantErr: "pool not found", wantRead: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// The spool file goes to os.TempDir; point it at a directory the
+			// test can check is left empty
+			spool := t.TempDir()
+			t.Setenv("TMPDIR", spool)
+
+			client := newMockLibvirtClient()
+			mgr := NewManager(client)
+			if !tt.noPool {
+				_ = mgr.CreatePool(context.Background(), DefaultImagesPool, PoolTypeDir, DefaultImagesPath)
+			}
+
+			r := bytes.NewReader(tt.input)
+			err := mgr.ImportImageFromReader(context.Background(), r, tt.imageName)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("ImportImageFromReader() error = %v", err)
+				}
+				vol := client.volumes[DefaultImagesPool][tt.imageName]
+				if !bytes.Equal(vol.data, tt.input) {
+					t.Errorf("uploaded %d bytes, want the %d input bytes", len(vol.data), len(tt.input))
+				}
+			} else {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("ImportImageFromReader() error = %v, want error containing %q", err, tt.wantErr)
+				}
+				if _, ok := client.volumes[DefaultImagesPool][tt.imageName]; ok {
+					t.Error("a volume was left for a refused image")
+				}
+			}
+
+			if read := r.Len() < len(tt.input); len(tt.input) > 0 && read != tt.wantRead {
+				t.Errorf("input consumed = %v, want %v", read, tt.wantRead)
+			}
+			entries, err := os.ReadDir(spool)
+			if err != nil {
+				t.Fatalf("ReadDir(%s): %v", spool, err)
+			}
+			if len(entries) != 0 {
+				t.Errorf("temporary files left behind: %v", entries)
+			}
+		})
+	}
+}
+
+// failingReader returns some bytes, then an error: a stream that breaks.
+type failingReader struct{ sent bool }
+
+func (f *failingReader) Read(p []byte) (int, error) {
+	if !f.sent {
+		f.sent = true
+		return copy(p, bootableRaw(512)), nil
+	}
+	return 0, errors.New("connection reset")
+}
+
+// A stream that breaks fails the import before any volume is made, and the
+// spool file is gone.
+func TestManager_ImportImageFromReader_BrokenStream(t *testing.T) {
+	spool := t.TempDir()
+	t.Setenv("TMPDIR", spool)
+	client, mgr := newImagesManager(t)
+	err := mgr.ImportImageFromReader(context.Background(), &failingReader{}, "disk.raw")
+	if err == nil || !strings.Contains(err.Error(), "connection reset") {
+		t.Fatalf("err = %v, want the read's error", err)
+	}
+	if len(client.volumes[DefaultImagesPool]) != 0 {
+		t.Error("a volume was made from a broken stream")
+	}
+	if entries, _ := os.ReadDir(spool); len(entries) != 0 {
+		t.Errorf("temporary files left behind: %v", entries)
+	}
+}
+
+// A named pipe given as the path (a shell's <(...)) is read as standard
+// input is.
+func TestManager_ImportImage_NamedPipe(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	fifo := filepath.Join(t.TempDir(), "pipe")
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Skipf("no named pipes here: %v", err)
+	}
+	data := bootableRaw(2048)
+	go func() {
+		w, err := os.OpenFile(fifo, os.O_WRONLY, 0)
+		if err != nil {
+			return
+		}
+		_, _ = w.Write(data)
+		_ = w.Close()
+	}()
+	client, mgr := newImagesManager(t)
+	if err := mgr.ImportImage(context.Background(), fifo, "disk.raw"); err != nil {
+		t.Fatalf("ImportImage() error = %v", err)
+	}
+	if got := client.volumes[DefaultImagesPool]["disk.raw"].data; !bytes.Equal(got, data) {
+		t.Errorf("uploaded %d bytes, want the %d written", len(got), len(data))
+	}
 }

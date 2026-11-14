@@ -237,9 +237,10 @@ func init() {
 }
 
 var imageImportCmd = &cobra.Command{
-	Use:   "import <source-path> <name>",
+	Use:   "import <source-path|-> <name>",
 	Short: "Import an image into the foundry-images pool",
 	Long: `Import a base OS image from a local file into the foundry-images pool.
+"-" reads the image from standard input.
 
 The image file must be in QCOW2 or bootable RAW format. The image name must
 include the correct file extension (.qcow2 or .raw) matching the actual format.
@@ -248,7 +249,7 @@ The tool validates that:
   - QCOW2 images have the correct magic bytes (QFI\xfb)
   - RAW images have a valid boot sector signature (0x55aa)
   - The file extension matches the detected format
-  - The source is a regular file (or a symlink to one)
+  - The source is a regular file (or a symlink to one), or a pipe
 
 This ensures only valid, bootable OS images are imported.
 
@@ -256,12 +257,20 @@ The file is streamed to libvirt, not read into memory. A raw image's volume
 is exactly the file's size. If the import fails or is interrupted (Ctrl-C),
 the partly written volume is deleted.
 
+Standard input and pipes are first copied to a temporary file in $TMPDIR (else
+/tmp), which needs room for the whole image: libvirt needs the volume's size
+before the upload, and the checks read the image at several offsets. The copy
+is removed when the import ends, however it ends.
+
 Examples:
   # Import a QCOW2 image
   foundry image import /path/to/fedora-43.qcow2 fedora-43.qcow2
 
   # Import a bootable RAW image
   foundry image import /path/to/ubuntu-24.04.raw ubuntu-24.04.raw
+
+  # Import from standard input
+  xz -dc fedora-43.qcow2.xz | foundry image import - fedora-43.qcow2
 
   # This will fail - extension required
   foundry image import /path/to/fedora.qcow2 fedora
@@ -279,7 +288,11 @@ Examples:
 			return err
 		}
 
-		fmt.Printf("Importing image from %s as %s...\n", sourcePath, imageName)
+		from := sourcePath
+		if from == "-" {
+			from = "standard input"
+		}
+		fmt.Printf("Importing image from %s as %s...\n", from, imageName)
 
 		// Ctrl-C or SIGTERM cancels the upload, so the import deletes its
 		// partial volume instead of leaving it under the image's name
@@ -315,7 +328,12 @@ Examples:
 		}
 
 		// Import the image
-		if err := mgr.ImportImage(ctx, sourcePath, imageName); err != nil {
+		if sourcePath == "-" {
+			err = mgr.ImportImageFromReader(ctx, cmd.InOrStdin(), imageName)
+		} else {
+			err = mgr.ImportImage(ctx, sourcePath, imageName)
+		}
+		if err != nil {
 			return fmt.Errorf("failed to import image: %w", err)
 		}
 

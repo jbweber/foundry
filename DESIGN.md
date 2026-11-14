@@ -905,9 +905,10 @@ Foundry validates disk images on import to ensure they are bootable OS images:
   qemu-img, so `internal/storage/format.go` reads those few big-endian fields itself. A boot
   disk is a new qcow2 whose backing file is the image, so the image itself must have none.
   An image given as a host path in `spec.bootDisk.image` is not imported and not checked.
-- **Regular files only** - the source path must be a regular file (a symlink to one is
-  followed). A directory or a device is refused: its size is not the size of what it would
-  stream. The file is opened once, and checked and uploaded from that one open file, so a
+- **Regular files and pipes only** - the source path must be a regular file (a symlink to one
+  is followed) or a named pipe. A directory or a device is refused before it is opened: its
+  size is not the size of what it would stream, and opening some devices does something. The
+  file is opened once, and checked and uploaded from that one open file, so a
   path replaced meanwhile changes nothing.
 - **Streamed upload** - the file is streamed to the volume (`StorageVolUpload`), not read into
   memory first. Exactly the size the file had when it was opened is sent: a file that ends
@@ -916,6 +917,16 @@ Foundry validates disk images on import to ensure they are bootable OS images:
   GiB: the guest sees no padding, and the volume read back hashes as the file does (see
   `spec.bootDisk.imageSHA256`). A qcow2 volume's capacity does not matter: the upload replaces
   the header libvirt wrote, and the image's header gives the guest-visible size.
+- **Standard input** - `foundry image import - <name>` (and a named pipe given as the path,
+  such as a shell's `<(...)`) spools the stream to a temporary file (`$TMPDIR`, else `/tmp`, on
+  the machine foundry runs on), runs the same checks on it and uploads it like a file path. Not
+  streamed straight into the volume: libvirt creates the volume with a capacity
+  (`StorageVolCreateXML`) before `StorageVolUpload`, a stream's length is only known at its end,
+  and the format checks read a seekable file at several offsets; spooling needs no size flag
+  from the caller. The temporary file needs room for the whole image, and is removed from its
+  directory as soon as it is created and used through its open descriptor, so nothing is left
+  however foundry ends, killed included. A stream that breaks fails the import before any
+  volume is made.
 - **No partial images** - when the upload fails, or is interrupted (Ctrl-C, SIGTERM), the volume
   is deleted, so no partial image stays under the name a VM would boot from. If that delete
   fails too, the error names the volume left behind.
@@ -1093,9 +1104,10 @@ foundry pool refresh <name>
 # List available base images
 foundry image list
 
-# Import local image file
-foundry image import <source-path> <name>
+# Import local image file ("-" reads standard input)
+foundry image import <source-path|-> <name>
 foundry image import /path/to/fedora-43.qcow2 fedora-43.qcow2
+xz -dc fedora-43.qcow2.xz | foundry image import - fedora-43.qcow2
 
 # Download and import image from URL (TODO: not yet implemented)
 foundry image pull <url> --name <image-name> [--checksum sha256:...]

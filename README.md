@@ -300,6 +300,9 @@ foundry destroy my-vm
 # Import a base image
 foundry image import /path/to/fedora-43.qcow2 fedora-43.qcow2
 
+# Import from standard input (copied to $TMPDIR first, which needs room for it)
+xz -dc fedora-43.qcow2.xz | foundry image import - fedora-43.qcow2
+
 # List images
 foundry image list
 
