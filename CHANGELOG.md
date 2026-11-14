@@ -29,6 +29,8 @@ git history.
 - An existing default pool (foundry-images, foundry-vms, foundry-logs) is checked rather than trusted: it must
   be a dir pool with an absolute, clean target path, at any such path, as the logs pool already was. Create
   also checks, before it makes anything, that foundry-images and foundry-vms are running.
+- Create refuses, before it makes anything, a `spec.storagePool` that does not exist, is not running, is not a
+  dir pool or has no absolute, clean path, with an error naming the field. Other dir pools are still allowed.
 
 - `foundry destroy` also deletes the VM's serial log and its rotated copies, by exact name, and removes a log
   left of a VM whose domain is gone. A create that fails after defining the domain deletes the log too.

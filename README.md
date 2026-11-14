@@ -420,6 +420,9 @@ foundry pool refresh my-pool
 foundry pool delete my-pool
 ```
 
+A VM's disks go in `spec.storagePool`, `foundry-vms` by default. Another pool must be a running dir pool with
+an absolute path, such as one made with `foundry pool add`; create refuses any other before it makes anything.
+
 ### View Storage Status
 
 ```bash

@@ -1045,7 +1045,9 @@ mode only when it makes the volume or builds the pool, so older ones keep theirs
 
 **Pool selection:** a VM's disks go in `spec.storagePool` (default `foundry-vms`); images
 come from `foundry-images`. There is no CLI flag, environment variable or config file for
-either.
+either. `spec.storagePool` may name any dir pool; create refuses, before it makes anything, one that does
+not exist, is not running, is not a dir pool, or has no absolute, clean target path, as it checks the
+default pools. Destroy deletes the VM's volumes in that pool by their exact names.
 
 **Image Format Validation** (added v0.2.0):
 

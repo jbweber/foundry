@@ -604,14 +604,23 @@ func removeDomain(lv LibvirtClient, name string) error {
 }
 
 // checkPools checks, with storage.Manager.CheckDirPool, the pools a create
-// writes to or reads from: foundry-images (images and key profiles) and
-// foundry-vms. A pool that does not exist, is not running, is not a
+// writes to or reads from: foundry-images (images and key profiles),
+// foundry-vms, and the pool spec.storagePool names for the VM's disks when
+// it is another one. A pool that does not exist, is not running, is not a
 // dir pool or has no absolute, clean path fails the create before anything
 // is made. The logs pool is checked by LogsDir.
 func checkPools(ctx context.Context, vm *v1alpha1.VirtualMachine, sm storageManager) error {
 	for _, p := range []string{storage.DefaultImagesPool, storage.DefaultVMsPool} {
 		if _, err := sm.CheckDirPool(ctx, p); err != nil {
 			return err
+		}
+	}
+	// Any other dir pool may hold the VM's disks (destroy finds them there
+	// by their exact names); one that is missing, stopped or not a dir pool
+	// is refused here rather than half way through the create
+	if p := getStoragePool(vm); p != storage.DefaultImagesPool && p != storage.DefaultVMsPool {
+		if _, err := sm.CheckDirPool(ctx, p); err != nil {
+			return fmt.Errorf("spec.storagePool: %w", err)
 		}
 	}
 	return nil
