@@ -1,0 +1,48 @@
+# The integration lane (make test-integration): foundry against a real libvirt and QEMU on a GitHub-hosted
+# Ubuntu runner. Its Linux runners expose /dev/kvm, which the tests need: a VM without spec.arch runs under
+# KVM. Started by hand, not on every pull request: it installs packages and starts VMs, which takes minutes,
+# and it depends on the runner keeping KVM available. The runner is thrown away after the job, so the tests
+# get the disposable libvirt they need. What they cover and create: DESIGN.md, Integration Tests.
+name: Integration
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    name: Integration (libvirt, KVM)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          # Newest 1.27 patch release (security fixes); go.mod's go line is only the minimum.
+          go-version: '1.27'
+          check-latest: true
+
+      - name: Check for KVM
+        run: |
+          if [ ! -c /dev/kvm ]; then
+            echo "this runner has no /dev/kvm: the integration tests start VMs under KVM" >&2
+            exit 1
+          fi
+          ls -l /dev/kvm
+
+      - name: Install libvirt, QEMU and UEFI firmware
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libvirt-daemon-system qemu-system-x86 ovmf
+          sudo systemctl start libvirtd
+          sudo virsh version
+
+      # As root: the libvirt socket is root's and the libvirt group's, and a group joined now would not
+      # apply to this shell. PATH keeps the Go that setup-go installed.
+      - name: Run integration tests
+        run: sudo env PATH="$PATH" FOUNDRY_INTEGRATION_SOCKET=/run/libvirt/libvirt-sock make test-integration

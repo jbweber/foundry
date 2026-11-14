@@ -86,6 +86,8 @@ foundry/
 │       └── interfaces.go    # Consumer-side LibvirtClient interface
 ├── examples/
 │   └── vm.yaml              # Annotated config covering every supported field
+├── tools/
+│   └── test-integration.sh  # The integration lane (make test-integration)
 ├── go.mod
 ├── go.sum
 ├── DESIGN.md                # This file
@@ -1262,10 +1264,44 @@ This keeps tests maintainable while providing confidence in the system.
 - Cleanup behavior (error paths and best-effort cleanup)
 
 ### Integration Tests
-- Requires libvirt running
-- Create/destroy/list operations
-- Storage volume operations
-- Cloud-init ISO creation
+Black-box tests of foundry against a real libvirt and QEMU, in a file with the `integration` build tag
+(`internal/vm/integration_test.go`), so `go test ./...` never builds them; `make vet` and `make lint` build
+them with the tag, so they keep compiling. They run with `make test-integration`, and only against the libvirt
+whose socket `FOUNDRY_INTEGRATION_SOCKET` names. There is no default, so they cannot reach the local libvirt by
+accident.
+- What they cover: the connection and host architecture; image import of raw and qcow2 images, read back as
+  their source's sha256, a second import under the same name refused without touching the first, a qcow2 with
+  a backing file and a failing reader leaving no volume; one VM through create (image digest, data disk with
+  serial, cloud-init, input disk), get, list and destroy, with user data and an input file holding characters
+  that are special in XML, read back unchanged from the stored spec, and no volume left after destroy; a
+  create whose image differs from its digest (other content, or cut short) failing before it makes anything.
+- What they need: a libvirt with the QEMU driver, its network and storage drivers, UEFI firmware for x86_64
+  (OVMF), and KVM: a VM without `spec.arch` runs under KVM, so the lifecycle test fails, saying so, when
+  libvirt offers none. Inside a VM that means nested virtualization. `go test -race` needs a C compiler.
+- What they create, they remove: VMs, an isolated transient network (no uplink, no addresses) and images, all
+  named `foundry-it-…` (bridges `fdryit…`, tap devices `fdryvm…`), and foundry's default pools,
+  `foundry-images` and `foundry-vms`, when the libvirt did not have them before the test, directories
+  included. The parent directory `/var/lib/libvirt/images/foundry` stays. Use a disposable libvirt all the
+  same, such as a throwaway VM's.
+- Without the socket every test is skipped, with a message that names the missing libvirt, and
+  `make test-integration` fails: a lane that ran no test proves nothing (`tools/test-integration.sh` counts the
+  tests that passed).
+- The GitHub Actions workflow `Integration` runs the lane on a GitHub-hosted Ubuntu runner, which exposes
+  `/dev/kvm`, with the distribution's libvirt. It is started by hand (workflow_dispatch) and is not part of
+  the checks on pull requests: it installs packages and starts VMs, which takes minutes, and it depends on the
+  runner keeping KVM available.
+
+The other tests that need a libvirt (`internal/libvirt/client_test.go`) connect to the local one when it is
+there and skip otherwise; `make test-unit` (`-short`) skips them always.
+
+### Fuzz Tests
+Inputs foundry did not write have fuzz targets: the spec loader (`FuzzLoadFromYAML`, `internal/loader`: no
+panic, and an accepted spec survives a YAML round trip), the spec stored in the domain's metadata
+(`FuzzStoreLoad`, `internal/metadata`: any user data and annotation read back unchanged) and the qcow2 header
+check of an image import (`FuzzCheckQCOW2Header`, `internal/storage`: no panic, no loop). Their seed corpora
+run with the unit tests; `make fuzz` fuzzes each for `FUZZTIME` (default 20s)
+([Go fuzzing](https://go.dev/doc/security/fuzz/)). A failing input lands in the package's `testdata/fuzz/`;
+commit it with the fix, so it stays a regression test.
 
 ### Manual Testing
 - Create VM and verify it boots

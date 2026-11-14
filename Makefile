@@ -1,4 +1,4 @@
-.PHONY: help build test test-unit test-integration coverage lint fmt fmt-check vet clean install deps tidy check all goimports
+.PHONY: help build test test-unit test-integration fuzz coverage lint fmt fmt-check vet clean install deps tidy check all goimports
 
 # Default target
 .DEFAULT_GOAL := help
@@ -59,10 +59,19 @@ test-unit:
 	@echo "Running unit tests..."
 	$(GOTEST) -v -race -short ./...
 
-## test-integration: Run only integration tests
+## test-integration: Run the integration tests against the libvirt at $FOUNDRY_INTEGRATION_SOCKET; fails when none ran
 test-integration:
 	@echo "Running integration tests..."
-	$(GOTEST) -v -race -run Integration ./...
+	tools/test-integration.sh
+
+# How long each fuzz target runs under `make fuzz`
+FUZZTIME ?= 20s
+
+## fuzz: Run each fuzz target for $(FUZZTIME) (the spec loader, the stored spec, the qcow2 header check)
+fuzz:
+	$(GOTEST) -run '^$$' -fuzz '^FuzzLoadFromYAML$$' -fuzztime=$(FUZZTIME) ./internal/loader/
+	$(GOTEST) -run '^$$' -fuzz '^FuzzStoreLoad$$' -fuzztime=$(FUZZTIME) ./internal/metadata/
+	$(GOTEST) -run '^$$' -fuzz '^FuzzCheckQCOW2Header$$' -fuzztime=$(FUZZTIME) ./internal/storage/
 
 ## coverage: Run tests with coverage report
 coverage:
@@ -77,7 +86,7 @@ coverage:
 ## lint: Run golangci-lint using go tool
 lint:
 	@echo "Running golangci-lint..."
-	$(GOCMD) tool golangci-lint run --config .golangci.yml ./...
+	$(GOCMD) tool golangci-lint run --config .golangci.yml --build-tags integration ./...
 
 ## goimports: Rewrite files to organize imports
 goimports:
@@ -101,10 +110,11 @@ fmt-check:
 		exit 1; \
 	fi
 
-## vet: Run go vet
+## vet: Run go vet, also on the integration tests, so that they build though only the integration lane runs them
 vet:
 	@echo "Running go vet..."
 	$(GOVET) ./...
+	$(GOVET) -tags integration ./...
 
 ## check: Run quick checks (fmt-check, vet, lint, test) - never modifies files
 check: fmt-check vet lint test
