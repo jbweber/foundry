@@ -103,6 +103,9 @@ func TestValidateSpec_FwCfg(t *testing.T) {
 		// takes up to 128 KiB long
 		{name: "string at the limit", entries: []v1alpha1.FwCfgEntrySpec{{Name: "opt/a", String: strings.Repeat("x", fwCfgMaxString)}}},
 		{name: "string over the limit", entries: []v1alpha1.FwCfgEntrySpec{{Name: "opt/a", String: strings.Repeat("x", fwCfgMaxString+1)}}, wantErr: "spec.fwCfg[0].string is 130945 bytes; at most 130944 fit in the QEMU argument libvirt passes it in, put larger content in a file"},
+		// libvirt does not escape commas in a string entry's QEMU argument
+		{name: "string without a comma", entries: []v1alpha1.FwCfgEntrySpec{{Name: "opt/a", String: "key=value; a b:c/d"}}},
+		{name: "string with a comma", entries: []v1alpha1.FwCfgEntrySpec{{Name: "opt/a", String: "a,b"}}, wantErr: "spec.fwCfg[0].string contains a comma, which libvirt passes to QEMU unescaped, so the VM would fail to start; put the content in a file entry instead"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

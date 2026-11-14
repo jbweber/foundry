@@ -361,6 +361,13 @@ const fwCfgMaxName = 55
 // larger content belongs in a file entry.
 const fwCfgMaxString = 128<<10 - 128
 
+// fwCfgStringComma explains why a comma in a fw_cfg string is refused.
+// libvirt (seen with 11.3) builds the QEMU argument
+// "name=<name>,string=<value>" without escaping commas in the value, and QEMU
+// splits its options on commas, so a value with a comma passes the define and
+// fails when the VM starts. libvirt passes a file entry by path instead.
+const fwCfgStringComma = "contains a comma, which libvirt passes to QEMU unescaped, so the VM would fail to start; put the content in a file entry instead"
+
 // validateFwCfg checks a list of fw_cfg entries.
 //
 // libvirt only accepts names under "opt/" and reserves "opt/ovmf/" and
@@ -384,6 +391,9 @@ func validateFwCfg(field string, entries []v1alpha1.FwCfgEntrySpec) error {
 		}
 		if len(e.String) > fwCfgMaxString {
 			return fmt.Errorf("%s[%d].string is %d bytes; at most %d fit in the QEMU argument libvirt passes it in, put larger content in a file", field, i, len(e.String), fwCfgMaxString)
+		}
+		if strings.Contains(e.String, ",") {
+			return fmt.Errorf("%s[%d].string %s", field, i, fwCfgStringComma)
 		}
 		if seen[e.Name] {
 			return fmt.Errorf("%s[%d].name %q is duplicated", field, i, e.Name)
