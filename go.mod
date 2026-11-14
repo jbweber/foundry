@@ -2,6 +2,8 @@ module github.com/jbweber/foundry
 
 go 1.27.0
 
+retract [v0.1.0, v0.6.1] // destroy can delete disks of running or paused guests and of other VMs; the VM spec is lost at the first stop; fixed in v0.7.0
+
 require (
 	github.com/digitalocean/go-libvirt v0.0.0-20260609165003-6254771e63a8
 	github.com/google/uuid v1.6.0
