@@ -154,5 +154,8 @@ git history.
   length and `gateway` an IP address (a bad one failed only after volumes were made), duplicate addresses are
   found whatever their prefix length (`10.0.0.5/24` and `10.0.0.5/16` got the same MAC), fw_cfg names take only
   `A-Z a-z 0-9 . _ / -` after `opt/` (a comma kept the VM from starting), and `passwordHash` must be one line.
+- `foundry create` refuses a boot disk smaller than its image's virtual size, before it makes anything. The
+  disk was made at the smaller size without a warning, and the guest saw a disk cut off in the middle of its
+  partitions.
 
 [Unreleased]: https://github.com/jbweber/foundry/compare/v0.6.1...HEAD

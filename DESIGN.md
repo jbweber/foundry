@@ -317,7 +317,9 @@ pool's directory. It costs reading the whole image once per create.
 - None of the VM's volumes (boot, data, cloud-init, input) exists yet in its pool: a leftover or
   a volume made by other means fails the create, naming the volume, before anything is made;
   each `inputDisks` `file` is a regular file, and the files of one disk hold at most 16 MiB
-- Boot disk image exists (unless empty: true)
+- Boot disk image exists (unless empty: true), and `spec.bootDisk.sizeGB` is at least its
+  virtual size (the volume's capacity in `foundry-images`; for a path image, a qcow2's header
+  size or a raw file's length)
 - Boot disk image volume has the sha256 `spec.bootDisk.imageSHA256` states, when it states one
 - Bridge exists on hypervisor (future: fuzzy match)
 

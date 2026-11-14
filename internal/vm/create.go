@@ -244,8 +244,12 @@ func createFromConfigWithDeps(ctx context.Context, vm *v1alpha1.VirtualMachine, 
 			// File path - checked as import checks an image, its format
 			// taken from its content, before anything is made
 			backingVolume = vm.Spec.BootDisk.Image
-			backingFormat, createErr = storage.CheckBootImageFile(backingVolume)
+			var imageSize uint64
+			backingFormat, imageSize, createErr = storage.CheckBootImageFile(backingVolume)
 			if createErr != nil {
+				return createErr
+			}
+			if createErr = checkBootDiskSize(vm, imageSize); createErr != nil {
 				return createErr
 			}
 			log.Printf("Using backing image (file, %s): %s", backingFormat, backingVolume)
@@ -268,6 +272,15 @@ func createFromConfigWithDeps(ctx context.Context, vm *v1alpha1.VirtualMachine, 
 				return fmt.Errorf("failed to get image path: %w", createErr)
 			}
 			log.Printf("Using backing image (volume): %s", backingVolume)
+
+			var imageSize uint64
+			imageSize, createErr = sm.ImageCapacity(ctx, imageName)
+			if createErr != nil {
+				return fmt.Errorf("failed to get image size: %w", createErr)
+			}
+			if createErr = checkBootDiskSize(vm, imageSize); createErr != nil {
+				return createErr
+			}
 
 			// The image's digest, when the spec states one, before anything
 			// is made: a volume that is not the image it is named for (cut
@@ -547,6 +560,19 @@ func checkVolumesAbsent(ctx context.Context, vm *v1alpha1.VirtualMachine, sm sto
 		if exists {
 			return fmt.Errorf("%s volume already exists: %s/%s", v.kind, pool, v.name)
 		}
+	}
+	return nil
+}
+
+// checkBootDiskSize refuses a boot disk smaller than its image's virtual
+// size: the overlay would be made at the smaller size without a warning, and
+// the guest would see a disk cut off in the middle of its partitions (no GPT
+// backup header, a truncated file system).
+func checkBootDiskSize(vm *v1alpha1.VirtualMachine, imageSize uint64) error {
+	const gib = 1 << 30
+	if disk := uint64(vm.Spec.BootDisk.SizeGB) * gib; disk < imageSize {
+		return fmt.Errorf("spec.bootDisk.sizeGB is %d, smaller than its image (%d bytes, so at least %d GiB)",
+			vm.Spec.BootDisk.SizeGB, imageSize, (imageSize+gib-1)/gib)
 	}
 	return nil
 }

@@ -347,6 +347,25 @@ func (m *Manager) GetImagePath(ctx context.Context, imageName string) (string, e
 	return m.GetVolumePath(ctx, DefaultImagesPool, imageName)
 }
 
+// ImageCapacity returns the capacity of an image volume in the
+// foundry-images pool: the disk size a guest booted from it sees (for a
+// qcow2 image, its virtual size, as libvirt reads it from the header).
+func (m *Manager) ImageCapacity(_ context.Context, imageName string) (uint64, error) {
+	pool, err := m.client.StoragePoolLookupByName(DefaultImagesPool)
+	if err != nil {
+		return 0, fmt.Errorf("pool not found: %w", err)
+	}
+	vol, err := m.client.StorageVolLookupByName(pool, imageName)
+	if err != nil {
+		return 0, fmt.Errorf("image not found: %w", err)
+	}
+	_, capacity, _, err := m.client.StorageVolGetInfo(vol)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get image info: %w", err)
+	}
+	return capacity, nil
+}
+
 // ImageExists checks if a base image exists in the foundry-images pool.
 func (m *Manager) ImageExists(ctx context.Context, imageName string) (bool, error) {
 	return m.VolumeExists(ctx, DefaultImagesPool, imageName)

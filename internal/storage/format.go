@@ -165,33 +165,37 @@ func checkQCOW2Header(head []byte) error {
 // content is a qcow2 or a bootable raw image, and a qcow2 must not make qemu
 // read another file (see checkQCOW2Header). It returns the format detected
 // from the content, never from the file's name, for the overlay to name as
-// its backing format. The path is read on the machine foundry runs on, which
-// is the hypervisor unless libvirt is reached over --socket.
-func CheckBootImageFile(path string) (VolumeFormat, error) {
+// its backing format, and the disk size a guest booted from it sees: a
+// qcow2's virtual size, a raw image's length. The path is read on the
+// machine foundry runs on, which is the hypervisor unless libvirt is reached
+// over --socket.
+func CheckBootImageFile(path string) (VolumeFormat, uint64, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return "", fmt.Errorf("failed to open boot image: %w", err)
+		return "", 0, fmt.Errorf("failed to open boot image: %w", err)
 	}
 	defer func() { _ = f.Close() }()
 	info, err := f.Stat()
 	if err != nil {
-		return "", fmt.Errorf("failed to stat boot image: %w", err)
+		return "", 0, fmt.Errorf("failed to stat boot image: %w", err)
 	}
 	if !info.Mode().IsRegular() {
-		return "", fmt.Errorf("boot image %s is not a regular file", path)
+		return "", 0, fmt.Errorf("boot image %s is not a regular file", path)
 	}
 	format, err := detectImageFormat(f)
 	if err != nil {
-		return "", fmt.Errorf("boot image %s: %w", path, err)
+		return "", 0, fmt.Errorf("boot image %s: %w", path, err)
 	}
 	if format == VolumeFormatQCOW2 {
 		head := make([]byte, min(info.Size(), qcow2HeadBytes))
 		if _, err := f.ReadAt(head, 0); err != nil {
-			return "", fmt.Errorf("failed to read the qcow2 header of boot image %s: %w", path, err)
+			return "", 0, fmt.Errorf("failed to read the qcow2 header of boot image %s: %w", path, err)
 		}
 		if err := checkQCOW2Header(head); err != nil {
-			return "", fmt.Errorf("boot image %s: %w", path, err)
+			return "", 0, fmt.Errorf("boot image %s: %w", path, err)
 		}
+		// The header's size field (bytes 24-31): the virtual disk size
+		return format, binary.BigEndian.Uint64(head[24:]), nil
 	}
-	return format, nil
+	return format, uint64(info.Size()), nil
 }
