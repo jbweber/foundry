@@ -5,6 +5,7 @@ package metadata
 
 import (
 	"encoding/xml"
+	"errors"
 	"fmt"
 
 	"github.com/digitalocean/go-libvirt"
@@ -121,6 +122,14 @@ func (c *Client) Store(domain libvirt.Domain, vm *v1alpha1.VirtualMachine) error
 	}
 
 	return nil
+}
+
+// IsNotFound reports whether err (from Load) means the domain has no foundry
+// metadata: libvirt's "no domain metadata" error, as for a domain foundry did
+// not make.
+func IsNotFound(err error) bool {
+	var le libvirt.Error
+	return errors.As(err, &le) && le.Code == uint32(libvirt.ErrNoDomainMetadata)
 }
 
 // Load retrieves the VirtualMachine spec from libvirt domain metadata.

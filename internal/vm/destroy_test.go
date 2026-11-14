@@ -8,6 +8,7 @@ import (
 
 	"github.com/digitalocean/go-libvirt"
 
+	"github.com/jbweber/foundry/api/v1alpha1"
 	"github.com/jbweber/foundry/internal/storage"
 )
 
@@ -22,7 +23,8 @@ func TestDestroyWithDeps_VMDoesNotExist(t *testing.T) {
 	}
 
 	// Execute
-	err := destroyWithDeps(ctx, "nonexistent-vm", lv, sm)
+	withSpec(t, lv, &v1alpha1.VirtualMachine{ObjectMeta: v1alpha1.ObjectMeta{Name: "nonexistent-vm"}})
+	err := destroyWithDeps(ctx, "nonexistent-vm", lv, sm, false)
 
 	// Verify
 	if err == nil {
@@ -76,7 +78,8 @@ func TestDestroyWithDeps_RunningVM_GracefulShutdown(t *testing.T) {
 	}
 
 	// Execute
-	err := destroyWithDeps(ctx, "test-vm", lv, sm)
+	withSpec(t, lv, &v1alpha1.VirtualMachine{ObjectMeta: v1alpha1.ObjectMeta{Name: "test-vm"}})
+	err := destroyWithDeps(ctx, "test-vm", lv, sm, false)
 
 	// Verify
 	if err != nil {
@@ -131,7 +134,8 @@ func TestDestroyWithDeps_RunningVM_ForceDestroy(t *testing.T) {
 	}
 
 	// Execute
-	err := destroyWithDeps(ctx, "test-vm", lv, sm)
+	withSpec(t, lv, &v1alpha1.VirtualMachine{ObjectMeta: v1alpha1.ObjectMeta{Name: "test-vm"}})
+	err := destroyWithDeps(ctx, "test-vm", lv, sm, false)
 
 	// Verify
 	if err != nil {
@@ -167,7 +171,8 @@ func TestDestroyWithDeps_StoppedVM(t *testing.T) {
 	}
 
 	// Execute
-	err := destroyWithDeps(ctx, "test-vm", lv, sm)
+	withSpec(t, lv, &v1alpha1.VirtualMachine{ObjectMeta: v1alpha1.ObjectMeta{Name: "test-vm"}})
+	err := destroyWithDeps(ctx, "test-vm", lv, sm, false)
 
 	// Verify
 	if err != nil {
@@ -207,7 +212,8 @@ func TestDestroyWithDeps_UndefineFails(t *testing.T) {
 	}
 
 	// Execute
-	err := destroyWithDeps(ctx, "test-vm", lv, sm)
+	withSpec(t, lv, &v1alpha1.VirtualMachine{ObjectMeta: v1alpha1.ObjectMeta{Name: "test-vm"}})
+	err := destroyWithDeps(ctx, "test-vm", lv, sm, false)
 
 	// Verify: should return error
 	if err == nil {
@@ -260,7 +266,8 @@ func TestDestroyWithDeps_VolumeCleanupBestEffort(t *testing.T) {
 	}
 
 	// Execute
-	err := destroyWithDeps(ctx, "test-vm", lv, sm)
+	withSpec(t, lv, &v1alpha1.VirtualMachine{ObjectMeta: v1alpha1.ObjectMeta{Name: "test-vm"}})
+	err := destroyWithDeps(ctx, "test-vm", lv, sm, false)
 
 	// Verify: should succeed despite volume deletion failure (best-effort)
 	if err != nil {
@@ -304,7 +311,8 @@ func TestDestroyWithDeps_OnlyDeletesMatchingVolumes(t *testing.T) {
 	}
 
 	// Execute
-	err := destroyWithDeps(ctx, "my-vm", lv, sm)
+	withSpec(t, lv, &v1alpha1.VirtualMachine{ObjectMeta: v1alpha1.ObjectMeta{Name: "my-vm"}})
+	err := destroyWithDeps(ctx, "my-vm", lv, sm, false)
 
 	// Verify
 	if err != nil {
@@ -357,7 +365,8 @@ func TestDestroyWithDeps_ListVolumesFailure(t *testing.T) {
 	}
 
 	// Execute
-	err := destroyWithDeps(ctx, "test-vm", lv, sm)
+	withSpec(t, lv, &v1alpha1.VirtualMachine{ObjectMeta: v1alpha1.ObjectMeta{Name: "test-vm"}})
+	err := destroyWithDeps(ctx, "test-vm", lv, sm, false)
 
 	// Verify: should succeed (volume cleanup is best-effort)
 	if err != nil {

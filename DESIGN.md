@@ -346,20 +346,38 @@ pool's directory. It costs reading the whole image once per create.
 ### VM Destruction Workflow
 
 ```
-1. Check VM exists
+1. Check VM exists and is foundry's (refused otherwise, unless --force)
 2. Get domain info
 3. If running:
    - Attempt graceful shutdown
    - Wait 5 seconds
    - If still running, force destroy
 4. Undefine domain with NVRAM cleanup
-5. Delete storage volumes
+5. Delete storage volumes (foundry-vms, `<vm>_` prefix; the spec's own pool,
+   by exact name)
    - Boot disk
    - Data disks
    - Cloud-init ISO
    - Input disks
-6. Remove VM directory
 ```
+
+Step 1 refuses a domain foundry did not make: one without foundry's spec in
+its metadata, or whose spec cannot be read. Nothing is stopped, undefined or
+deleted, and the error says so. `foundry destroy --force <vm>` destroys it
+anyway, searching foundry-vms only for its volumes (with no spec there is no
+`spec.storagePool` to name another pool).
+
+Step 5 takes every volume in foundry-vms named `<vm>_...`, so what a failed
+create left there goes too, except those of another defined VM whose name
+starts with `<vm>_` (destroying `web` leaves `web_2`'s) and Secure Boot key
+profiles. It never searches the images pool by prefix: image names are free
+text, so an image `rhel_10.qcow2` would go with a VM named `rhel`. When the
+VM's stored spec puts its disks in another pool (`spec.storagePool`, the
+images pool included), destroy deletes there only the names foundry gives
+that VM's volumes: `<vm>_boot.qcow2`, `<vm>_cloudinit.iso`,
+`<vm>_data-<device>.qcow2` for the spec's data disks and
+`<vm>_input-<label>.iso` for its input disks. Base images and key profiles
+(`varstore_<profile>_<arch>.fd`) are never taken.
 
 ### VM Listing Workflow
 
@@ -808,8 +826,9 @@ through the libvirt API: foundry writes no file on the hypervisor.
   without cleanup; foundry neither reuses nor deletes a leftover volume. After
   that check, every input volume of the spec that exists is one this create
   made, so a later failure deletes them by name with the VM's other volumes.
-  `foundry destroy` deletes them with the rest (the `<vm>_` prefix in the
-  default pools, as for the boot disk), and the
+  `foundry destroy` deletes them with the rest (as for the boot disk: the
+  `<vm>_` prefix in foundry-vms, the exact names the spec gives in another
+  pool), and the
   spec stores the paths, not the content, so creating the VM again reads the
   files again.
 

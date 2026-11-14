@@ -42,6 +42,7 @@ git history.
 - An integration lane: `make test-integration` runs foundry against the libvirt whose socket
   `FOUNDRY_INTEGRATION_SOCKET` names, and fails when no test ran. The GitHub Actions workflow `Integration`
   runs it on a GitHub-hosted runner, started by hand. See README, Integration Tests.
+- `foundry destroy --force` destroys a domain foundry did not make; see Changed.
 
 ### Changed
 
@@ -59,6 +60,9 @@ git history.
 - Go 1.27 is the minimum to build; CI and releases build with its newest patch release. golangci-lint
   v2.15.0.
 - Dependencies: libvirt.org/go/libvirtxml 1.12008.0, go.yaml.in/yaml/v3 3.0.6.
+- `foundry destroy` destroys only VMs foundry made: a domain without foundry's spec in its metadata, or whose
+  spec cannot be read, is refused with nothing changed. `--force` destroys it anyway, deleting its `<vm>_...`
+  volumes in foundry-vms only.
 
 ### Fixed
 
@@ -76,5 +80,12 @@ git history.
 - A `hostDevice` with `%`, which the kernel takes as a template for a numbered name, is refused.
 - `NetworkInterfaceSpec.DeepCopy` copies `vlan` instead of sharing it with the original.
 - A connect cancelled by its context closes a connection that completes late instead of leaking it.
+- `foundry destroy` no longer deletes images-pool volumes by name prefix. It deleted every volume named
+  `<vm>_...` in foundry-images too, and image names are free text, so destroying a VM `rhel` deleted an image
+  `rhel_10.qcow2`. It now searches foundry-vms by prefix and, when the spec puts the VM's disks in another pool
+  (`spec.storagePool`, foundry-images included), deletes there only the boot, cloud-init, data and input
+  volumes the spec names. Volumes in a pool other than the two default ones were not deleted before; they
+  are now.
+- `foundry destroy` of a VM `web` leaves the volumes of another VM `web_2`, which also start with `web_`.
 
 [Unreleased]: https://github.com/jbweber/foundry/compare/v0.6.1...HEAD
