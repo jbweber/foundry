@@ -92,6 +92,26 @@ func VolumeNameCloudInit(vmName string) string {
 	return fmt.Sprintf("%s_cloudinit.iso", vmName)
 }
 
+// VolumeNameInput returns the volume name for one of a VM's input disks
+// (spec.inputDisks), by its ISO-9660 label. Labels are A-Z 0-9 _, so the
+// lower-cased label names the volume without clashing with another label.
+// Format: {vmName}_input-{label in lower case}.iso (e.g., "web-server_input-nodecfg.iso")
+func VolumeNameInput(vmName, label string) string {
+	return fmt.Sprintf("%s_input-%s.iso", vmName, strings.ToLower(label))
+}
+
+// MaxInputDisks is the number of input disks a VM can have: their CD-ROMs
+// take the targets sdb to sdz (sda is the cloud-init ISO's).
+const MaxInputDisks = 25
+
+// InputDiskTarget returns the target device of the i-th input disk (from 0,
+// below MaxInputDisks): sdb, sdc, ... sdz. On x86_64 the first SATA
+// controller has six ports and libvirt adds another controller for the
+// disks beyond them.
+func InputDiskTarget(i int) string {
+	return "sd" + string(rune('b'+i))
+}
+
 // VarstorePrefix starts the name of every Secure Boot key profile volume.
 const VarstorePrefix = "varstore_"
 

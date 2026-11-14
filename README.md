@@ -29,6 +29,7 @@ This project isn't suggested for general purpose use, and really exists because 
 - **Image Management**: Import, list, and manage base OS images
 - **UEFI Boot**: Modern UEFI firmware support, with pinned firmware files and Secure Boot key profiles
 - **SMBIOS and fw_cfg**: Optional SMBIOS system serial and identity, and QEMU fw_cfg entries for the guest
+- **Input Disks**: Optional small read-only disks with files for the guest, found by their label
 - **x86_64 and aarch64 Guests**: KVM when the guest matches the hypervisor's architecture, QEMU emulation otherwise
 - **Deterministic MACs**: MAC addresses automatically calculated from IP addresses
 - **Metadata Persistence**: VM specs stored in libvirt domain metadata for state recovery
@@ -171,6 +172,41 @@ guest the content of a file on the hypervisor, and libvirt relabels the file so
 QEMU can read it: only use specs from people who may read that file as root.
 `smbios.uuid` can't change on an existing VM (libvirt keeps a domain's UUID);
 set it at creation.
+
+### Input Disks
+
+`spec.inputDisks` gives the guest a few small files on read-only disks, such as
+an installer's config or anything its first boot reads before it has a network.
+Each entry is one ISO-9660 disk with a volume label and its files in the root
+directory. foundry builds the image, uploads it as a volume of the VM's pool
+(`<vm>_input-<label in lower case>.iso`) and attaches it as a CD-ROM. The guest
+finds a disk by its label, not by its device name:
+
+```yaml
+spec:
+  inputDisks:
+    - label: NODECFG              # 1-32 of A-Z 0-9 _
+      files:
+        - name: node.yaml         # a-z 0-9 _ -, optional .ext of 1-8; at most 28
+          file: inputs/node.yaml  # read by foundry; relative to this YAML file
+        - name: install-config
+          string: |               # or the content inline
+            disk=/dev/vda
+```
+
+```sh
+# In the guest
+mount -o ro LABEL=NODECFG /mnt
+```
+
+The files of one disk may hold 16 MiB, and inline `string` content 1 MiB across
+all disks (it is stored with the spec in the domain's metadata); larger content
+belongs in an image. `file` must be a regular file, and foundry reads it with
+the permissions of the user running foundry: only use specs from people who may
+read that file as that user. `CIDATA` is the label of the cloud-init seed, so it
+is refused next to `spec.cloudInit`; without `spec.cloudInit`, an input disk
+labelled `CIDATA` is a hand-made NoCloud seed. A spec without `inputDisks`
+gets no input disks, as before. `foundry destroy` deletes them with the VM.
 
 ### List VMs
 
@@ -333,7 +369,7 @@ foundry/
 │   ├── status/         # Status management (phases, conditions)
 │   ├── output/         # Output formatters (table, YAML, JSON)
 │   ├── storage/        # Storage pool and volume management
-│   ├── cloudinit/      # Cloud-init ISO generation
+│   ├── cloudinit/      # Cloud-init and input disk ISO generation
 │   ├── libvirt/        # Libvirt client and domain operations
 │   └── vm/             # VM lifecycle operations (create, destroy, list, get)
 ├── examples/           # Example configurations

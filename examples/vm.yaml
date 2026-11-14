@@ -99,4 +99,11 @@ spec:
   # fwCfg:                    # QEMU fw_cfg entries (names under opt/)
   #   - name: opt/org.tianocore/EnableLegacyLoader
   #     string: "no"          # inline content, or file: /path/on/hypervisor
+  # inputDisks:               # Small read-only ISO-9660 disks with files for the guest
+  #   - label: NODECFG        # Volume label (1-32 of A-Z 0-9 _); guest: LABEL=NODECFG
+  #     files:
+  #       - name: node.yaml   # a-z 0-9 _ -, optional .ext of 1-8; at most 28 characters
+  #         file: inputs/node.yaml  # read by foundry; relative to this YAML file
+  #       - name: install-config
+  #         string: "disk=/dev/vda"  # or the content inline
   storagePool: foundry-vms    # Storage pool to use (default: foundry-vms)

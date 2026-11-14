@@ -24,6 +24,7 @@ const (
 	VolumeTypeCloudInit VolumeType = "cloudinit"  // Cloud-init ISO volume
 	VolumeTypeBaseImage VolumeType = "base-image" // Base OS image volume
 	VolumeTypeVarstore  VolumeType = "varstore"   // UEFI varstore template (a Secure Boot key profile)
+	VolumeTypeInput     VolumeType = "input"      // Input disk ISO (spec.inputDisks)
 )
 
 // VolumeFormat represents the disk format.

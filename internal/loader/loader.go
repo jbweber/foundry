@@ -5,12 +5,14 @@ package loader
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
 
 	"github.com/jbweber/foundry/api/v1alpha1"
+	"github.com/jbweber/foundry/internal/naming"
 )
 
 // MaxVlanID is the highest assignable 802.1Q VLAN ID. The 12-bit VLAN field
@@ -26,7 +28,30 @@ func LoadFromFile(path string) (*v1alpha1.VirtualMachine, error) {
 		return nil, fmt.Errorf("failed to read file %s: %w", path, err)
 	}
 
-	return LoadFromYAML(data)
+	vm, err := LoadFromYAML(data)
+	if err != nil {
+		return nil, err
+	}
+	resolveInputFiles(vm, filepath.Dir(path))
+	return vm, nil
+}
+
+// resolveInputFiles makes relative spec.inputDisks[].files[].file paths
+// absolute, from dir (the directory of the VM's YAML file), so they name the
+// same files whatever directory foundry runs from, and the spec stored in the
+// domain's metadata does too.
+func resolveInputFiles(vm *v1alpha1.VirtualMachine, dir string) {
+	for i := range vm.Spec.InputDisks {
+		for j := range vm.Spec.InputDisks[i].Files {
+			f := &vm.Spec.InputDisks[i].Files[j]
+			if f.File == "" || filepath.IsAbs(f.File) {
+				continue
+			}
+			if abs, err := filepath.Abs(filepath.Join(dir, f.File)); err == nil {
+				f.File = abs
+			}
+		}
+	}
 }
 
 // LoadFromYAML loads a VirtualMachine resource from YAML bytes.
@@ -162,6 +187,9 @@ func validateSpec(vm *v1alpha1.VirtualMachine) error {
 		return err
 	}
 	if err := validateFwCfg("spec.fwCfg", vm.Spec.FwCfg); err != nil {
+		return err
+	}
+	if err := validateInputDisks(vm); err != nil {
 		return err
 	}
 
@@ -347,6 +375,81 @@ func validateFwCfg(field string, entries []v1alpha1.FwCfgEntrySpec) error {
 			return fmt.Errorf("%s[%d].name %q is duplicated", field, i, e.Name)
 		}
 		seen[e.Name] = true
+	}
+	return nil
+}
+
+// maxInputStringBytes bounds the inline content (string) of all input files
+// together. The spec, inline content included, is stored in the domain's
+// metadata, and libvirt takes at most 4 MiB in one string over its RPC
+// protocol (REMOTE_STRING_MAX); larger content belongs in a file.
+const maxInputStringBytes = 1 << 20
+
+// inputLabelRE is the form of an input disk label: an ISO-9660 volume
+// identifier of d-characters (ECMA-119 7.4.1), at most 32 of them.
+var inputLabelRE = regexp.MustCompile(`^[A-Z0-9_]{1,32}$`)
+
+// inputFileNameRE is the form of an input file name that reaches a Linux
+// guest unchanged on a plain ISO-9660 image: lower case (the image writer
+// lower-cases, isofs shows lower case), a-z 0-9 _ - (other characters become
+// "_"), at most one dot (the writer turns any other dot into "_"), and an
+// extension of at most 8 characters (the writer cuts a longer one).
+var inputFileNameRE = regexp.MustCompile(`^[a-z0-9_-]+(\.[a-z0-9_-]{1,8})?$`)
+
+// maxInputFileNameLen is the longest input file name: ISO-9660 file
+// identifiers hold 30 characters, including the ";1" version suffix.
+const maxInputFileNameLen = 28
+
+// validateInputDisks checks spec.inputDisks. File contents are read, and
+// their size checked, when the disk images are built (vm.Create).
+func validateInputDisks(vm *v1alpha1.VirtualMachine) error {
+	if len(vm.Spec.InputDisks) > naming.MaxInputDisks {
+		return fmt.Errorf("spec.inputDisks has %d disks; at most %d are supported (their CD-ROMs take sdb to sdz)", len(vm.Spec.InputDisks), naming.MaxInputDisks)
+	}
+	labels := make(map[string]int)
+	inline := 0
+	for i, d := range vm.Spec.InputDisks {
+		field := fmt.Sprintf("spec.inputDisks[%d]", i)
+		if !inputLabelRE.MatchString(d.Label) {
+			return fmt.Errorf("%s.label %q must be 1 to 32 characters from A-Z 0-9 _", field, d.Label)
+		}
+		if other, ok := labels[d.Label]; ok {
+			return fmt.Errorf("%s.label %q is already used by spec.inputDisks[%d]", field, d.Label, other)
+		}
+		labels[d.Label] = i
+		if d.Label == "CIDATA" && vm.Spec.CloudInit != nil {
+			return fmt.Errorf("%s.label CIDATA is the label of the cloud-init seed; it is only allowed without spec.cloudInit", field)
+		}
+		if len(d.Files) == 0 {
+			return fmt.Errorf("%s.files must list at least one file", field)
+		}
+		names := make(map[string]bool)
+		for j, f := range d.Files {
+			ff := fmt.Sprintf("%s.files[%d]", field, j)
+			if len(f.Name) > maxInputFileNameLen || !inputFileNameRE.MatchString(f.Name) {
+				return fmt.Errorf("%s.name %q must be at most %d characters: a-z 0-9 _ - and an optional extension of a dot and 1 to 8 of the same", ff, f.Name, maxInputFileNameLen)
+			}
+			if names[f.Name] {
+				return fmt.Errorf("%s.name %q is duplicated", ff, f.Name)
+			}
+			names[f.Name] = true
+			if (f.File == "") == (f.String == "") {
+				return fmt.Errorf("%s requires exactly one of file or string", ff)
+			}
+			inline += len(f.String)
+		}
+	}
+	// libvirt refuses two disks with the same target at define time
+	for i := range vm.Spec.InputDisks {
+		target := naming.InputDiskTarget(i)
+		for j, disk := range vm.Spec.DataDisks {
+			if disk.Device == target {
+				return fmt.Errorf("spec.dataDisks[%d].device %q is the target of spec.inputDisks[%d]", j, disk.Device, i)
+			}
+		}
+	}
+	if inline > maxInputStringBytes {
+		return fmt.Errorf("spec.inputDisks inline strings total %d bytes; at most %d (1 MiB) are allowed, put larger content in a file", inline, maxInputStringBytes)
 	}
 	return nil
 }

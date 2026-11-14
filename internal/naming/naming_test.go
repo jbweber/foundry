@@ -161,6 +161,27 @@ func TestVolumeNameCloudInit(t *testing.T) {
 	}
 }
 
+func TestVolumeNameInput(t *testing.T) {
+	if got := VolumeNameInput("web-server", "NODE_CFG1"); got != "web-server_input-node_cfg1.iso" {
+		t.Errorf("VolumeNameInput() = %q", got)
+	}
+}
+
+// The most input disks validation allows take distinct targets up to sdz.
+func TestInputDiskTarget(t *testing.T) {
+	seen := map[string]bool{"sda": true}
+	for i := 0; i < MaxInputDisks; i++ {
+		target := InputDiskTarget(i)
+		if seen[target] {
+			t.Errorf("target %s of input disk %d is taken", target, i)
+		}
+		seen[target] = true
+	}
+	if InputDiskTarget(0) != "sdb" || InputDiskTarget(MaxInputDisks-1) != "sdz" {
+		t.Errorf("targets %s .. %s", InputDiskTarget(0), InputDiskTarget(MaxInputDisks-1))
+	}
+}
+
 func TestVolumeNameVarstore(t *testing.T) {
 	if got, want := VolumeNameVarstore("my-keys", "x86_64"), "varstore_my-keys_x86_64.fd"; got != want {
 		t.Errorf("VolumeNameVarstore() = %q, want %q", got, want)

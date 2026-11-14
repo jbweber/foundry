@@ -117,6 +117,54 @@ type VirtualMachineSpec struct {
 	// guest reads each from /sys/firmware/qemu_fw_cfg/by_name/<name>/raw.
 	// +optional
 	FwCfg []FwCfgEntrySpec `json:"fwCfg,omitempty" yaml:"fwCfg,omitempty"`
+
+	// InputDisks are small read-only disks, each an ISO-9660 image with a
+	// volume label and a few files (e.g. an installer's config), that foundry
+	// builds, uploads into the VM's storage pool as a volume and attaches as
+	// a CD-ROM. The guest finds one by its label
+	// (/dev/disk/by-label/<label>). Deleted with the VM. Without it the VM
+	// gets no input disks, as before.
+	// +optional
+	InputDisks []InputDiskSpec `json:"inputDisks,omitempty" yaml:"inputDisks,omitempty"`
+}
+
+// InputDiskSpec defines a small read-only ISO-9660 disk with files for the
+// guest.
+//
+// +k8s:deepcopy-gen=true
+type InputDiskSpec struct {
+	// Label is the ISO-9660 volume label the guest finds the disk by
+	// (/dev/disk/by-label/<label>): 1 to 32 characters from A-Z 0-9 _
+	// (ISO-9660 d-characters). Unique among the VM's input disks; also names
+	// the volume (<vm>_input-<label in lower case>.iso). CIDATA is only
+	// allowed without spec.cloudInit (it is the label of foundry's own
+	// cloud-init seed).
+	Label string `json:"label" yaml:"label"`
+
+	// Files are the disk's files, all in its root directory. At least one.
+	Files []InputFileSpec `json:"files" yaml:"files"`
+}
+
+// InputFileSpec defines one file of an input disk.
+// Exactly one of File or String must be set.
+//
+// +k8s:deepcopy-gen=true
+type InputFileSpec struct {
+	// Name is the file name in the disk's root directory. ISO-9660 without
+	// extensions keeps only short lower-case names intact on a Linux guest,
+	// so it is a base of a-z 0-9 _ - and an optional extension of a dot and
+	// 1 to 8 of the same characters, 28 characters at most (e.g. "node.yaml").
+	Name string `json:"name" yaml:"name"`
+
+	// File is a regular file, on the machine foundry runs on, to copy in.
+	// foundry reads it itself and uploads the disk image through libvirt.
+	// A relative path is taken from the directory of the VM's YAML file.
+	// +optional
+	File string `json:"file,omitempty" yaml:"file,omitempty"`
+
+	// String is the file's content, given inline.
+	// +optional
+	String string `json:"string,omitempty" yaml:"string,omitempty"`
 }
 
 // SMBIOSSpec defines SMBIOS system information (type 1) entries, rendered as
@@ -475,6 +523,28 @@ func (in *VirtualMachineSpec) DeepCopy() *VirtualMachineSpec {
 		out.Autostart = &autostart
 	}
 
+	// Deep copy InputDisks slice
+	if in.InputDisks != nil {
+		out.InputDisks = make([]InputDiskSpec, len(in.InputDisks))
+		for i := range in.InputDisks {
+			out.InputDisks[i] = *in.InputDisks[i].DeepCopy()
+		}
+	}
+
+	return out
+}
+
+// DeepCopy creates a deep copy of InputDiskSpec.
+func (in *InputDiskSpec) DeepCopy() *InputDiskSpec {
+	if in == nil {
+		return nil
+	}
+	out := new(InputDiskSpec)
+	*out = *in
+	if in.Files != nil {
+		out.Files = make([]InputFileSpec, len(in.Files))
+		copy(out.Files, in.Files)
+	}
 	return out
 }
 
