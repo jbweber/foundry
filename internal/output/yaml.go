@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"fmt"
 
-	"go.yaml.in/yaml/v3"
-
 	"github.com/jbweber/foundry/api/v1alpha1"
 )
 
@@ -17,7 +15,7 @@ func (f *YAMLFormatter) FormatVM(vm *v1alpha1.VirtualMachine) (string, error) {
 	// Ensure TypeMeta is set
 	v1alpha1.SetDefaultAPIVersion(vm)
 
-	data, err := yaml.Marshal(vm)
+	data, err := v1alpha1.EncodeYAML(vm)
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal VM to YAML: %w", err)
 	}
@@ -38,7 +36,7 @@ func (f *YAMLFormatter) FormatVMList(vms []*v1alpha1.VirtualMachine) (string, er
 		// Ensure TypeMeta is set
 		v1alpha1.SetDefaultAPIVersion(vm)
 
-		data, err := yaml.Marshal(vm)
+		data, err := v1alpha1.EncodeYAML(vm)
 		if err != nil {
 			return "", fmt.Errorf("failed to marshal VM %s to YAML: %w", vm.Name, err)
 		}

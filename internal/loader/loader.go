@@ -105,7 +105,7 @@ func SaveToFile(vm *v1alpha1.VirtualMachine, path string) error {
 	// Ensure TypeMeta is set
 	v1alpha1.SetDefaultAPIVersion(vm)
 
-	data, err := yaml.Marshal(vm)
+	data, err := v1alpha1.EncodeYAML(vm)
 	if err != nil {
 		return fmt.Errorf("failed to marshal VM to YAML: %w", err)
 	}
