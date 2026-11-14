@@ -199,6 +199,10 @@ func GenerateDomainXML(vm *v1alpha1.VirtualMachine, hostArch string) (string, er
 	if vm.Spec.Firmware != nil {
 		applyFirmware(domain, vm.Spec.Firmware, vm.GetArch())
 	}
+	if vm.HasSMBIOS() {
+		applySMBIOS(domain, vm)
+	}
+	addFwCfg(domain, vm.Spec.FwCfg)
 
 	// Add cloud-init ISO if configured (volume-based)
 	if vm.Spec.CloudInit != nil {
@@ -399,4 +403,63 @@ func applyAarch64(domain *libvirtxml.Domain) {
 	// rtc, pit and hpet are x86 timers; the Arm guest uses the architected
 	// generic timer, which needs no configuration.
 	domain.Clock.Timer = nil
+}
+
+// applySMBIOS sets the SMBIOS system information (type 1) through libvirt's
+// sysinfo (https://libvirt.org/formatdomain.html#smbios-system-information):
+// <os><smbios mode='sysinfo'/> takes the values from <sysinfo type='smbios'>.
+// The serial is always among them, stable per VM, so a guest can bind to it.
+// libvirt requires the domain UUID and the SMBIOS one to match, so a set
+// spec.smbios.uuid becomes the domain's UUID too.
+func applySMBIOS(domain *libvirtxml.Domain, vm *v1alpha1.VirtualMachine) {
+	domain.OS.SMBios = &libvirtxml.DomainSMBios{Mode: "sysinfo"}
+	domain.SysInfo = append(domain.SysInfo, libvirtxml.DomainSysInfo{SMBIOS: &libvirtxml.DomainSysInfoSMBIOS{
+		System: &libvirtxml.DomainSysInfoSystem{Entry: smbiosSystemEntries(vm)},
+	}})
+	if s := vm.Spec.SMBIOS; s != nil && s.UUID != "" {
+		domain.UUID = s.UUID
+	}
+}
+
+// smbiosSystemEntries returns the <sysinfo type='smbios'><system> entries:
+// the serial, and whatever spec.smbios sets, in the order libvirt documents
+// them.
+func smbiosSystemEntries(vm *v1alpha1.VirtualMachine) []libvirtxml.DomainSysInfoEntry {
+	s := vm.Spec.SMBIOS
+	if s == nil {
+		s = &v1alpha1.SMBIOSSpec{}
+	}
+	var entries []libvirtxml.DomainSysInfoEntry
+	for _, e := range []libvirtxml.DomainSysInfoEntry{
+		{Name: "manufacturer", Value: s.Manufacturer},
+		{Name: "product", Value: s.Product},
+		{Name: "version", Value: s.Version},
+		{Name: "serial", Value: vm.GetSerial()},
+		{Name: "uuid", Value: s.UUID},
+		{Name: "sku", Value: s.SKU},
+		{Name: "family", Value: s.Family},
+	} {
+		if e.Value != "" {
+			entries = append(entries, e)
+		}
+	}
+	return entries
+}
+
+// addFwCfg adds fw_cfg entries through libvirt's native <sysinfo type='fwcfg'>
+// (https://libvirt.org/formatdomain.html#smbios-system-information). The
+// guest reads them from /sys/firmware/qemu_fw_cfg/by_name/<name>/raw.
+func addFwCfg(domain *libvirtxml.Domain, entries []v1alpha1.FwCfgEntrySpec) {
+	if len(entries) == 0 {
+		return
+	}
+	fwcfg := &libvirtxml.DomainSysInfoFWCfg{}
+	for _, e := range entries {
+		fwcfg.Entry = append(fwcfg.Entry, libvirtxml.DomainSysInfoEntry{
+			Name:  e.Name,
+			File:  e.File,
+			Value: e.String,
+		})
+	}
+	domain.SysInfo = append(domain.SysInfo, libvirtxml.DomainSysInfo{FWCfg: fwcfg})
 }

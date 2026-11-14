@@ -221,6 +221,13 @@ status:
   `keys` and `nvramTemplate` not both; `keys` is 1-63 lowercase letters,
   digits and dashes, starting and ending with a letter or digit (see
   [UEFI Firmware and Secure Boot](#uefi-firmware-and-secure-boot))
+- `spec.serial` (or, with `spec.smbios` set, the default `foundry-<name>`)
+  is 1-64 characters from `A-Z a-z 0-9 . _ -`; `spec.smbios` strings are 1-64
+  characters from `A-Z a-z 0-9`, space and `. _ - + ( ) / :`, without leading
+  or trailing space; `spec.smbios.uuid` is a UUID (lower-cased on load)
+- `spec.fwCfg[].name` starts with `opt/`, is not under `opt/ovmf/` or
+  `opt/org.qemu/`, and is unique; each entry has exactly one of `file` or
+  `string` (see [SMBIOS and fw_cfg](#smbios-and-fw_cfg))
 
 **Not yet enforced** (documented intent, no implementation):
 - `metadata.name` format: `^[a-z0-9][a-z0-9_-]*[a-z0-9]$` (after normalization)
@@ -521,6 +528,61 @@ firmware:
 
 Replacing or deleting a profile does not affect existing VMs: each has its own
 copy of the varstore from its first start.
+
+### SMBIOS and fw_cfg
+
+Both go through libvirt's `<sysinfo>`
+([SMBIOS system information](https://libvirt.org/formatdomain.html#smbios-system-information)).
+
+**SMBIOS system information (type 1).** A guest that binds something to its
+machine, such as an installer that checks which machine it runs on, needs a
+system serial that is set and stable; QEMU sets none. With `spec.serial` or
+`spec.smbios` set, the domain gets `<os><smbios mode='sysinfo'/></os>` and
+one `<sysinfo type='smbios'><system>` block with the serial and whatever
+`spec.smbios` sets, in the order libvirt documents them:
+
+```xml
+<os>
+  <smbios mode='sysinfo'/>
+</os>
+<sysinfo type='smbios'>
+  <system>
+    <entry name='manufacturer'>Example Corp</entry>
+    <entry name='serial'>foundry-web01</entry>
+    <entry name='uuid'>4c4c4544-0042-3510-8051-b4c04f4e3532</entry>
+  </system>
+</sysinfo>
+```
+
+- The serial is `spec.serial`, or `foundry-<name>`: known before the VM
+  exists and the same when the VM is recreated.
+- The SMBIOS serial is **opt-in**. A serial on every VM would change what
+  existing specs render and what their guests see in
+  `/sys/class/dmi/id/product_serial` the next time they are created, so a
+  spec with neither field renders exactly the domain it did before.
+  `smbios: {}` asks for the default serial alone.
+- libvirt requires the SMBIOS UUID to match the domain's, so a set
+  `spec.smbios.uuid` is also the domain UUID; a VM destroyed and created
+  again keeps the same identity. Without it libvirt picks the UUID.
+- The character sets keep every value a plain token in libvirt XML, on QEMU's
+  `-smbios` option (no `,` `=` or quotes) and in the guest's sysfs (no
+  leading or trailing space, which readers strip).
+
+**fw_cfg.** `spec.fwCfg` entries become one `<sysinfo type='fwcfg'>` block;
+the guest reads each from `/sys/firmware/qemu_fw_cfg/by_name/<name>/raw`
+(with the `qemu_fw_cfg` module). `string` is inline content, `file` a file on
+the hypervisor that QEMU reads at start. libvirt accepts only names under
+`opt/` and reserves `opt/ovmf/` and `opt/org.qemu/`; validation checks this
+at load time rather than at define time. For example,
+`opt/org.tianocore/EnableLegacyLoader` set to `no` makes OVMF verify a
+directly booted kernel under Secure Boot.
+
+```xml
+<sysinfo type='fwcfg'>
+  <entry name='opt/org.tianocore/EnableLegacyLoader'>no</entry>
+  <entry name='opt/com.example/config' file='/srv/config.json'/>
+</sysinfo>
+```
 
 ### Default Route
 
@@ -870,7 +932,6 @@ old-vm     shut off  4      8 GiB   -
 - ❌ Installation ISO attachment
 - ❌ CoreOS/Ignition support (provisioning format abstraction needed)
 - ❌ Console autologin
-- ❌ Custom firmware config (fw_cfg)
 - ❌ Config file support (~/.config/foundry/config.yaml)
 - ❌ Bridge verification before deployment (fuzzy match existing bridges)
 

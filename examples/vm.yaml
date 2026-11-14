@@ -90,4 +90,13 @@ spec:
   #   secureBoot: true        # Secure loader + SMM (x86_64 only)
   #   keys: my-keys           # Secure Boot key profile ('foundry varstore import'), or
   #   nvramTemplate: /path/VARS.fd  # a varstore template path (not both)
+  # serial: SN-0001           # SMBIOS system serial (default with smbios: foundry-<name>;
+                              # with neither set the VM gets no SMBIOS information)
+  # smbios:                   # SMBIOS system information; "smbios: {}" for the default serial
+  #   manufacturer: Example Corp
+  #   product: Model 9
+  #   uuid: 4c4c4544-0042-3510-8051-b4c04f4e3532  # also the domain UUID
+  # fwCfg:                    # QEMU fw_cfg entries (names under opt/)
+  #   - name: opt/org.tianocore/EnableLegacyLoader
+  #     string: "no"          # inline content, or file: /path/on/hypervisor
   storagePool: foundry-vms    # Storage pool to use (default: foundry-vms)
