@@ -269,6 +269,15 @@ func GenerateDomainXML(vm *v1alpha1.VirtualMachine, hostArch string) (string, er
 				},
 			}
 		}
+		if len(iface.VlanTrunk) > 0 {
+			// trunk='yes' keeps a one-ID trunk tagged; with several tags libvirt
+			// trunks anyway (formatdomain, "Setting VLAN tag").
+			tags := make([]libvirtxml.DomainInterfaceVLanTag, 0, len(iface.VlanTrunk))
+			for _, id := range iface.VlanTrunk {
+				tags = append(tags, libvirtxml.DomainInterfaceVLanTag{ID: id})
+			}
+			netIface.VLan = &libvirtxml.DomainInterfaceVLan{Trunk: "yes", Tags: tags}
+		}
 
 		// Add boot order if PXE boot is enabled for this interface
 		if iface.PXEBoot {

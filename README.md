@@ -22,7 +22,7 @@ This project isn't suggested for general purpose use, and really exists because 
 - **Pure Go Implementation**: No CGo dependencies, easy to install and deploy
 - **Cloud-init Support**: Automatic SSH key injection and network configuration
 - **Bridge Networking**: Support for multiple network interfaces with bridge connectivity
-- **VLAN Tagging**: Optional 802.1Q tag applied per interface on the bridge port
+- **VLAN Tagging**: Optional 802.1Q tag applied per interface on the bridge port, or a trunk of several tags into the guest
 - **Host-side Device Names**: Optional fixed name for an interface's tap device on the host
 - **PXE Boot**: Optionally network boot an interface ahead of the boot disk
 - **Storage Management**: QCOW2 boot disks with backing images, plus additional data disks
@@ -98,7 +98,7 @@ foundry render examples/vm.yaml
 
 The config is loaded, defaulted, and validated exactly as `create` does, so the
 output matches what would be handed to libvirt — useful for checking boot order,
-VLAN tags, and disk targets while iterating on a config. Referenced pools,
+VLAN tags and trunks, and disk targets while iterating on a config. Referenced pools,
 volumes, and base images are not checked for existence.
 
 A config with `spec.arch` renders for the machine `render` runs on; use
@@ -211,6 +211,26 @@ read that file as that user. `CIDATA` is the label of the cloud-init seed, so it
 is refused next to `spec.cloudInit`; without `spec.cloudInit`, an input disk
 labelled `CIDATA` is a hand-made NoCloud seed. A spec without `inputDisks`
 gets no input disks, as before. `foundry destroy` deletes them with the VM.
+
+### VLAN Trunks
+
+`vlan` tags an interface's bridge port with one VLAN, and the guest sees plain
+traffic. `vlanTrunk` instead carries several VLANs, still tagged, into the
+guest, for a guest that splits them itself (a virtual switch or router):
+
+```yaml
+spec:
+  networkInterfaces:
+    - ip: 192.168.251.2/24
+      gateway: 192.168.251.1
+      bridge: br-trunk
+      vlanTrunk: [101, 102, 110]  # 1-256 IDs of 1-4094; not beside vlan
+```
+
+The host bridge must be VLAN-aware (Open vSwitch, or a Linux bridge with
+libvirt 11.0.0 or later) and carry the IDs; foundry does not configure the host.
+There is no native VLAN. The interface still needs `ip` and `gateway`, as its MAC
+and device name come from the IP.
 
 ### Host-side Device Names
 

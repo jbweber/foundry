@@ -111,3 +111,41 @@ func TestGenerateDomainXML_HostDevice(t *testing.T) {
 		t.Errorf("interface 0 MAC = %+v, want be:ef:0a:14:1e:28", ifs[0].MAC)
 	}
 }
+
+func TestGenerateDomainXML_VlanTrunk(t *testing.T) {
+	vm := extrasTestVM(
+		v1alpha1.NetworkInterfaceSpec{IP: "10.20.30.40/24", Gateway: "10.20.30.1", Bridge: "br0", DefaultRoute: true},
+		v1alpha1.NetworkInterfaceSpec{IP: "10.20.31.40/24", Gateway: "10.20.31.1", Bridge: "br-trunk", VlanTrunk: []uint{101, 102, 110}},
+		v1alpha1.NetworkInterfaceSpec{IP: "10.20.32.40/24", Gateway: "10.20.32.1", Bridge: "br-trunk", VlanTrunk: []uint{200}},
+	)
+	xml, domain := generate(t, vm, v1alpha1.ArchX86_64)
+	if !strings.Contains(xml, `<vlan trunk="yes">`) {
+		t.Errorf("XML has no <vlan trunk=\"yes\">:\n%s", xml)
+	}
+	ifs := domain.Devices.Interfaces
+	if len(ifs) != 3 {
+		t.Fatalf("Interface count = %d, want 3", len(ifs))
+	}
+	if ifs[0].VLan != nil {
+		t.Errorf("Interface 0 has unexpected <vlan> element")
+	}
+	for i, want := range map[int][]uint{1: {101, 102, 110}, 2: {200}} {
+		v := ifs[i].VLan
+		if v == nil {
+			t.Errorf("Interface %d missing <vlan> element", i)
+			continue
+		}
+		if v.Trunk != "yes" {
+			t.Errorf("Interface %d trunk = %q, want yes", i, v.Trunk)
+		}
+		if len(v.Tags) != len(want) {
+			t.Errorf("Interface %d has %d tags, want %d", i, len(v.Tags), len(want))
+			continue
+		}
+		for j, id := range want {
+			if v.Tags[j].ID != id || v.Tags[j].NativeMode != "" {
+				t.Errorf("Interface %d tag %d = %+v, want id %d with no native mode", i, j, v.Tags[j], id)
+			}
+		}
+	}
+}

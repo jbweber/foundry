@@ -62,6 +62,11 @@ spec:
       # and trunk this ID. Omit for an untagged interface.
       vlan: 100
 
+      # Optional, instead of vlan: make the port a trunk that carries these
+      # 802.1Q IDs tagged into the guest, for a guest that splits the VLANs
+      # itself. 1-256 IDs of 1-4094, each once; no native VLAN.
+      # vlanTrunk: [101, 102, 103]
+
       # Optional: the host-side device name (the tap device on the bridge).
       # Default: derived from the IP ("vm" + the octets in hex, vmc0a80132
       # here). Set it when something on the host finds the port by name.

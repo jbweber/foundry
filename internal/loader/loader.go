@@ -20,6 +20,11 @@ import (
 // so the usable range is 1-4094.
 const MaxVlanID = 4094
 
+// MaxVlanTrunk is the most IDs one trunk interface may list. libvirt adds each
+// ID to the bridge port one at a time, so a short list keeps a start quick;
+// raise it when a caller needs more.
+const MaxVlanTrunk = 256
+
 // LoadFromFile loads a VirtualMachine resource from a YAML file.
 // The file must be in the foundry.cofront.xyz/v1alpha1 format.
 func LoadFromFile(path string) (*v1alpha1.VirtualMachine, error) {
@@ -257,6 +262,9 @@ func validateSpec(vm *v1alpha1.VirtualMachine) error {
 		if iface.Vlan != nil && (*iface.Vlan == 0 || *iface.Vlan > MaxVlanID) {
 			return fmt.Errorf("spec.networkInterfaces[%d].vlan %d must be between 1 and %d", i, *iface.Vlan, MaxVlanID)
 		}
+		if err := validateVlanTrunk(i, iface); err != nil {
+			return err
+		}
 
 		// Boot order and the default route are both domain-wide, so only one
 		// interface may claim either.
@@ -274,6 +282,34 @@ func validateSpec(vm *v1alpha1.VirtualMachine) error {
 		}
 	}
 
+	return nil
+}
+
+// validateVlanTrunk checks a trunk interface's IDs: not beside vlan, not
+// empty when given, each 1-4094 and listed once, at most MaxVlanTrunk.
+func validateVlanTrunk(i int, iface v1alpha1.NetworkInterfaceSpec) error {
+	if iface.VlanTrunk == nil {
+		return nil
+	}
+	if iface.Vlan != nil {
+		return fmt.Errorf("spec.networkInterfaces[%d] cannot set both vlan and vlanTrunk", i)
+	}
+	if len(iface.VlanTrunk) == 0 {
+		return fmt.Errorf("spec.networkInterfaces[%d].vlanTrunk is empty: list the VLAN IDs, or omit it", i)
+	}
+	if len(iface.VlanTrunk) > MaxVlanTrunk {
+		return fmt.Errorf("spec.networkInterfaces[%d].vlanTrunk lists %d IDs, at most %d", i, len(iface.VlanTrunk), MaxVlanTrunk)
+	}
+	seen := make(map[uint]bool, len(iface.VlanTrunk))
+	for _, id := range iface.VlanTrunk {
+		if id == 0 || id > MaxVlanID {
+			return fmt.Errorf("spec.networkInterfaces[%d].vlanTrunk ID %d must be between 1 and %d", i, id, MaxVlanID)
+		}
+		if seen[id] {
+			return fmt.Errorf("spec.networkInterfaces[%d].vlanTrunk lists %d twice", i, id)
+		}
+		seen[id] = true
+	}
 	return nil
 }
 

@@ -345,6 +345,15 @@ type NetworkInterfaceSpec struct {
 	// +optional
 	Vlan *uint `json:"vlan,omitempty" yaml:"vlan,omitempty"`
 
+	// VlanTrunk makes this interface a VLAN trunk: libvirt applies every
+	// listed 802.1Q ID to the bridge port as a tagged VLAN, so the guest sees
+	// the tags and picks the frames apart itself (a guest that switches or
+	// routes per VLAN). Each ID is 1-4094, listed once, at most 256 IDs.
+	// The bridge must be VLAN-aware and trunk the IDs. Exclusive with Vlan.
+	// +kubebuilder:validation:MaxItems=256
+	// +optional
+	VlanTrunk []uint `json:"vlanTrunk,omitempty" yaml:"vlanTrunk,omitempty"`
+
 	// DNSServers is the list of DNS server IP addresses.
 	// +optional
 	DNSServers []string `json:"dnsServers,omitempty" yaml:"dnsServers,omitempty"`
@@ -612,6 +621,12 @@ func (in *NetworkInterfaceSpec) DeepCopy() *NetworkInterfaceSpec {
 	if in.DNSServers != nil {
 		out.DNSServers = make([]string, len(in.DNSServers))
 		copy(out.DNSServers, in.DNSServers)
+	}
+
+	// Deep copy VlanTrunk slice
+	if in.VlanTrunk != nil {
+		out.VlanTrunk = make([]uint, len(in.VlanTrunk))
+		copy(out.VlanTrunk, in.VlanTrunk)
 	}
 
 	return out

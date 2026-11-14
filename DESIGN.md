@@ -152,6 +152,7 @@ spec:
       defaultRoute: false
       vlan: 100               # Optional: 802.1Q VLAN ID (1-4094) to tag on the bridge
       hostDevice: port-b1     # Optional: host-side device name (default: derived from the IP)
+      # vlanTrunk: [101, 102]  # Optional, instead of vlan: carry these VLANs tagged into the guest
       pxeBoot: false          # Optional: network boot from this interface (default: false)
 
   # Optional: Cloud-init configuration
@@ -233,6 +234,7 @@ status:
   `macvtap` or `macvlan`; no two interfaces share a host-side name, set or derived (see
   [Network Interface Naming](#network-interface-naming))
 - `networkInterfaces[].vlan` within 1-4094 when set (see [VLAN Tagging](#vlan-tagging))
+- `networkInterfaces[].vlanTrunk`, when set: not beside `vlan`, 1-256 IDs, each 1-4094 and listed once (see [VLAN Trunks](#vlan-trunks))
 - At most one interface sets `defaultRoute`, and at most one sets `pxeBoot`
 - `spec.arch`, when set, is `x86_64` or `aarch64` (see [Guest Architecture](#guest-architecture))
 - `spec.cpuMode` is not `host-model` for an `aarch64` guest
@@ -451,16 +453,54 @@ This emits a `<vlan>` element on the interface:
   untagged traffic on a normal virtio NIC.
 - Generated cloud-init network-config is unaffected — no VLAN sub-interface is
   configured in the guest, and the IP is assigned to the NIC directly.
-- Only a single tag is supported (access-port semantics). Trunking multiple
-  VLANs into one guest interface is not exposed.
+- A single tag (access-port semantics). For several VLANs into one guest
+  interface, see [VLAN Trunks](#vlan-trunks).
 - Omitting `vlan` leaves the interface untagged, matching prior behavior.
 
 **Requirements**:
 - The host bridge must be VLAN-aware and trunk the requested ID. Foundry does
   not create or configure the VLAN on the host.
 
-**Limitations**:
-⚠️ The VLAN ID range is currently declared via kubebuilder markers but **not enforced at load time**. Reserved IDs (`0`, `4095`) and out-of-range values are passed straight through to libvirt, so the failure surfaces at define time as a libvirt error rather than as a config validation error.
+**Validation**: the loader refuses reserved IDs (`0`, `4095`) and out-of-range
+values, so they fail as a config error rather than at define time in libvirt.
+
+### VLAN Trunks
+
+An interface may instead be a trunk: `vlanTrunk` lists the 802.1Q IDs the bridge
+port carries tagged into the guest. It is for a guest that takes the VLANs apart
+itself, such as a virtual switch or router that works per VLAN.
+
+```yaml
+networkInterfaces:
+  - ip: 192.168.251.2/24
+    gateway: 192.168.251.1
+    bridge: br-trunk
+    vlanTrunk: [101, 102, 103, 104, 105, 106, 107, 108, 109, 110]
+```
+
+This emits `<vlan trunk='yes'>` with one `<tag>` per ID:
+
+```xml
+<vlan trunk='yes'>
+  <tag id='101'/>
+  <tag id='102'/>
+  ...
+</vlan>
+```
+
+libvirt supports trunking several tags on Open vSwitch and, since 11.0.0, on
+standard Linux bridges, and `trunk='yes'` keeps a one-ID list a trunk rather
+than an access port ([formatdomain: Setting VLAN tag](https://libvirt.org/formatdomain.html#setting-vlan-tag-on-supported-network-types-only)).
+
+**Rules**: exclusive with `vlan`; 1 to 256 IDs, each 1-4094, none twice. There
+is no native (untagged) VLAN: untagged frames from the guest are not given one.
+The host bridge must be VLAN-aware and carry the IDs; foundry does not configure
+the host.
+
+**Limitations**: the interface still needs `ip` and `gateway`, because its MAC
+and tap name come from the IP and cloud-init configures that address on the
+NIC. On a trunk the address is inert unless something carries untagged frames;
+an interface with no IP is a possible follow-up.
 
 ### PXE Boot
 
