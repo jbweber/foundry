@@ -231,6 +231,10 @@ func validateSpec(vm *v1alpha1.VirtualMachine) error {
 		return fmt.Errorf("spec.networkInterfaces must have at least one interface")
 	}
 
+	if err := validateHostDevices(vm); err != nil {
+		return err
+	}
+
 	ipsSeen := make(map[string]bool)
 	defaultRouteIdx := -1
 	pxeBootIdx := -1
@@ -270,6 +274,74 @@ func validateSpec(vm *v1alpha1.VirtualMachine) error {
 		}
 	}
 
+	return nil
+}
+
+// reservedHostDevicePrefixes are the interface name prefixes libvirt keeps
+// for the names it generates: "If no target is specified, certain
+// hypervisors will automatically generate a name ... the name should not
+// start with either 'vnet', 'vif', 'macvtap', or 'macvlan', which are
+// prefixes reserved by libvirt and certain hypervisors. Manually specified
+// targets using these prefixes may be ignored"
+// (https://libvirt.org/formatdomain.html#overriding-the-target-element).
+// The QEMU driver drops such a name when it parses a persistent definition
+// ("An auto-generated target name, blank it out", virDomainNetDefParseXML in
+// https://gitlab.com/libvirt/libvirt/-/blob/v11.10.0/src/conf/domain_conf.c,
+// with VIR_NET_GENERATED_VNET_PREFIX "vnet", ..._MACVTAP_PREFIX "macvtap"
+// and ..._MACVLAN_PREFIX "macvlan" in src/util/virnetdev.h; "vif" is the Xen
+// driver's own prefix), so the device would get a new generated name at
+// every start.
+var reservedHostDevicePrefixes = []string{"vnet", "vif", "macvtap", "macvlan"}
+
+// maxHostDeviceLen is the longest Linux interface name: IFNAMSIZ (16)
+// including the terminating NUL (dev_valid_name in
+// https://github.com/torvalds/linux/blob/master/net/core/dev.c).
+const maxHostDeviceLen = 15
+
+// ValidateHostDevice checks a host-side interface name (spec.networkInterfaces[].hostDevice).
+func ValidateHostDevice(name string) error {
+	if name == "" || len(name) > maxHostDeviceLen {
+		return fmt.Errorf("must be 1 to %d characters", maxHostDeviceLen)
+	}
+	// The kernel refuses ".", "..", "/", ":" and white space in a name
+	// (dev_valid_name); foundry also keeps to printable ASCII.
+	if name == "." || name == ".." {
+		return fmt.Errorf("cannot be %q", name)
+	}
+	for _, r := range name {
+		if r <= ' ' || r >= 0x7f || r == '/' || r == ':' {
+			return fmt.Errorf("may not contain %q (printable ASCII without '/', ':' or space)", r)
+		}
+	}
+	for _, p := range reservedHostDevicePrefixes {
+		if strings.HasPrefix(name, p) {
+			return fmt.Errorf("starts with %q, a prefix libvirt reserves for the names it generates", p)
+		}
+	}
+	return nil
+}
+
+// validateHostDevices checks spec.networkInterfaces[].hostDevice, and that
+// no two interfaces end up with the same host-side name (a set one, or the
+// one derived from the IP).
+func validateHostDevices(vm *v1alpha1.VirtualMachine) error {
+	seen := make(map[string]int)
+	for i, iface := range vm.Spec.NetworkInterfaces {
+		name := iface.HostDevice
+		if name != "" {
+			if err := ValidateHostDevice(name); err != nil {
+				return fmt.Errorf("spec.networkInterfaces[%d].hostDevice %q %w", i, name, err)
+			}
+		} else if derived, err := naming.InterfaceNameFromIP(iface.IP); err == nil {
+			name = derived
+		} else {
+			continue // a bad IP is reported by the interface checks
+		}
+		if other, ok := seen[name]; ok {
+			return fmt.Errorf("spec.networkInterfaces[%d] has the host device name %q of spec.networkInterfaces[%d]", i, name, other)
+		}
+		seen[name] = i
+	}
 	return nil
 }
 

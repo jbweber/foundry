@@ -151,6 +151,7 @@ spec:
       bridge: br1
       defaultRoute: false
       vlan: 100               # Optional: 802.1Q VLAN ID (1-4094) to tag on the bridge
+      hostDevice: port-b1     # Optional: host-side device name (default: derived from the IP)
       pxeBoot: false          # Optional: network boot from this interface (default: false)
 
   # Optional: Cloud-init configuration
@@ -227,6 +228,10 @@ status:
   among the VM's disks (see [Disk Serials](#disk-serials))
 - At least one network interface, each with `ip`, `gateway`, `bridge`
 - No duplicate IP addresses in network interfaces
+- `networkInterfaces[].hostDevice`, when set, is a Linux interface name of 1-15 characters
+  (not `.` or `..`, printable ASCII without `/`, `:` or space), not starting with `vnet`, `vif`,
+  `macvtap` or `macvlan`; no two interfaces share a host-side name, set or derived (see
+  [Network Interface Naming](#network-interface-naming))
 - `networkInterfaces[].vlan` within 1-4094 when set (see [VLAN Tagging](#vlan-tagging))
 - At most one interface sets `defaultRoute`, and at most one sets `pxeBoot`
 - `spec.arch`, when set, is `x86_64` or `aarch64` (see [Guest Architecture](#guest-architecture))
@@ -388,6 +393,27 @@ IP: 192.168.1.100    → Interface: vmc0a80164
 ⚠️ **IP Uniqueness Required**: This approach assumes IP addresses are unique across all VMs. If two VMs use the same IP address (even on different networks/bridges), they will have interface name collisions.
 
 This is acceptable for the current use case where IPs are expected to be unique.
+
+**A name of the caller's choosing (`hostDevice`)**: a caller that finds a VM's port on the host by its
+name (a network controller keyed on port names) sets `spec.networkInterfaces[].hostDevice`, and foundry
+puts that name in `<target dev=.../>` instead of the derived one. Either way the name is foundry's choice,
+so libvirt keeps it in the persistent definition and the device has it at every start; without a
+`<target>`, libvirt would hand out `vnetN` afresh at each start. The MAC still comes from the IP.
+Checked by the loader:
+- 1 to 15 characters (IFNAMSIZ is 16 with the terminating NUL), not `.` or `..`, no `/`, `:` or white
+  space: the kernel's rule (`dev_valid_name` in
+  [net/core/dev.c](https://github.com/torvalds/linux/blob/master/net/core/dev.c)).
+- Not starting with `vnet`, `vif`, `macvtap` or `macvlan`. libvirt: "the name should not start with either
+  'vnet', 'vif', 'macvtap', or 'macvlan', which are prefixes reserved by libvirt and certain hypervisors.
+  Manually specified targets using these prefixes may be ignored"
+  ([formatdomain: Overriding the target element](https://libvirt.org/formatdomain.html#overriding-the-target-element)).
+  In code, the parser drops such a name from a persistent definition ("An auto-generated target name,
+  blank it out", `virDomainNetDefParseXML` in
+  [src/conf/domain_conf.c](https://gitlab.com/libvirt/libvirt/-/blob/v11.10.0/src/conf/domain_conf.c), with
+  the prefixes `vnet`, `macvtap` and `macvlan` from `src/util/virnetdev.h`, plus the driver's own, `vif` for
+  Xen), so the port would get a generated name after all.
+- Unique among the VM's interfaces, counting the derived names of the others. Unique across VMs and
+  host devices is the caller's concern: a VM whose name is taken fails to start.
 
 **Future Enhancement**:
 When a database/state store is available, consider migrating to a better naming scheme such as:

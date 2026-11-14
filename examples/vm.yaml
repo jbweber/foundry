@@ -62,6 +62,12 @@ spec:
       # and trunk this ID. Omit for an untagged interface.
       vlan: 100
 
+      # Optional: the host-side device name (the tap device on the bridge).
+      # Default: derived from the IP ("vm" + the octets in hex, vmc0a80132
+      # here). Set it when something on the host finds the port by name.
+      # 1-15 characters, not starting with vnet, vif, macvtap or macvlan.
+      # hostDevice: port-b1
+
       # Optional: network boot from this interface (default: false).
       # Gives the NIC boot order 1 and demotes the boot disk to order 2.
       # Set on at most one interface.

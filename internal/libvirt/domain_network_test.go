@@ -90,3 +90,24 @@ func TestGenerateDomainXML_NoDiskSerialByDefault(t *testing.T) {
 		t.Errorf("XML has a disk <serial> element without one in the spec:\n%s", xml)
 	}
 }
+
+func TestGenerateDomainXML_HostDevice(t *testing.T) {
+	vm := extrasTestVM(
+		v1alpha1.NetworkInterfaceSpec{IP: "10.20.30.40/24", Gateway: "10.20.30.1", Bridge: "br0", HostDevice: "port-a1"},
+		v1alpha1.NetworkInterfaceSpec{IP: "10.20.31.40/24", Gateway: "10.20.31.1", Bridge: "br1"},
+	)
+	_, domain := generate(t, vm, v1alpha1.ArchX86_64)
+	ifs := domain.Devices.Interfaces
+	if len(ifs) != 2 {
+		t.Fatalf("Interface count = %d, want 2", len(ifs))
+	}
+	for i, want := range []string{"port-a1", "vm0a141f28"} {
+		if ifs[i].Target == nil || ifs[i].Target.Dev != want {
+			t.Errorf("interface %d target = %+v, want dev %q", i, ifs[i].Target, want)
+		}
+	}
+	// The MAC still comes from the IP whatever the device is called.
+	if ifs[0].MAC == nil || ifs[0].MAC.Address != "be:ef:0a:14:1e:28" {
+		t.Errorf("interface 0 MAC = %+v, want be:ef:0a:14:1e:28", ifs[0].MAC)
+	}
+}

@@ -355,6 +355,22 @@ type NetworkInterfaceSpec struct {
 	// +optional
 	DefaultRoute bool `json:"defaultRoute,omitempty" yaml:"defaultRoute,omitempty"`
 
+	// HostDevice fixes the name of the interface's host-side device (the tap
+	// device libvirt creates and plugs into the bridge; libvirt's
+	// <interface><target dev=.../>, https://libvirt.org/formatdomain.html#overriding-the-target-element),
+	// for a caller that finds the VM's port on the host by name. Without it
+	// the name is derived from the IP ("vm" and its four octets in hex, e.g.
+	// vm0a371616). A Linux interface name: 1 to 15 characters, not "." or
+	// "..", without "/", ":" or white space, and not starting with "vnet",
+	// "vif", "macvtap" or "macvlan": libvirt reserves those prefixes for the
+	// names it generates and drops such a name from the persistent
+	// definition, so the device would get a generated name that changes
+	// from one start to the next. Unique among the VM's interfaces; that no
+	// other VM uses it is the caller's concern (the VM then fails to start).
+	// +optional
+	// +kubebuilder:validation:MaxLength=15
+	HostDevice string `json:"hostDevice,omitempty" yaml:"hostDevice,omitempty"`
+
 	// PXEBoot enables network boot (PXE) on this interface.
 	// When true, this interface will be configured as the primary boot device
 	// with boot order 1, and the boot disk will be set to boot order 2.

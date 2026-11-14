@@ -23,6 +23,7 @@ This project isn't suggested for general purpose use, and really exists because 
 - **Cloud-init Support**: Automatic SSH key injection and network configuration
 - **Bridge Networking**: Support for multiple network interfaces with bridge connectivity
 - **VLAN Tagging**: Optional 802.1Q tag applied per interface on the bridge port
+- **Host-side Device Names**: Optional fixed name for an interface's tap device on the host
 - **PXE Boot**: Optionally network boot an interface ahead of the boot disk
 - **Storage Management**: QCOW2 boot disks with backing images, plus additional data disks
 - **Disk Serials**: Optional serial per disk, so the guest finds it in `/dev/disk/by-id`
@@ -210,6 +211,26 @@ read that file as that user. `CIDATA` is the label of the cloud-init seed, so it
 is refused next to `spec.cloudInit`; without `spec.cloudInit`, an input disk
 labelled `CIDATA` is a hand-made NoCloud seed. A spec without `inputDisks`
 gets no input disks, as before. `foundry destroy` deletes them with the VM.
+
+### Host-side Device Names
+
+Each interface's tap device on the host gets a name derived from its IP
+(`vm0a141e28` for 10.20.30.40). When something on the host finds the VM's
+port by a name of its own, set it:
+
+```yaml
+spec:
+  networkInterfaces:
+    - ip: 10.20.30.40/24
+      gateway: 10.20.30.1
+      bridge: br0
+      hostDevice: port-a1         # 1-15 characters, a Linux interface name
+```
+
+The name stays the same at every start. libvirt reserves names starting with
+`vnet`, `vif`, `macvtap` and `macvlan` for its own, so foundry refuses them.
+Two interfaces of one VM can't share a name; a name another VM or the host
+already uses makes the VM fail to start.
 
 ### Disk Serials
 

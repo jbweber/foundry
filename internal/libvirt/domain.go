@@ -233,10 +233,16 @@ func GenerateDomainXML(vm *v1alpha1.VirtualMachine, hostArch string) (string, er
 			return "", fmt.Errorf("failed to calculate MAC address for %s: %w", iface.IP, err)
 		}
 
-		// Calculate interface name from IP
-		ifaceName, err := naming.InterfaceNameFromIP(iface.IP)
-		if err != nil {
-			return "", fmt.Errorf("failed to calculate interface name for %s: %w", iface.IP, err)
+		// The host-side device name: the one the spec fixes, or one derived
+		// from the IP. Either way a name of foundry's choosing, so libvirt
+		// keeps it in the persistent definition and the device has it at
+		// every start (generated vnetN names are handed out afresh per start).
+		ifaceName := iface.HostDevice
+		if ifaceName == "" {
+			ifaceName, err = naming.InterfaceNameFromIP(iface.IP)
+			if err != nil {
+				return "", fmt.Errorf("failed to calculate interface name for %s: %w", iface.IP, err)
+			}
 		}
 
 		netIface := libvirtxml.DomainInterface{
