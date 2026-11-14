@@ -228,6 +228,9 @@ pool's directory. It costs reading the whole image once per create.
   (a few hundred KiB) may keep that file's tail after the upload, and then
   fails the check; real images are far larger.
 - The digest is not stored with the image: the VM file keeps it.
+- Images imported before these checks existed are not checked again: a raw one
+  was padded to whole GiB and fails a digest check, and a qcow2 one was never
+  checked for a backing file. Import them again.
 
 ### Configuration Validation Rules
 
@@ -955,7 +958,11 @@ Foundry validates disk images on import to ensure they are bootable OS images:
   volume is made.
 - **No partial images** - when the upload fails, or is interrupted (Ctrl-C, SIGTERM), the volume
   is deleted, so no partial image stays under the name a VM would boot from. If that delete
-  fails too, the error names the volume left behind.
+  fails too, the error names the volume left behind. A second Ctrl-C ends foundry at once, should
+  the delete hang. A crash or `kill -9` mid-upload can still leave a partial volume under the
+  image's name; `spec.bootDisk.imageSHA256` refuses it, and `foundry image delete` removes it.
+- **No terminal as input** - `foundry image import -` with a terminal (or another character
+  device, such as `/dev/null`) as standard input is refused instead of waiting for typing.
 
 This prevents common issues like:
 - Importing non-bootable files that cause VM boot failures

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"strings"
@@ -294,10 +295,21 @@ Examples:
 		}
 		fmt.Printf("Importing image from %s as %s...\n", from, imageName)
 
+		in := cmd.InOrStdin()
+		if sourcePath == "-" && isTerminal(in) {
+			return fmt.Errorf("standard input is a terminal or another character device: pipe or redirect the image into it")
+		}
+
 		// Ctrl-C or SIGTERM cancels the upload, so the import deletes its
-		// partial volume instead of leaving it under the image's name
+		// partial volume instead of leaving it under the image's name. Once
+		// it has, the signals have their default effect again, so a second
+		// Ctrl-C ends foundry if the cleanup hangs.
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
+		go func() {
+			<-ctx.Done()
+			stop()
+		}()
 
 		// Connect to libvirt
 		client, err := libvirt.Connect("", 5*time.Second)
@@ -329,7 +341,7 @@ Examples:
 
 		// Import the image
 		if sourcePath == "-" {
-			err = mgr.ImportImageFromReader(ctx, cmd.InOrStdin(), imageName)
+			err = mgr.ImportImageFromReader(ctx, in, imageName)
 		} else {
 			err = mgr.ImportImage(ctx, sourcePath, imageName)
 		}
@@ -340,6 +352,17 @@ Examples:
 		fmt.Printf("✓ Image %s imported successfully\n", imageName)
 		return nil
 	},
+}
+
+// isTerminal reports whether r is a terminal or another character device,
+// where an image cannot come from: reading a terminal would wait for typing.
+func isTerminal(r io.Reader) bool {
+	f, ok := r.(*os.File)
+	if !ok {
+		return false
+	}
+	info, err := f.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
 var imageListCmd = &cobra.Command{

@@ -41,11 +41,10 @@ func CheckImageName(imageName string) error {
 // (checkQCOW2Header). The file must be a regular file (a symlink to one is
 // followed) or a pipe, which is read as ImportImageFromReader reads. A
 // directory or a device is refused before it is opened: its size is not the
-// size of what it would stream, and opening some devices does something. The
-// file is streamed to libvirt, not read
-// into memory, and if it ends before the size it had when it was opened, the
-// import fails. On any failure after the volume is created, the volume is
-// deleted.
+// size of what it would stream, and opening some devices does something.
+// The file is streamed to libvirt, not read into memory, and if it ends
+// before the size it had when it was opened, the import fails. On any
+// failure after the volume is created, the volume is deleted.
 func (m *Manager) ImportImage(ctx context.Context, filePath, imageName string) error {
 	if err := CheckImageName(imageName); err != nil {
 		return err
