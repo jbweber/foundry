@@ -17,10 +17,11 @@ import (
 	"github.com/jbweber/foundry/internal/storage"
 )
 
-const (
-	// shutdownTimeout is how long to wait for graceful shutdown before forcing.
-	shutdownTimeout = 5 * time.Second
+// shutdownTimeout is how long to wait for graceful shutdown before forcing.
+// A variable so tests can shorten it.
+var shutdownTimeout = 5 * time.Second
 
+const (
 	// Domain states (from libvirt VIR_DOMAIN_* constants)
 	domainStateRunning = 1
 	domainStateShutoff = 5
@@ -31,8 +32,9 @@ const (
 // This orchestrates the entire VM destruction process:
 //  1. Check if VM exists and is foundry's (its spec is in the domain's metadata)
 //  2. Get VM state
-//  3. Graceful shutdown if running (5s timeout)
-//  4. Force destroy if still running
+//  3. Stop it in any state but shut off: graceful shutdown (5s timeout),
+//     or at once a forced destroy when paused, suspended or crashed
+//  4. Force destroy if still not shut off
 //  5. Undefine domain (with NVRAM cleanup for UEFI VMs)
 //  6. Delete the VM's storage volumes (see vmVolumes)
 //
@@ -44,7 +46,9 @@ const (
 // but the operation continues.
 //
 // Returns an error if the VM doesn't exist, is refused, or if critical libvirt
-// operations fail.
+// operations fail. A VM that cannot be stopped, or whose state cannot be
+// read, is an error with its definition and volumes left as they are, also
+// with force.
 func Destroy(ctx context.Context, vmName string, force bool) error {
 	// Connect to libvirt
 	log.Printf("Connecting to libvirt...")
@@ -109,58 +113,14 @@ func destroyWithDeps(ctx context.Context, vmName string, lv LibvirtClient, sm st
 		return fmt.Errorf("failed to get VM state: %w", err)
 	}
 
-	// Step 3: Graceful shutdown if running
-	needsForceDestroy := false
-	if state == domainStateRunning {
-		log.Printf("VM is running, attempting graceful shutdown...")
-		if err := lv.DomainShutdown(domain); err != nil {
-			log.Printf("Warning: graceful shutdown failed: %v", err)
-			needsForceDestroy = true
-		} else {
-			// Wait for shutdown with timeout
-			log.Printf("Waiting up to %v for graceful shutdown...", shutdownTimeout)
-			shutdownCtx, cancel := context.WithTimeout(ctx, shutdownTimeout)
-			defer cancel()
-
-			// Poll for shutdown
-			ticker := time.NewTicker(500 * time.Millisecond)
-			defer ticker.Stop()
-
-			shutdownSucceeded := false
-			for !shutdownSucceeded {
-				select {
-				case <-shutdownCtx.Done():
-					// Timeout - will force destroy below
-					log.Printf("Graceful shutdown timed out")
-					needsForceDestroy = true
-					shutdownSucceeded = true // exit loop
-				case <-ticker.C:
-					currentState, _, err := lv.DomainGetState(domain, 0)
-					if err != nil {
-						log.Printf("Warning: failed to check shutdown state: %v", err)
-						needsForceDestroy = true
-						shutdownSucceeded = true // exit loop
-					} else if currentState == domainStateShutoff {
-						log.Printf("VM shut down gracefully")
-						shutdownSucceeded = true // exit loop
-					}
-				}
-			}
-		}
-	}
-
-	// Step 4: Force destroy if still running
-	if needsForceDestroy {
-		// Check state one more time
-		currentState, _, err := lv.DomainGetState(domain, 0)
-		if err != nil {
-			log.Printf("Warning: failed to check state before destroy: %v", err)
-		}
-		if err == nil && currentState == domainStateRunning {
-			log.Printf("Force destroying VM...")
-			if err := lv.DomainDestroy(domain); err != nil {
-				log.Printf("Warning: force destroy failed: %v", err)
-			}
+	// Steps 3-4: stop the domain in any state but shut off (running,
+	// blocked, paused, shutting down, crashed, suspended): undefining an
+	// active domain does not stop it, it only makes it transient, and its
+	// disks would be deleted under it. One that cannot be stopped is an
+	// error, with the definition and volumes left as they are.
+	if state != domainStateShutoff {
+		if err := stopActiveDomain(ctx, lv, domain, state, shutdownTimeout); err != nil {
+			return fmt.Errorf("VM '%s' could not be stopped, nothing deleted: %w", vmName, err)
 		}
 	}
 
@@ -287,3 +247,83 @@ func deleteVolumes(ctx context.Context, sm storageManager, volumes []poolVolume)
 // while preserving data disks. This would be useful for OS upgrades without data loss.
 // Workflow: stop VM → delete boot volume → delete cloudinit volume → recreate both →
 // redefine domain → start VM. Data volumes remain untouched.
+
+// stopActiveDomain stops a domain that is not shut off. A paused,
+// suspended (pmsuspended) or crashed guest cannot answer the ACPI power
+// button, so it is destroyed at once; in any other state it gets the
+// graceful shutdown of stopDomain first.
+func stopActiveDomain(ctx context.Context, lv LibvirtClient, domain libvirt.Domain, state int32, timeout time.Duration) error {
+	switch libvirt.DomainState(state) {
+	case libvirt.DomainPaused, libvirt.DomainPmsuspended, libvirt.DomainCrashed:
+		log.Printf("VM is %s; destroying it (it cannot shut down by itself)...", domainStateName(state))
+		if err := lv.DomainDestroy(domain); err != nil {
+			return fmt.Errorf("force destroy failed: %w", err)
+		}
+		return nil
+	}
+	return stopDomain(ctx, lv, domain, timeout)
+}
+
+// domainStateName names the libvirt domain states destroy reports.
+func domainStateName(state int32) string {
+	switch libvirt.DomainState(state) {
+	case libvirt.DomainPaused:
+		return "paused"
+	case libvirt.DomainPmsuspended:
+		return "suspended"
+	case libvirt.DomainCrashed:
+		return "crashed"
+	}
+	return fmt.Sprintf("in state %d", state)
+}
+
+// stopDomain stops a running domain: a graceful shutdown (ACPI power button),
+// up to timeout, then a forced destroy if it has not shut off by then. It
+// returns an error when the domain may still be running: the forced destroy
+// failed, or its state could not be read.
+func stopDomain(ctx context.Context, lv LibvirtClient, domain libvirt.Domain, timeout time.Duration) error {
+	log.Printf("VM is running, attempting graceful shutdown...")
+	if err := lv.DomainShutdown(domain); err != nil {
+		log.Printf("Warning: graceful shutdown failed: %v", err)
+	} else {
+		log.Printf("Waiting up to %v for graceful shutdown...", timeout)
+		shutdownCtx, cancel := context.WithTimeout(ctx, timeout)
+		defer cancel()
+
+		ticker := time.NewTicker(500 * time.Millisecond)
+		defer ticker.Stop()
+
+	wait:
+		for {
+			select {
+			case <-shutdownCtx.Done():
+				log.Printf("Graceful shutdown timed out")
+				break wait
+			case <-ticker.C:
+				currentState, _, err := lv.DomainGetState(domain, 0)
+				if err != nil {
+					log.Printf("Warning: failed to check shutdown state: %v", err)
+					break wait
+				}
+				if currentState == domainStateShutoff {
+					log.Printf("VM shut down gracefully")
+					return nil
+				}
+			}
+		}
+	}
+
+	// Force destroy if still not shut off
+	currentState, _, err := lv.DomainGetState(domain, 0)
+	if err != nil {
+		return fmt.Errorf("failed to check state before destroy: %w", err)
+	}
+	if currentState == domainStateShutoff {
+		return nil
+	}
+	log.Printf("Force destroying VM...")
+	if err := lv.DomainDestroy(domain); err != nil {
+		return fmt.Errorf("force destroy failed: %w", err)
+	}
+	return nil
+}

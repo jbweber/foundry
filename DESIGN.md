@@ -374,11 +374,16 @@ or an image.
 
 ```
 1. Check VM exists and is foundry's (refused otherwise, unless --force)
-2. Get domain info
-3. If running:
-   - Attempt graceful shutdown
-   - Wait 5 seconds
-   - If still running, force destroy
+2. Get domain state
+3. If not shut off (running, blocked, paused, shutting down, crashed,
+   suspended):
+   - Paused, suspended or crashed: force destroy at once (the guest cannot
+     answer the ACPI power button)
+   - Otherwise: attempt graceful shutdown, wait 5 seconds, and force destroy
+     if it is still not shut off
+   - If it cannot be stopped, or its state cannot be read: error, nothing
+     undefined or deleted (also with --force). Undefining an active domain
+     only makes it transient: it would keep running on deleted disks
 4. Undefine domain with NVRAM cleanup
 5. Delete storage volumes (foundry-vms, `<vm>_` prefix; the spec's own pool,
    by exact name)
