@@ -238,7 +238,8 @@ status:
 - At most one interface sets `defaultRoute`, and at most one sets `pxeBoot`
 - `spec.arch`, when set, is `x86_64` or `aarch64` (see [Guest Architecture](#guest-architecture))
 - `spec.cpuMode` is not `host-model` for an `aarch64` guest
-- `spec.firmware`, when set, has a `loader`; `secureBoot` only for x86_64;
+- `spec.firmware`, when set, has a `loader`; `secureBoot` (the varstore lock, not Secure Boot
+  checking) only for x86_64;
   `keys` and `nvramTemplate` not both; `keys` is 1-63 lowercase letters,
   digits and dashes, starting and ending with a letter or digit (see
   [UEFI Firmware and Secure Boot](#uefi-firmware-and-secure-boot))
@@ -540,7 +541,8 @@ or `--host-arch`.
 | Firmware | UEFI, auto-selected (OVMF) unless `spec.firmware` pins it | UEFI, auto-selected (AAVMF) unless `spec.firmware` pins it |
 | `<bios useserial>` | yes | no (libvirt refuses it off x86) |
 | Clock timers | rtc, pit, hpet | none (architected generic timer) |
-| Secure Boot (`spec.firmware.secureBoot`) | yes, with SMM | no (no SMM) |
+| Secure Boot checking (pinned loader and key profile) | yes | yes |
+| Varstore lock (`spec.firmware.secureBoot`) | yes, with emulated SMM | no (QEMU's `virt` machine has no SMM) |
 | Cloud-init CD-ROM | SATA (`sda`) | SCSI (`sda`) on a virtio-scsi controller; `virt` has no AHCI |
 | Serial console | isa-serial, guest `ttyS0` | system-serial (pl011), guest `ttyAMA0` |
 
@@ -589,13 +591,25 @@ firmware:
   varstore (`/var/lib/libvirt/qemu/nvram/<name>_VARS.fd`) on first start.
   Without it libvirt uses the template it pairs with the loader. `destroy`
   undefines with the NVRAM flag, so the VM's own varstore goes with it.
-- `secureBoot` marks the loader secure: only SMM code may write the varstore,
-  so the guest OS cannot change the enrolled keys. libvirt refuses
-  `secure='yes'` without `<smm state='on'/>`
+- `secureBoot` is libvirt's `secure='yes'` on the loader: the firmware locks
+  its varstore so that only firmware code, running in the VM's System
+  Management Mode (SMM), can change the enrolled keys, and the guest OS cannot,
+  even as root. libvirt refuses `secure='yes'` without `<smm state='on'/>`
   ([hypervisor features](https://libvirt.org/formatdomain.html#hypervisor-features)),
-  so foundry turns SMM on with it. SMM is x86-only, so validation refuses
-  `secureBoot` for aarch64; an aarch64 guest can still pin its loader and a
-  key profile.
+  so foundry turns SMM on with it. SMM here is virtual hardware that QEMU
+  emulates for x86 guests; QEMU's Arm `virt` machine has none, so libvirt can't
+  express the lock for an aarch64 guest and validation refuses `secureBoot`
+  there. See [Secure Boot on aarch64](#secure-boot-on-aarch64).
+
+**Secure Boot on aarch64**: the `secureBoot` field is the lock on the enrolled
+keys, not Secure Boot itself. An aarch64 guest with a pinned `loader` and a
+`keys` profile does Secure Boot checking: the keys are enrolled and the
+firmware enforces them on every boot. What it lacks is protection of those keys
+against a guest OS running as root, which can write the varstore through the
+firmware's runtime services. The way this is solved is a varstore kept by
+the host rather than by the guest's firmware: QEMU's `uefi-vars` device
+([QEMU: UEFI variable service](https://www.qemu.org/docs/master/devel/uefi-vars.html))
+holds the variables in QEMU and works without SMM. foundry does not use it.
 - `keys` names a **Secure Boot key profile**: a varstore with a PK, KEK, db
   and dbx enrolled, stored as the volume `varstore_<profile>_<arch>.fd` of the
   `foundry-images` pool. The architecture comes from `spec.arch` (x86_64 when
