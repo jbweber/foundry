@@ -70,6 +70,13 @@ const (
 
 	// MetadataKey is the key used to store/retrieve metadata from libvirt.
 	MetadataKey = "foundry-vm-spec"
+
+	// affectConfig is VIR_DOMAIN_AFFECT_CONFIG: the spec is kept in, and read
+	// from, the domain's persistent definition, the one that survives a stop
+	// (https://libvirt.org/html/libvirt-libvirt-domain.html#virDomainSetMetadata).
+	// Not "current" (0): on a running domain that is the live definition,
+	// which libvirt discards when the domain stops.
+	affectConfig = libvirt.DomainAffectConfig
 )
 
 // FoundryMetadata is the XML structure for storing VirtualMachine data in libvirt.
@@ -86,13 +93,27 @@ type FoundryMetadata struct {
 	SpecYAML string `xml:",chardata"`
 }
 
-// Store saves the VirtualMachine spec to libvirt domain metadata.
-// This allows the spec to persist with the VM itself.
-func (c *Client) Store(domain libvirt.Domain, vm *v1alpha1.VirtualMachine) error {
+// MaxRecordBytes bounds the stored spec record, the XML Encode returns.
+// libvirt's RPC protocol carries a string of at most 4 MiB (REMOTE_STRING_MAX,
+// https://gitlab.com/libvirt/libvirt/-/blob/v11.3.0/src/remote/remote_protocol.x):
+// a larger record fails DomainSetMetadata. Once stored, the record is also
+// part of the domain XML that DomainGetXMLDesc returns as one string, next to
+// the definition itself, which holds the spec's fw_cfg strings a second time;
+// a domain whose XML no longer fits in one RPC string can't be read back, so
+// list and destroy fail on it. 1.5 MiB for the record keeps the record and
+// the definition together well under 4 MiB. It sits above the 1 MiB that
+// input disk inline strings may total, so that limit still applies first.
+const MaxRecordBytes = 3 << 19
+
+// Encode returns the record Store writes for vm: its YAML as the text of the
+// metadata element. It refuses a record larger than MaxRecordBytes, counted
+// as stored (escaping included), so callers can check a spec before anything
+// is created.
+func Encode(vm *v1alpha1.VirtualMachine) (string, error) {
 	// Serialize the entire VirtualMachine (including TypeMeta, ObjectMeta, Spec) to YAML
 	yamlData, err := v1alpha1.EncodeYAML(vm)
 	if err != nil {
-		return fmt.Errorf("failed to marshal VM spec to YAML: %w", err)
+		return "", fmt.Errorf("failed to marshal VM spec to YAML: %w", err)
 	}
 
 	// Wrap in XML structure
@@ -104,18 +125,30 @@ func (c *Client) Store(domain libvirt.Domain, vm *v1alpha1.VirtualMachine) error
 	// Marshal to XML
 	xmlData, err := xml.MarshalIndent(metadata, "  ", "  ")
 	if err != nil {
-		return fmt.Errorf("failed to marshal metadata to XML: %w", err)
+		return "", fmt.Errorf("failed to marshal metadata to XML: %w", err)
+	}
+	if len(xmlData) > MaxRecordBytes {
+		return "", fmt.Errorf("the spec takes %d bytes as stored in the domain's metadata, at most %d (1.5 MiB) are allowed: "+
+			"inline content (cloud-init user data, input disk and fw_cfg strings, annotations) is too large", len(xmlData), MaxRecordBytes)
+	}
+	return string(xmlData), nil
+}
+
+// Store saves the VirtualMachine spec to the domain's persistent definition,
+// replacing any earlier value, so the spec stays with the VM across stops.
+func (c *Client) Store(domain libvirt.Domain, vm *v1alpha1.VirtualMachine) error {
+	record, err := Encode(vm)
+	if err != nil {
+		return err
 	}
 
-	// Set metadata on domain
-	// flags: 0 = replace existing metadata
 	err = c.client.DomainSetMetadata(
 		domain,
 		int32(libvirt.DomainMetadataElement), // Type: custom XML element
-		libvirt.OptString{string(xmlData)},
+		libvirt.OptString{record},
 		libvirt.OptString{MetadataKey}, // Key for our metadata
 		libvirt.OptString{MetadataNamespace},
-		libvirt.DomainModificationImpact(0), // flags: replace
+		affectConfig,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to set libvirt domain metadata: %w", err)
@@ -132,7 +165,8 @@ func IsNotFound(err error) bool {
 	return errors.As(err, &le) && le.Code == uint32(libvirt.ErrNoDomainMetadata)
 }
 
-// Load retrieves the VirtualMachine spec from libvirt domain metadata.
+// Load retrieves the VirtualMachine spec from the domain's persistent
+// definition, where Store keeps it, whether the domain runs or not.
 // Returns the full VirtualMachine object with spec populated.
 func (c *Client) Load(domain libvirt.Domain) (*v1alpha1.VirtualMachine, error) {
 	// Get metadata from domain
@@ -140,7 +174,7 @@ func (c *Client) Load(domain libvirt.Domain) (*v1alpha1.VirtualMachine, error) {
 		domain,
 		int32(libvirt.DomainMetadataElement),
 		libvirt.OptString{MetadataNamespace},
-		libvirt.DomainModificationImpact(0), // flags
+		affectConfig,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get libvirt domain metadata: %w", err)
@@ -173,14 +207,15 @@ func (c *Client) Update(domain libvirt.Domain, vm *v1alpha1.VirtualMachine) erro
 // Delete removes Foundry metadata from a domain.
 // This is typically called during VM destruction cleanup.
 func (c *Client) Delete(domain libvirt.Domain) error {
-	// Setting empty string with flags=1 removes the metadata
+	// Setting an empty string removes the metadata, from the persistent
+	// definition where Store keeps it
 	err := c.client.DomainSetMetadata(
 		domain,
 		int32(libvirt.DomainMetadataElement),
 		libvirt.OptString{""}, // empty string removes metadata
 		libvirt.OptString{MetadataKey},
 		libvirt.OptString{MetadataNamespace},
-		libvirt.DomainModificationImpact(1), // flags: remove
+		affectConfig,
 	)
 	if err != nil {
 		// Ignore "not found" errors - metadata may not exist
@@ -190,13 +225,13 @@ func (c *Client) Delete(domain libvirt.Domain) error {
 	return nil
 }
 
-// Exists checks if Foundry metadata exists for a domain.
+// Exists checks if Foundry metadata exists in a domain's persistent definition.
 func (c *Client) Exists(domain libvirt.Domain) bool {
 	_, err := c.client.DomainGetMetadata(
 		domain,
 		int32(libvirt.DomainMetadataElement),
 		libvirt.OptString{MetadataNamespace},
-		libvirt.DomainModificationImpact(0),
+		affectConfig,
 	)
 	return err == nil
 }

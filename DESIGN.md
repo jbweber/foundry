@@ -300,6 +300,8 @@ pool's directory. It costs reading the whole image once per create.
 
 **Runtime validation (during VM creation):**
 - VM name doesn't conflict with existing domain
+- The spec as stored in the domain's metadata takes at most 1.5 MiB, checked before anything
+  is made (see [Spec size](#spec-size))
 - No input disk volume exists yet; each `inputDisks` `file` is a regular file, and the files of
   one disk hold at most 16 MiB
 - Boot disk image exists (unless empty: true)
@@ -339,9 +341,34 @@ pool's directory. It costs reading the whole image once per create.
    - Cloud-init CDROM, input disk CDROMs
    - Serial console
 7. Define domain in libvirt
+7b. Store the spec in the domain's metadata (persistent definition); a failed
+   store fails the create, and the domain and volumes are removed
 8. Set autostart flag
 9. Start domain
 ```
+
+#### Where the spec is stored
+
+The spec is stored with the domain, as a custom metadata element, in the
+domain's **persistent definition** (`VIR_DOMAIN_AFFECT_CONFIG`), and read
+back from there. It is stored right after the define, before the domain
+starts: on a running domain, libvirt's default ("current") would write only
+the live definition, which libvirt discards when the domain stops, and the VM
+would then look like one foundry did not make. A VM whose spec cannot be
+stored is not created.
+
+#### Spec size
+
+The stored record (the spec as YAML, as the XML text of the metadata element,
+escaping included) may take at most 1.5 MiB; a larger spec fails before any
+volume or domain is made. libvirt's RPC protocol carries a string of at most
+4 MiB (`REMOTE_STRING_MAX`): a larger record cannot be stored, and once
+stored, the record is part of the domain XML that libvirt returns as one
+string next to the definition itself, which holds the fw_cfg strings a second
+time. 1.5 MiB keeps both together well under 4 MiB, so list and destroy can
+always read the domain. Everything inline counts: cloud-init user data, input
+disk and fw_cfg strings, annotations. Larger content belongs in a `file` entry
+or an image.
 
 ### VM Destruction Workflow
 
@@ -805,10 +832,8 @@ through the libvirt API: foundry writes no file on the hypervisor.
   duplicate target at define). The files of one
   disk may hold 16 MiB, since the image is built in memory and these disks are
   for small inputs, not payloads (those belong in an image). Inline `string`
-  content may total 1 MiB: the spec, inline content included, is stored in
-  the domain's metadata, and libvirt takes at most 4 MiB in one string over
-  its RPC protocol, so a larger spec would start the VM and then fail to store
-  its metadata.
+  content may total 1 MiB, within the bound on the whole stored spec (see
+  [Spec size](#spec-size)).
 - **What a `file` can name.** foundry reads it with the permissions of the
   user running foundry and hands its content to the guest, so only run specs
   from people who may read that file as that user. It must be a regular file:

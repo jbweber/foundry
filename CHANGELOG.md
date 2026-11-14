@@ -66,6 +66,20 @@ git history.
 
 ### Fixed
 
+- The spec is stored in the domain's persistent definition (`VIR_DOMAIN_AFFECT_CONFIG`), right after the
+  define and before the VM starts, and read back from there. It was stored after the start with libvirt's
+  default, which on a running domain writes only the live definition: the spec was gone at the VM's first
+  stop, and `destroy` then refused the VM as not foundry's. A spec that cannot be stored now fails the
+  create, which removes the domain and the volumes it made; it was only a warning.
+- The spec as stored in the domain's metadata may take at most 1.5 MiB, checked before anything is made.
+  Inline content other than input disk strings (cloud-init user data, fw_cfg strings, annotations) had no
+  bound, so a spec too large for libvirt to store created and started a VM without its spec.
+- Upgrading: VMs created by earlier versions have their spec only in the live definition. While running they
+  are now refused by `destroy` as not foundry's and shown by `list` and `get` without their spec; after
+  their first stop they have no spec at all. Remove such VMs with `foundry destroy --force`, which
+  deletes their volumes in foundry-vms only: volumes of a VM whose `spec.storagePool` was another pool must
+  be deleted by hand (their names start with `<vm>_`, for example with `virsh vol-delete --pool <pool>
+  <volume>`). Recreate the VM from its spec file to manage it with foundry again.
 - The spec is stored in the domain's metadata as escaped XML text. A spec whose strings held `&` or `<` (a
   shell script in `rawUserData`) made invalid XML, so the VM started and was left without its stored spec.
 - A spec holding a string of several lines that starts with a tab (in user data, an input file, a fw_cfg

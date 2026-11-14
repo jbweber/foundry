@@ -107,7 +107,7 @@ func verifyImageDigest(ctx context.Context, vm *v1alpha1.VirtualMachine, sm stor
 //  2. Connect to libvirt
 //  3. Pre-flight checks (VM exists, disk space, etc.)
 //  4. Create storage (disks, cloud-init ISO, input disks)
-//  5. Define domain in libvirt
+//  5. Define domain in libvirt and store the spec in it
 //  6. Set autostart and start VM
 //
 // On any failure, attempts to clean up partially created resources.
@@ -182,6 +182,13 @@ func createFromConfigWithDeps(ctx context.Context, vm *v1alpha1.VirtualMachine, 
 		return createErr
 	}
 	// Note: DomainLookupByName returns error if not found (which is what we want)
+
+	// Step 1b: The spec must fit in the domain's metadata, where it is stored
+	// after the define; checked now so a spec too large to store fails
+	// before anything is made
+	if _, createErr = metadata.Encode(vm); createErr != nil {
+		return createErr
+	}
 
 	// Step 2: Check if boot volume already exists (pre-flight check)
 	log.Printf("Checking if boot volume already exists...")
@@ -351,6 +358,15 @@ func createFromConfigWithDeps(ctx context.Context, vm *v1alpha1.VirtualMachine, 
 	}
 	domainDefined = true
 
+	// Step 10b: Store the VM's spec in the domain's persistent definition,
+	// before the domain starts: the domain is foundry's from the moment it
+	// exists, and a VM foundry cannot store the spec of is not created (it
+	// would be one destroy refuses as not foundry's)
+	log.Printf("Storing VM metadata...")
+	if createErr = mc.Store(domain, vm); createErr != nil {
+		return fmt.Errorf("failed to store VM metadata: %w", createErr)
+	}
+
 	// Step 11: Set autostart
 	autostartValue := 1
 	if vm.Spec.Autostart != nil && !*vm.Spec.Autostart {
@@ -365,13 +381,6 @@ func createFromConfigWithDeps(ctx context.Context, vm *v1alpha1.VirtualMachine, 
 	log.Printf("Starting VM...")
 	if createErr = lv.DomainCreate(domain); createErr != nil {
 		return fmt.Errorf("failed to start domain: %w", createErr)
-	}
-
-	// Step 13: Store VM metadata in libvirt domain
-	log.Printf("Storing VM metadata...")
-	if createErr = mc.Store(domain, vm); createErr != nil {
-		log.Printf("Warning: failed to store VM metadata: %v", createErr)
-		// Don't fail the creation if metadata storage fails - VM is already running
 	}
 
 	log.Printf("VM '%s' created successfully!", vm.Name)

@@ -3,6 +3,7 @@ package metadata
 import (
 	"encoding/xml"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/digitalocean/go-libvirt"
@@ -22,6 +23,7 @@ type mockLibvirtClient struct {
 	lastSetKey       string
 	lastSetURI       string
 	lastSetFlags     libvirt.DomainModificationImpact
+	lastGetFlags     libvirt.DomainModificationImpact
 	setMetadataCalls int
 	getMetadataCalls int
 }
@@ -56,6 +58,7 @@ func (m *mockLibvirtClient) DomainGetMetadata(
 	flags libvirt.DomainModificationImpact,
 ) (string, error) {
 	m.getMetadataCalls++
+	m.lastGetFlags = flags
 	return m.getMetadataValue, m.getMetadataError
 }
 
@@ -136,8 +139,8 @@ func TestStore_ValidVM(t *testing.T) {
 		t.Errorf("Expected URI %q, got %q", MetadataNamespace, mock.lastSetURI)
 	}
 
-	if mock.lastSetFlags != 0 {
-		t.Errorf("Expected flags 0 (replace), got %d", mock.lastSetFlags)
+	if mock.lastSetFlags != libvirt.DomainAffectConfig {
+		t.Errorf("Expected flags %d (VIR_DOMAIN_AFFECT_CONFIG, the persistent definition), got %d", libvirt.DomainAffectConfig, mock.lastSetFlags)
 	}
 
 	// Verify the XML can be parsed back
@@ -594,8 +597,8 @@ func TestDelete_Success(t *testing.T) {
 		t.Errorf("Expected URI %q, got %q", MetadataNamespace, mock.lastSetURI)
 	}
 
-	if mock.lastSetFlags != 1 {
-		t.Errorf("Expected flags 1 (remove), got %d", mock.lastSetFlags)
+	if mock.lastSetFlags != libvirt.DomainAffectConfig {
+		t.Errorf("Expected flags %d (VIR_DOMAIN_AFFECT_CONFIG, the persistent definition), got %d", libvirt.DomainAffectConfig, mock.lastSetFlags)
 	}
 }
 
@@ -812,5 +815,70 @@ func TestRoundTrip_MultiLineStringsMarshalLoses(t *testing.T) {
 		if got.Annotations["note"] != s {
 			t.Errorf("%q: annotation reads back as %q", s, got.Annotations["note"])
 		}
+	}
+}
+
+// TestLoad_ReadsPersistentDefinition tests that Load reads the spec from the
+// domain's persistent definition, where Store keeps it, also while the
+// domain runs.
+func TestLoad_ReadsPersistentDefinition(t *testing.T) {
+	mock := &mockLibvirtClient{}
+	client := NewClient(mock)
+	if err := client.Store(libvirt.Domain{}, newTestVM("test-vm")); err != nil {
+		t.Fatalf("Store() failed: %v", err)
+	}
+	mock.getMetadataValue = mock.lastSetMetadata
+	if _, err := client.Load(libvirt.Domain{}); err != nil {
+		t.Fatalf("Load() failed: %v", err)
+	}
+	if mock.lastGetFlags != libvirt.DomainAffectConfig {
+		t.Errorf("Load read with flags %d, want %d (VIR_DOMAIN_AFFECT_CONFIG)", mock.lastGetFlags, libvirt.DomainAffectConfig)
+	}
+	client.Exists(libvirt.Domain{})
+	if mock.lastGetFlags != libvirt.DomainAffectConfig {
+		t.Errorf("Exists read with flags %d, want %d (VIR_DOMAIN_AFFECT_CONFIG)", mock.lastGetFlags, libvirt.DomainAffectConfig)
+	}
+}
+
+// TestEncode_Bound tests that a record at most MaxRecordBytes is accepted and
+// a larger one refused, counted as stored (escaping included), and that
+// Store refuses it without calling libvirt.
+func TestEncode_Bound(t *testing.T) {
+	vm := newTestVM("test-vm")
+	vm.Spec.CloudInit = &v1alpha1.CloudInitSpec{}
+	// Fill the user data so the record is exactly MaxRecordBytes ("a" is
+	// stored as one byte; the rawUserData line is added once)
+	vm.Spec.CloudInit.RawUserData = "a"
+	withOne, err := Encode(vm)
+	if err != nil {
+		t.Fatalf("Encode() failed: %v", err)
+	}
+	overhead := len(withOne) - 1
+	vm.Spec.CloudInit.RawUserData = strings.Repeat("a", MaxRecordBytes-overhead)
+	got, err := Encode(vm)
+	if err != nil {
+		t.Fatalf("record of %d bytes refused: %v", MaxRecordBytes, err)
+	}
+	if len(got) != MaxRecordBytes {
+		t.Fatalf("test setup: record is %d bytes, want %d", len(got), MaxRecordBytes)
+	}
+
+	vm.Spec.CloudInit.RawUserData += "a"
+	if _, err := Encode(vm); err == nil {
+		t.Errorf("record of %d bytes accepted, at most %d allowed", MaxRecordBytes+1, MaxRecordBytes)
+	}
+
+	// Escaping counts: "&" is stored as "&amp;"
+	vm.Spec.CloudInit.RawUserData = strings.Repeat("&", MaxRecordBytes/4)
+	if _, err := Encode(vm); err == nil {
+		t.Error("record whose escaped size exceeds the bound accepted")
+	}
+
+	mock := &mockLibvirtClient{}
+	if err := NewClient(mock).Store(libvirt.Domain{}, vm); err == nil {
+		t.Error("Store() accepted an oversize record")
+	}
+	if mock.setMetadataCalls != 0 {
+		t.Errorf("Store() called libvirt %d times for an oversize record", mock.setMetadataCalls)
 	}
 }

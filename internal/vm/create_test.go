@@ -852,10 +852,15 @@ func TestCleanupWithDeps_WithCloudInit(t *testing.T) {
 	}
 }
 
-// TestCreateFromConfigWithDeps_MetadataStoreFailure tests metadata storage failure (non-fatal)
+// TestCreateFromConfigWithDeps_MetadataStoreFailure tests that a spec that
+// cannot be stored fails the create: the VM is never started, the domain is
+// undefined and the volumes are deleted from the VM's own pool. A VM left
+// without its spec is one destroy refuses as not foundry's, and a forced
+// destroy only looks in foundry-vms.
 func TestCreateFromConfigWithDeps_MetadataStoreFailure(t *testing.T) {
 	ctx := context.Background()
 	vm := testVMConfig()
+	vm.Spec.StoragePool = "fast"
 	lv := newMockLibvirtClient()
 	sm := newMockStorageManager()
 
@@ -864,16 +869,82 @@ func TestCreateFromConfigWithDeps_MetadataStoreFailure(t *testing.T) {
 		return errors.New("metadata storage failed")
 	}
 
-	// Should succeed despite metadata failure (it's just a warning)
 	err := createFromConfigWithDeps(ctx, vm, lv, sm, newMockMetadataClient(lv))
-
-	if err != nil {
-		t.Fatalf("expected success (metadata failure is non-fatal), got error: %v", err)
+	if err == nil {
+		t.Fatal("expected create to fail when the spec cannot be stored")
 	}
+	if !strings.Contains(err.Error(), "failed to store VM metadata") {
+		t.Errorf("expected a metadata store error, got: %v", err)
+	}
+	if len(lv.domainCreateCalls) != 0 {
+		t.Error("domain was started although its spec could not be stored")
+	}
+	if len(lv.domainUndefineCalls)+len(lv.domainUndefineFlagsCalls) == 0 {
+		t.Error("domain was not undefined after the failed store")
+	}
+	want := "fast/" + getBootVolumeName(vm)
+	found := false
+	for _, c := range sm.deleteVolumeCalls {
+		if c == want {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("boot volume %s not deleted; deletes: %v", want, sm.deleteVolumeCalls)
+	}
+}
 
-	// Verify domain was created
-	if len(lv.domainCreateCalls) != 1 {
-		t.Error("expected domain to be created despite metadata failure")
+// TestCreateFromConfigWithDeps_StoresSpecInPersistentDefinition tests that
+// the spec is stored in the domain's persistent definition, and before the
+// domain starts. Stored with "current" on a running domain it would go into
+// the live definition only, which libvirt discards when the VM stops.
+func TestCreateFromConfigWithDeps_StoresSpecInPersistentDefinition(t *testing.T) {
+	lv := newMockLibvirtClient()
+	var flags []libvirt.DomainModificationImpact
+	startedBeforeStore := false
+	lv.domainSetMetadataFunc = func(_ libvirt.Domain, _ int32, _ libvirt.OptString, _ libvirt.OptString, _ libvirt.OptString, f libvirt.DomainModificationImpact) error {
+		flags = append(flags, f)
+		if len(lv.domainCreateCalls) > 0 {
+			startedBeforeStore = true
+		}
+		return nil
+	}
+	sm := newMockStorageManager()
+	if err := createFromConfigWithDeps(context.Background(), testVMConfig(), lv, sm, newMockMetadataClient(lv)); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if len(flags) != 1 {
+		t.Fatalf("expected the spec stored once, got %d stores", len(flags))
+	}
+	if flags[0]&libvirt.DomainAffectConfig == 0 {
+		t.Errorf("spec stored with flags %d, without VIR_DOMAIN_AFFECT_CONFIG: lost when the VM stops", flags[0])
+	}
+	if startedBeforeStore {
+		t.Error("spec stored after the domain was started")
+	}
+}
+
+// TestCreateFromConfigWithDeps_OversizeSpecFailsEarly tests that a spec too
+// large to store in the domain's metadata fails before any volume or domain
+// is made, rather than leaving a VM without its spec.
+func TestCreateFromConfigWithDeps_OversizeSpecFailsEarly(t *testing.T) {
+	vm := testVMConfig()
+	vm.Spec.CloudInit = &v1alpha1.CloudInitSpec{
+		RawUserData: "#cloud-config\n# " + strings.Repeat("a", 2<<20),
+	}
+	lv := newMockLibvirtClient()
+	sm := newMockStorageManager()
+
+	err := createFromConfigWithDeps(context.Background(), vm, lv, sm, newMockMetadataClient(lv))
+	if err == nil {
+		t.Fatal("expected create to fail for a spec larger than the metadata bound")
+	}
+	if !strings.Contains(err.Error(), "at most") {
+		t.Errorf("expected a size error, got: %v", err)
+	}
+	if len(sm.createVolumeCalls) != 0 || len(lv.domainDefineXMLCalls) != 0 || len(lv.domainCreateCalls) != 0 {
+		t.Errorf("made volumes %v / defined %d / started %d before refusing the spec",
+			sm.createVolumeCalls, len(lv.domainDefineXMLCalls), len(lv.domainCreateCalls))
 	}
 }
 
