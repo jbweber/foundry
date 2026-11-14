@@ -99,6 +99,10 @@ func TestValidateSpec_FwCfg(t *testing.T) {
 			{Name: "opt/a", String: "1"},
 			{Name: "opt/a", String: "2"},
 		}, wantErr: `spec.fwCfg[1].name "opt/a" is duplicated`},
+		// libvirt passes a string entry to QEMU as one argument, which exec
+		// takes up to 128 KiB long
+		{name: "string at the limit", entries: []v1alpha1.FwCfgEntrySpec{{Name: "opt/a", String: strings.Repeat("x", fwCfgMaxString)}}},
+		{name: "string over the limit", entries: []v1alpha1.FwCfgEntrySpec{{Name: "opt/a", String: strings.Repeat("x", fwCfgMaxString+1)}}, wantErr: "spec.fwCfg[0].string is 130945 bytes; at most 130944 fit in the QEMU argument libvirt passes it in, put larger content in a file"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

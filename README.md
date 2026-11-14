@@ -167,7 +167,8 @@ spec:
       file: /srv/config.json  # a file on the hypervisor
 ```
 
-fw_cfg names are at most 55 characters (QEMU's limit). A `file` entry gives the
+fw_cfg names are at most 55 characters (QEMU's limit), and a `string` is at most
+128 KiB less 128 bytes (larger content goes in a `file`). A `file` entry gives the
 guest the content of a file on the hypervisor, and libvirt relabels the file so
 QEMU can read it: only use specs from people who may read that file as root.
 `smbios.uuid` can't change on an existing VM (libvirt keeps a domain's UUID);
