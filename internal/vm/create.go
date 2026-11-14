@@ -3,6 +3,7 @@ package vm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -159,18 +160,23 @@ func CreateFromConfig(ctx context.Context, vm *v1alpha1.VirtualMachine) error {
 
 // createFromConfigWithDeps creates a VM with injected dependencies.
 // This allows for testing by accepting interfaces instead of concrete types.
-func createFromConfigWithDeps(ctx context.Context, vm *v1alpha1.VirtualMachine, lv LibvirtClient, sm storageManager, mc *metadata.Client) error {
+func createFromConfigWithDeps(ctx context.Context, vm *v1alpha1.VirtualMachine, lv LibvirtClient, sm storageManager, mc *metadata.Client) (retErr error) {
 	// State tracking for cleanup
 	var (
-		domainDefined  bool
-		storageCreated bool
+		domainDefined bool
+		// made lists the volumes this create made, in the VM's pool, as it
+		// makes them: a failed create deletes these and nothing else
+		made []string
 	)
 
-	// Setup cleanup function that runs on error
+	// Setup cleanup function that runs on error. What the cleanup could not
+	// remove is added to the create's error, so it is not left unnoticed
 	var createErr error
 	defer func() {
 		if createErr != nil {
-			cleanupWithDeps(ctx, vm, sm, lv, domainDefined, storageCreated)
+			if err := cleanupWithDeps(ctx, vm, sm, lv, domainDefined, made); err != nil {
+				retErr = fmt.Errorf("%w; cleanup incomplete: %w", retErr, err)
+			}
 		}
 	}()
 
@@ -190,14 +196,10 @@ func createFromConfigWithDeps(ctx context.Context, vm *v1alpha1.VirtualMachine, 
 		return createErr
 	}
 
-	// Step 2: Check if boot volume already exists (pre-flight check)
-	log.Printf("Checking if boot volume already exists...")
-	exists, createErr := sm.VolumeExists(ctx, getStoragePool(vm), getBootVolumeName(vm))
-	if createErr != nil {
-		return fmt.Errorf("failed to check boot volume: %w", createErr)
-	}
-	if exists {
-		createErr = fmt.Errorf("boot volume already exists: %s/%s", getStoragePool(vm), getBootVolumeName(vm))
+	// Step 2: Check that none of the VM's boot, data and cloud-init volumes
+	// exists yet (pre-flight check; input volumes are checked in step 2c)
+	log.Printf("Checking that the VM's volumes do not exist yet...")
+	if createErr = checkVolumesAbsent(ctx, vm, sm); createErr != nil {
 		return createErr
 	}
 
@@ -274,7 +276,7 @@ func createFromConfigWithDeps(ctx context.Context, vm *v1alpha1.VirtualMachine, 
 	if createErr = sm.CreateVolume(ctx, getStoragePool(vm), bootSpec); createErr != nil {
 		return fmt.Errorf("failed to create boot volume: %w", createErr)
 	}
-	storageCreated = true
+	made = append(made, bootSpec.Name)
 
 	// Step 5: Create data disk volumes
 	for _, dataDisk := range vm.Spec.DataDisks {
@@ -288,6 +290,7 @@ func createFromConfigWithDeps(ctx context.Context, vm *v1alpha1.VirtualMachine, 
 		if createErr = sm.CreateVolume(ctx, getStoragePool(vm), dataSpec); createErr != nil {
 			return fmt.Errorf("failed to create data volume %s: %w", dataDisk.Device, createErr)
 		}
+		made = append(made, dataSpec.Name)
 	}
 
 	// Step 6: Generate and create cloud-init ISO volume (if configured)
@@ -317,6 +320,7 @@ func createFromConfigWithDeps(ctx context.Context, vm *v1alpha1.VirtualMachine, 
 		if createErr = sm.CreateVolume(ctx, getStoragePool(vm), cloudInitSpec); createErr != nil {
 			return fmt.Errorf("failed to create cloud-init volume: %w", createErr)
 		}
+		made = append(made, cloudInitSpec.Name)
 
 		log.Printf("Writing cloud-init data to volume...")
 		if createErr = sm.WriteVolumeData(ctx, getStoragePool(vm), getCloudInitVolumeName(vm), isoData); createErr != nil {
@@ -327,7 +331,7 @@ func createFromConfigWithDeps(ctx context.Context, vm *v1alpha1.VirtualMachine, 
 	}
 
 	// Step 7: Create the input disk volumes and upload their images
-	if createErr = createInputVolumes(ctx, vm, sm, inputImages); createErr != nil {
+	if createErr = createInputVolumes(ctx, vm, sm, inputImages, &made); createErr != nil {
 		return createErr
 	}
 
@@ -424,69 +428,110 @@ func resolveKeyProfile(ctx context.Context, vm *v1alpha1.VirtualMachine, sm stor
 	return &resolved, nil
 }
 
-// cleanupWithDeps attempts to clean up all VM resources on failure.
-// This version accepts interfaces for testing.
+// cleanupWithDeps removes the VM resources a failed create made: the
+// domain, if it was defined, and the volumes in made (names in the VM's
+// pool). This version accepts interfaces for testing.
 //
-// This is best-effort: it logs errors but continues trying to clean up
-// as much as possible. It never returns an error.
-func cleanupWithDeps(ctx context.Context, vm *v1alpha1.VirtualMachine, sm storageManager, lv LibvirtClient, domainDefined, storageCreated bool) {
+// It carries on past a failure where that is safe, and returns an error that
+// says what was left behind. A domain that may still be running (it could
+// not be stopped, or its state could not be read) is left defined with all
+// its volumes: undefining an active domain only makes it transient, and its
+// disks would be deleted under it. Such a VM's spec is stored, so
+// `foundry destroy` removes it once it can be stopped.
+func cleanupWithDeps(ctx context.Context, vm *v1alpha1.VirtualMachine, sm storageManager, lv LibvirtClient, domainDefined bool, made []string) error {
 	log.Printf("Cleaning up after failed VM creation...")
+	var left []string
 
-	// Clean up libvirt domain if it was defined
 	if domainDefined && lv != nil {
-		log.Printf("Undefining domain '%s'...", vm.Name)
-		domain, err := lv.DomainLookupByName(vm.Name)
-		if err != nil {
-			log.Printf("Warning: failed to lookup domain for cleanup: %v", err)
-		} else {
-			// Try to destroy (force stop) if running
-			if err := lv.DomainDestroy(domain); err != nil {
-				// Ignore error - domain might not be running
-				log.Printf("Note: domain was not running (this is normal): %v", err)
+		if err := removeDomain(lv, vm.Name); err != nil {
+			if errors.Is(err, errDomainMayRun) {
+				for _, name := range made {
+					left = append(left, fmt.Sprintf("volume %s/%s", getStoragePool(vm), name))
+				}
+				return fmt.Errorf("%w; left in place: %s (remove with 'foundry destroy %s')", err, strings.Join(left, ", "), vm.Name)
 			}
-
-			// Undefine the domain
-			if err := lv.DomainUndefine(domain); err != nil {
-				log.Printf("Warning: failed to undefine domain: %v", err)
-			} else {
-				log.Printf("Domain undefined successfully")
-			}
+			left = append(left, err.Error())
 		}
 	}
 
-	// Clean up storage volumes if any were created
-	if storageCreated && sm != nil {
+	// Delete the volumes this create made, and only those: a name the spec
+	// gives may be a volume that existed before (create refuses one it
+	// finds, but libvirt has the last word), and that is not ours to delete
+	if len(made) > 0 && sm != nil {
 		log.Printf("Removing VM storage volumes...")
-
-		// Delete boot volume
-		if err := sm.DeleteVolume(ctx, getStoragePool(vm), getBootVolumeName(vm)); err != nil {
-			log.Printf("Warning: failed to delete boot volume: %v", err)
-		}
-
-		// Delete data volumes
-		for _, dataDisk := range vm.Spec.DataDisks {
-			if err := sm.DeleteVolume(ctx, getStoragePool(vm), getDataVolumeName(vm, dataDisk.Device)); err != nil {
-				log.Printf("Warning: failed to delete data volume %s: %v", dataDisk.Device, err)
+		for _, name := range made {
+			if err := sm.DeleteVolume(ctx, getStoragePool(vm), name); err != nil {
+				log.Printf("Warning: failed to delete volume %s: %v", name, err)
+				left = append(left, fmt.Sprintf("volume %s/%s not deleted: %v", getStoragePool(vm), name, err))
 			}
 		}
-
-		// Delete cloud-init ISO volume
-		if vm.Spec.CloudInit != nil {
-			if err := sm.DeleteVolume(ctx, getStoragePool(vm), getCloudInitVolumeName(vm)); err != nil {
-				log.Printf("Warning: failed to delete cloud-init volume: %v", err)
-			}
-		}
-
-		// Delete input disk volumes. create checked that none existed
-		// before it, so these are its own.
-		for _, in := range vm.Spec.InputDisks {
-			if err := sm.DeleteVolume(ctx, getStoragePool(vm), foundrylibvirt.GetInputVolumeName(vm, in.Label)); err != nil {
-				log.Printf("Warning: failed to delete input volume %s: %v", in.Label, err)
-			}
-		}
-
-		log.Printf("Storage cleanup complete")
 	}
 
+	if len(left) > 0 {
+		return errors.New(strings.Join(left, "; "))
+	}
 	log.Printf("Cleanup complete")
+	return nil
+}
+
+// errDomainMayRun marks a cleanup failure after which the domain may still
+// be running.
+var errDomainMayRun = errors.New("may still be running")
+
+// removeDomain stops (forcibly) and undefines the domain a failed create
+// defined, with its varstore: every foundry domain is UEFI, and once a start
+// has made the varstore libvirt refuses an undefine without
+// VIR_DOMAIN_UNDEFINE_NVRAM ("cannot undefine domain with nvram"). A domain
+// that is already gone is not an error.
+func removeDomain(lv LibvirtClient, name string) error {
+	log.Printf("Undefining domain '%s'...", name)
+	domain, err := lv.DomainLookupByName(name)
+	if err != nil {
+		var le libvirt.Error
+		if errors.As(err, &le) && le.Code == uint32(libvirt.ErrNoDomain) {
+			return nil
+		}
+		return fmt.Errorf("domain '%s' %w: lookup failed: %w", name, errDomainMayRun, err)
+	}
+	state, _, err := lv.DomainGetState(domain, 0)
+	if err != nil {
+		return fmt.Errorf("domain '%s' %w: its state cannot be read: %w", name, errDomainMayRun, err)
+	}
+	if state != domainStateShutoff {
+		if err := lv.DomainDestroy(domain); err != nil {
+			return fmt.Errorf("domain '%s' %w: it could not be stopped: %w", name, errDomainMayRun, err)
+		}
+	}
+	if err := lv.DomainUndefineFlags(domain, libvirt.DomainUndefineNvram); err != nil {
+		log.Printf("Warning: failed to undefine domain: %v", err)
+		return fmt.Errorf("domain '%s' left defined (stopped): %w", name, err)
+	}
+	log.Printf("Domain undefined successfully")
+	return nil
+}
+
+// checkVolumesAbsent fails if the VM's boot volume, a data volume or its
+// cloud-init volume already exists in its pool: a leftover of an earlier VM
+// of the same name, or a volume made by other means, which create must
+// neither reuse nor delete. Input volumes are checked by checkInputVolumes.
+func checkVolumesAbsent(ctx context.Context, vm *v1alpha1.VirtualMachine, sm storageManager) error {
+	type volume struct{ kind, name string }
+	volumes := []volume{{"boot", getBootVolumeName(vm)}}
+	for _, d := range vm.Spec.DataDisks {
+		volumes = append(volumes, volume{"data", getDataVolumeName(vm, d.Device)})
+	}
+	if vm.Spec.CloudInit != nil {
+		volumes = append(volumes, volume{"cloud-init", getCloudInitVolumeName(vm)})
+	}
+	pool := getStoragePool(vm)
+	for _, v := range volumes {
+		exists, err := sm.VolumeExists(ctx, pool, v.name)
+		if err != nil {
+			return fmt.Errorf("failed to check %s volume %s: %w", v.kind, v.name, err)
+		}
+		if exists {
+			return fmt.Errorf("%s volume already exists: %s/%s", v.kind, pool, v.name)
+		}
+	}
+	return nil
 }

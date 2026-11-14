@@ -43,7 +43,7 @@ func TestValidateSpec_SMBIOS(t *testing.T) {
 		wantErr string
 	}{
 		{name: "neither set"},
-		{name: "neither set, name not a valid serial", vmName: "vm+1"},
+		{name: "neither set, name too long for a serial", vmName: strings.Repeat("v", 60)},
 		{name: "serial", serial: "SN_01.a-b"},
 		{name: "serial 64 characters", serial: strings.Repeat("s", 64)},
 		{name: "empty smbios", smbios: &v1alpha1.SMBIOSSpec{}},
@@ -54,7 +54,7 @@ func TestValidateSpec_SMBIOS(t *testing.T) {
 		{name: "serial too long", serial: strings.Repeat("s", 65), wantErr: "spec.serial"},
 		{name: "serial with space", serial: "SN 1", wantErr: "spec.serial"},
 		{name: "serial with comma", serial: "SN,1", wantErr: "spec.serial"},
-		{name: "default serial from bad name", vmName: "vm+1", smbios: &v1alpha1.SMBIOSSpec{}, wantErr: "the default is \"foundry-\""},
+		{name: "default serial from long name", vmName: strings.Repeat("v", 60), smbios: &v1alpha1.SMBIOSSpec{}, wantErr: "the default is \"foundry-\""},
 		{name: "leading space", smbios: &v1alpha1.SMBIOSSpec{Manufacturer: " Example"}, wantErr: "spec.smbios.manufacturer"},
 		{name: "trailing space", smbios: &v1alpha1.SMBIOSSpec{Product: "Model "}, wantErr: "spec.smbios.product"},
 		{name: "comma", smbios: &v1alpha1.SMBIOSSpec{Version: "1,2"}, wantErr: "spec.smbios.version"},

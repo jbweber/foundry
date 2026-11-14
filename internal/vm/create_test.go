@@ -86,7 +86,7 @@ func TestCreateFromConfigWithDeps_Success(t *testing.T) {
 			}
 
 			// Verify no cleanup was called (success path)
-			if len(lv.domainUndefineCalls) > 0 {
+			if len(lv.domainUndefineCalls)+len(lv.domainUndefineFlagsCalls) > 0 {
 				t.Error("unexpected cleanup: domain undefine called on success")
 			}
 			if len(sm.deleteVolumeCalls) > 0 {
@@ -188,7 +188,7 @@ func TestCreateFromConfigWithDeps_StorageFailures(t *testing.T) {
 					return errors.New("libvirt create volume failed")
 				}
 			},
-			expectCleanup: false, // storageCreated flag not set yet
+			expectCleanup: false, // no volume made yet
 		},
 	}
 
@@ -281,11 +281,11 @@ func TestCreateFromConfigWithDeps_LibvirtFailures(t *testing.T) {
 
 			// Verify domain cleanup only happens if domain was defined
 			if tt.expectDomainDefined {
-				if len(lv.domainUndefineCalls) != 1 {
-					t.Errorf("expected domain cleanup, got %d calls", len(lv.domainUndefineCalls))
+				if len(lv.domainUndefineFlagsCalls) != 1 {
+					t.Errorf("expected domain cleanup, got %d calls", len(lv.domainUndefineFlagsCalls))
 				}
 			} else {
-				if len(lv.domainUndefineCalls) > 0 {
+				if len(lv.domainUndefineFlagsCalls) > 0 {
 					t.Error("unexpected domain cleanup when define failed")
 				}
 			}
@@ -298,35 +298,35 @@ func TestCleanupWithDeps(t *testing.T) {
 	tests := []struct {
 		name                 string
 		domainDefined        bool
-		storageCreated       bool
+		made                 []string
 		expectDomainCleanup  bool
 		expectStorageCleanup bool
 	}{
 		{
 			name:                 "both created",
 			domainDefined:        true,
-			storageCreated:       true,
+			made:                 []string{"test-vm_boot.qcow2"},
 			expectDomainCleanup:  true,
 			expectStorageCleanup: true,
 		},
 		{
 			name:                 "only domain created",
 			domainDefined:        true,
-			storageCreated:       false,
+			made:                 nil,
 			expectDomainCleanup:  true,
 			expectStorageCleanup: false,
 		},
 		{
 			name:                 "only storage created",
 			domainDefined:        false,
-			storageCreated:       true,
+			made:                 []string{"test-vm_boot.qcow2"},
 			expectDomainCleanup:  false,
 			expectStorageCleanup: true,
 		},
 		{
 			name:                 "nothing created",
 			domainDefined:        false,
-			storageCreated:       false,
+			made:                 nil,
 			expectDomainCleanup:  false,
 			expectStorageCleanup: false,
 		},
@@ -346,15 +346,17 @@ func TestCleanupWithDeps(t *testing.T) {
 				}
 			}
 
-			cleanupWithDeps(ctx, vm, sm, lv, tt.domainDefined, tt.storageCreated)
+			if err := cleanupWithDeps(ctx, vm, sm, lv, tt.domainDefined, tt.made); err != nil {
+				t.Errorf("cleanup reported %v", err)
+			}
 
 			// Verify cleanup behavior
 			if tt.expectDomainCleanup {
-				if len(lv.domainUndefineCalls) != 1 {
-					t.Errorf("expected domain cleanup, got %d calls", len(lv.domainUndefineCalls))
+				if len(lv.domainUndefineFlagsCalls) != 1 {
+					t.Errorf("expected domain cleanup, got %d calls", len(lv.domainUndefineFlagsCalls))
 				}
 			} else {
-				if len(lv.domainUndefineCalls) > 0 {
+				if len(lv.domainUndefineFlagsCalls) > 0 {
 					t.Error("unexpected domain cleanup")
 				}
 			}
@@ -373,30 +375,35 @@ func TestCleanupWithDeps(t *testing.T) {
 	}
 }
 
-// TestCleanupWithDeps_ContinuesOnError tests that cleanup continues even if operations fail
+// TestCleanupWithDeps_ContinuesOnError tests that cleanup continues past a
+// failed undefine or volume delete, and reports what it left behind
 func TestCleanupWithDeps_ContinuesOnError(t *testing.T) {
 	ctx := context.Background()
 	vm := testVMConfig()
 	lv := newMockLibvirtClient()
 	sm := newMockStorageManager()
 
-	// Make all cleanup operations fail
 	lv.domainLookupByNameFunc = func(name string) (libvirt.Domain, error) {
-		return libvirt.Domain{}, errors.New("lookup failed")
+		return libvirt.Domain{Name: name}, nil
+	}
+	lv.domainUndefineFlagsFunc = func(libvirt.Domain, libvirt.DomainUndefineFlagsValues) error {
+		return errors.New("undefine failed")
 	}
 	sm.deleteVolumeFunc = func(ctx context.Context, poolName, volumeName string) error {
 		return errors.New("delete failed")
 	}
 
-	// Should not panic
-	cleanupWithDeps(ctx, vm, sm, lv, true, true)
-
-	// Verify attempts were made despite failures
-	if len(lv.domainLookupByNameCalls) != 1 {
-		t.Error("expected domain cleanup attempt")
+	err := cleanupWithDeps(ctx, vm, sm, lv, true, []string{"test-vm_boot.qcow2"})
+	if err == nil {
+		t.Fatal("expected cleanup to report what it left behind")
 	}
-	if len(sm.deleteVolumeCalls) == 0 {
-		t.Error("expected storage cleanup attempt")
+	for _, want := range []string{"domain 'test-vm' left defined", "volume foundry-vms/test-vm_boot.qcow2 not deleted"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("cleanup error %q does not mention %q", err, want)
+		}
+	}
+	if len(sm.deleteVolumeCalls) != 1 {
+		t.Error("expected storage cleanup attempt despite the failed undefine")
 	}
 }
 
@@ -807,8 +814,8 @@ func TestCleanupWithDeps_NilDependencies(t *testing.T) {
 	vm := testVMConfig()
 
 	// Should not panic with nil dependencies
-	cleanupWithDeps(ctx, vm, nil, nil, false, false)
-	cleanupWithDeps(ctx, vm, nil, nil, true, true)
+	_ = cleanupWithDeps(ctx, vm, nil, nil, false, nil)
+	_ = cleanupWithDeps(ctx, vm, nil, nil, true, []string{"test-vm_boot.qcow2"})
 }
 
 // TestCleanupWithDeps_WithDataDisks tests cleanup with multiple data disks
@@ -818,7 +825,7 @@ func TestCleanupWithDeps_WithDataDisks(t *testing.T) {
 	lv := newMockLibvirtClient()
 	sm := newMockStorageManager()
 
-	cleanupWithDeps(ctx, vm, sm, lv, false, true)
+	_ = cleanupWithDeps(ctx, vm, sm, lv, false, []string{"test-vm_boot.qcow2", "test-vm_data-vdb.qcow2", "test-vm_data-vdc.qcow2"})
 
 	// Should attempt to delete boot + 2 data disks = 3 volumes
 	if len(sm.deleteVolumeCalls) != 3 {
@@ -833,7 +840,7 @@ func TestCleanupWithDeps_WithCloudInit(t *testing.T) {
 	lv := newMockLibvirtClient()
 	sm := newMockStorageManager()
 
-	cleanupWithDeps(ctx, vm, sm, lv, false, true)
+	_ = cleanupWithDeps(ctx, vm, sm, lv, false, []string{"test-vm_boot.qcow2", "test-vm_cloudinit.iso"})
 
 	// Should attempt to delete boot + cloud-init = 2 volumes
 	if len(sm.deleteVolumeCalls) != 2 {

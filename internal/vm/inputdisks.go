@@ -80,9 +80,9 @@ func readInputFile(path string, limit int) ([]byte, error) {
 
 // createInputVolumes creates a raw volume of each input image's exact size in
 // the VM's pool and uploads the image into it (StorageVolCreateXML, then
-// StorageVolUpload). On failure the caller's cleanup deletes them with the
-// VM's other volumes.
-func createInputVolumes(ctx context.Context, vm *v1alpha1.VirtualMachine, sm storageManager, images []inputImage) error {
+// StorageVolUpload). Each volume it makes is added to made, so that on
+// failure the caller's cleanup deletes it with the VM's other volumes.
+func createInputVolumes(ctx context.Context, vm *v1alpha1.VirtualMachine, sm storageManager, images []inputImage, made *[]string) error {
 	pool := getStoragePool(vm)
 	for _, img := range images {
 		log.Printf("Creating input disk volume %s (%d bytes)...", img.volume, len(img.data))
@@ -95,6 +95,7 @@ func createInputVolumes(ctx context.Context, vm *v1alpha1.VirtualMachine, sm sto
 		if err := sm.CreateVolume(ctx, pool, spec); err != nil {
 			return fmt.Errorf("failed to create input volume %s: %w", img.volume, err)
 		}
+		*made = append(*made, img.volume)
 		if err := sm.WriteVolumeData(ctx, pool, img.volume, img.data); err != nil {
 			return fmt.Errorf("failed to write input volume %s: %w", img.volume, err)
 		}
@@ -104,9 +105,7 @@ func createInputVolumes(ctx context.Context, vm *v1alpha1.VirtualMachine, sm sto
 
 // checkInputVolumes fails if a volume an input disk would be created in
 // already exists, as the boot volume check does: a leftover of an earlier VM
-// of the same name, which create must neither reuse nor delete. With none
-// left over, every input volume of the spec that exists after a failed create
-// is one this create made, so cleanup can delete them by name.
+// of the same name, which create must neither reuse nor delete.
 func checkInputVolumes(ctx context.Context, vm *v1alpha1.VirtualMachine, sm storageManager, images []inputImage) error {
 	pool := getStoragePool(vm)
 	for _, img := range images {
