@@ -121,6 +121,7 @@ spec:
     sizeGB: 50                # Disk size in GB
     image: fedora-43.qcow2    # Image reference (see formats below)
     imagePool: foundry-images # Optional: pool containing base image (default: foundry-images)
+    imageSHA256: 8582f6...    # Optional: sha256 of the image; checked before anything is made
     # OR for empty boot disk:
     # empty: true             # Create empty disk instead of snapshot
     # serial: root            # Optional: disk serial (/dev/disk/by-id/virtio-root)
@@ -206,6 +207,31 @@ status:
 - Full reference: `foundry-images:fedora-43.qcow2` (explicit pool:volume format)
 - File path: `/path/to/image.qcow2` (direct filesystem path, not recommended)
 
+**Image digest** (`spec.bootDisk.imageSHA256`, optional): the sha256 of the
+image volume's bytes, 64 lower-case hex digits as `sha256sum` prints them for
+the file that was imported. Create reads the volume back through libvirt
+(`StorageVolDownload`, streamed, to the volume's end), hashes it and refuses
+one that differs (`storage.ErrImageDigest`), as its last check before it makes
+anything, so a refused image leaves nothing behind. This catches a volume that
+is not the image the spec was written for: an import cut short by a crash, an
+image deleted and imported again with other content, or a file changed in the
+pool's directory. It costs reading the whole image once per create.
+
+- Only for an image volume: a file path is not a volume and an empty disk has
+  no image, so the loader refuses the field with either.
+- Only for `foundry-images`: create takes the image from that pool whatever
+  pool the reference names, so a digest for another pool would be checked
+  against a volume other than the one booted. The loader refuses it.
+- The stored volume hashes as the file did because an import uploads the file
+  byte for byte, and a raw image's volume is exactly the file's size. A qcow2
+  image smaller than the empty qcow2 file libvirt creates for the volume
+  (a few hundred KiB) may keep that file's tail after the upload, and then
+  fails the check; real images are far larger.
+- The digest is not stored with the image: the VM file keeps it.
+- Images imported before these checks existed are not checked again: a raw one
+  was padded to whole GiB and fails a digest check, and a qcow2 one was never
+  checked for a backing file. Import them again.
+
 ### Configuration Validation Rules
 
 **Required:**
@@ -224,6 +250,8 @@ status:
 - `metadata.name` is non-empty
 - VCPUs > 0, memoryGiB > 0, disk sizes > 0
 - `spec.bootDisk` specifies exactly one of `image` or `empty: true`
+- `spec.bootDisk.imageSHA256`, when set, is 64 lower-case hex digits, with an image volume
+  (not a file path or an empty disk) in `foundry-images` (see Image digest above)
 - Data disks have a device name, and no duplicate device names
 - `serial` (boot disk and data disks) is 1-20 characters from `A-Z a-z 0-9 - _ .`, unique
   among the VM's disks (see [Disk Serials](#disk-serials))
@@ -272,6 +300,7 @@ status:
 - No input disk volume exists yet; each `inputDisks` `file` is a regular file, and the files of
   one disk hold at most 16 MiB
 - Boot disk image exists (unless empty: true)
+- Boot disk image volume has the sha256 `spec.bootDisk.imageSHA256` states, when it states one
 - Bridge exists on hypervisor (future: fuzzy match)
 
 ## Core Workflows
@@ -886,6 +915,54 @@ Foundry validates disk images on import to ensure they are bootable OS images:
 - **Required extension** - Image names must have `.qcow2` or `.raw` extension matching actual format
 - **Format mismatch detection** - Rejects files where extension doesn't match detected format
 - **Non-bootable rejection** - RAW images without boot sector signature are rejected
+- **No qcow2 that reads host files** - a qcow2 image can name other files for qemu to read: a
+  backing file (whose content shows through wherever the image has none) or an external data
+  file (which holds all of the guest's data). A VM booted from such an image reads that file,
+  any file qemu may open on the host. The import refuses:
+  - a backing file (`backing_file_offset` or `backing_file_size` set) or a backing format
+    header extension;
+  - an external data file (incompatible feature bit 2, or the external data file name
+    extension);
+  - what the check cannot vouch for: a version other than 2 or 3, an incompatible feature bit
+    the [qcow2 specification](https://www.qemu.org/docs/master/interop/qcow2.html) does not
+    define (0-4: dirty, corrupt, external data file, compression type, extended L2; qemu
+    refuses unknown ones too), and header extensions that do not end within the first 64 KiB
+    (qemu reads them up to the end of the first cluster, and 64 KiB is qemu-img's default
+    cluster size).
+
+  No Go library for qcow2 headers is among foundry's dependencies and foundry does not run
+  qemu-img, so `internal/storage/format.go` reads those few big-endian fields itself. A boot
+  disk is a new qcow2 whose backing file is the image, so the image itself must have none.
+  An image given as a host path in `spec.bootDisk.image` is not imported and not checked.
+- **Regular files and pipes only** - the source path must be a regular file (a symlink to one
+  is followed) or a named pipe. A directory or a device is refused before it is opened: its
+  size is not the size of what it would stream, and opening some devices does something. The
+  file is opened once, and checked and uploaded from that one open file, so a
+  path replaced meanwhile changes nothing.
+- **Streamed upload** - the file is streamed to the volume (`StorageVolUpload`), not read into
+  memory first. Exactly the size the file had when it was opened is sent: a file that ends
+  early fails the import, and one that grew is imported as it was.
+- **Exact raw size** - a raw image's volume is exactly the file's size, not rounded up to whole
+  GiB: the guest sees no padding, and the volume read back hashes as the file does (see
+  `spec.bootDisk.imageSHA256`). A qcow2 volume's capacity does not matter: the upload replaces
+  the header libvirt wrote, and the image's header gives the guest-visible size.
+- **Standard input** - `foundry image import - <name>` (and a named pipe given as the path,
+  such as a shell's `<(...)`) spools the stream to a temporary file (`$TMPDIR`, else `/tmp`, on
+  the machine foundry runs on), runs the same checks on it and uploads it like a file path. Not
+  streamed straight into the volume: libvirt creates the volume with a capacity
+  (`StorageVolCreateXML`) before `StorageVolUpload`, a stream's length is only known at its end,
+  and the format checks read a seekable file at several offsets; spooling needs no size flag
+  from the caller. The temporary file needs room for the whole image, and is removed from its
+  directory as soon as it is created and used through its open descriptor, so nothing is left
+  however foundry ends, killed included. A stream that breaks fails the import before any
+  volume is made.
+- **No partial images** - when the upload fails, or is interrupted (Ctrl-C, SIGTERM), the volume
+  is deleted, so no partial image stays under the name a VM would boot from. If that delete
+  fails too, the error names the volume left behind. A second Ctrl-C ends foundry at once, should
+  the delete hang. A crash or `kill -9` mid-upload can still leave a partial volume under the
+  image's name; `spec.bootDisk.imageSHA256` refuses it, and `foundry image delete` removes it.
+- **No terminal as input** - `foundry image import -` with a terminal (or another character
+  device, such as `/dev/null`) as standard input is refused instead of waiting for typing.
 
 This prevents common issues like:
 - Importing non-bootable files that cause VM boot failures
@@ -1060,9 +1137,10 @@ foundry pool refresh <name>
 # List available base images
 foundry image list
 
-# Import local image file
-foundry image import <source-path> <name>
+# Import local image file ("-" reads standard input)
+foundry image import <source-path|-> <name>
 foundry image import /path/to/fedora-43.qcow2 fedora-43.qcow2
+xz -dc fedora-43.qcow2.xz | foundry image import - fedora-43.qcow2
 
 # Download and import image from URL (TODO: not yet implemented)
 foundry image pull <url> --name <image-name> [--checksum sha256:...]

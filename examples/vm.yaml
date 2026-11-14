@@ -20,6 +20,7 @@ spec:
     sizeGB: 50                # Disk size in GB
     image: fedora-43.qcow2    # Image reference (see DESIGN.md for accepted formats)
     imagePool: foundry-images # Optional: pool containing base image (default: foundry-images)
+    # imageSHA256: 8582f6...  # Optional: sha256 of the image (sha256sum of the imported file); checked before anything is made
     # OR for empty boot disk:
     # empty: true             # Create empty disk instead of snapshot
     # serial: root            # Optional: disk serial; the guest sees /dev/disk/by-id/virtio-root

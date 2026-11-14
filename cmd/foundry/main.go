@@ -3,8 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -235,9 +238,10 @@ func init() {
 }
 
 var imageImportCmd = &cobra.Command{
-	Use:   "import <source-path> <name>",
+	Use:   "import <source-path|-> <name>",
 	Short: "Import an image into the foundry-images pool",
 	Long: `Import a base OS image from a local file into the foundry-images pool.
+"-" reads the image from standard input.
 
 The image file must be in QCOW2 or bootable RAW format. The image name must
 include the correct file extension (.qcow2 or .raw) matching the actual format.
@@ -246,8 +250,18 @@ The tool validates that:
   - QCOW2 images have the correct magic bytes (QFI\xfb)
   - RAW images have a valid boot sector signature (0x55aa)
   - The file extension matches the detected format
+  - The source is a regular file (or a symlink to one), or a pipe
 
 This ensures only valid, bootable OS images are imported.
+
+The file is streamed to libvirt, not read into memory. A raw image's volume
+is exactly the file's size. If the import fails or is interrupted (Ctrl-C),
+the partly written volume is deleted.
+
+Standard input and pipes are first copied to a temporary file in $TMPDIR (else
+/tmp), which needs room for the whole image: libvirt needs the volume's size
+before the upload, and the checks read the image at several offsets. The copy
+is removed when the import ends, however it ends.
 
 Examples:
   # Import a QCOW2 image
@@ -256,20 +270,48 @@ Examples:
   # Import a bootable RAW image
   foundry image import /path/to/ubuntu-24.04.raw ubuntu-24.04.raw
 
+  # Import from standard input
+  xz -dc fedora-43.qcow2.xz | foundry image import - fedora-43.qcow2
+
   # This will fail - extension required
   foundry image import /path/to/fedora.qcow2 fedora
 
   # This will fail - format mismatch
   foundry image import /path/to/fedora.qcow2 fedora.raw`,
-	Args: cobra.ExactArgs(2),
+	Args:         cobra.ExactArgs(2),
+	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		sourcePath := args[0]
 		imageName := args[1]
 
-		fmt.Printf("Importing image from %s as %s...\n", sourcePath, imageName)
+		// A bad name fails before connecting or reading anything
+		if err := storage.CheckImageName(imageName); err != nil {
+			return err
+		}
+
+		from := sourcePath
+		if from == "-" {
+			from = "standard input"
+		}
+		fmt.Printf("Importing image from %s as %s...\n", from, imageName)
+
+		in := cmd.InOrStdin()
+		if sourcePath == "-" && isTerminal(in) {
+			return fmt.Errorf("standard input is a terminal or another character device: pipe or redirect the image into it")
+		}
+
+		// Ctrl-C or SIGTERM cancels the upload, so the import deletes its
+		// partial volume instead of leaving it under the image's name. Once
+		// it has, the signals have their default effect again, so a second
+		// Ctrl-C ends foundry if the cleanup hangs.
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		go func() {
+			<-ctx.Done()
+			stop()
+		}()
 
 		// Connect to libvirt
-		ctx := context.Background()
 		client, err := libvirt.Connect("", 5*time.Second)
 		if err != nil {
 			return fmt.Errorf("failed to connect to libvirt: %w", err)
@@ -298,13 +340,29 @@ Examples:
 		}
 
 		// Import the image
-		if err := mgr.ImportImage(ctx, sourcePath, imageName); err != nil {
+		if sourcePath == "-" {
+			err = mgr.ImportImageFromReader(ctx, in, imageName)
+		} else {
+			err = mgr.ImportImage(ctx, sourcePath, imageName)
+		}
+		if err != nil {
 			return fmt.Errorf("failed to import image: %w", err)
 		}
 
 		fmt.Printf("✓ Image %s imported successfully\n", imageName)
 		return nil
 	},
+}
+
+// isTerminal reports whether r is a terminal or another character device,
+// where an image cannot come from: reading a terminal would wait for typing.
+func isTerminal(r io.Reader) bool {
+	f, ok := r.(*os.File)
+	if !ok {
+		return false
+	}
+	info, err := f.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
 var imageListCmd = &cobra.Command{

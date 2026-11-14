@@ -77,6 +77,29 @@ func parseImageReference(bootDisk v1alpha1.BootDiskSpec) (string, string, bool, 
 	return imagePool, bootDisk.Image, false, nil
 }
 
+// verifyImageDigest reads back the image volume a VM's boot disk is backed
+// by, when its spec states spec.bootDisk.imageSHA256, and refuses one that
+// differs (storage.ErrImageDigest). It reads the whole volume, so it takes
+// time in proportion to the image's size. The volume is the one create
+// backs the boot disk with: imageName in foundry-images (the loader refuses
+// a digest for an image in another pool).
+func verifyImageDigest(ctx context.Context, vm *v1alpha1.VirtualMachine, sm storageManager, imageName string) error {
+	want := vm.Spec.BootDisk.ImageSHA256
+	if want == "" {
+		return nil
+	}
+	log.Printf("Checking the sha256 of image %s:%s (reads the whole image)...", storage.DefaultImagesPool, imageName)
+	got, err := sm.VolumeSHA256(ctx, storage.DefaultImagesPool, imageName)
+	if err != nil {
+		return fmt.Errorf("failed to check the digest of image %s: %w", imageName, err)
+	}
+	if got != want {
+		return fmt.Errorf("%w: spec.bootDisk.imageSHA256 says image %s:%s has sha256 %s, it has sha256 %s (import it again, or correct the spec)",
+			storage.ErrImageDigest, storage.DefaultImagesPool, imageName, want, got)
+	}
+	return nil
+}
+
 // Create creates a VM from a YAML configuration file.
 //
 // This orchestrates the entire VM creation process:
@@ -222,6 +245,13 @@ func createFromConfigWithDeps(ctx context.Context, vm *v1alpha1.VirtualMachine, 
 				return fmt.Errorf("failed to get image path: %w", createErr)
 			}
 			log.Printf("Using backing image (volume): %s", backingVolume)
+
+			// The image's digest, when the spec states one, before anything
+			// is made: a volume that is not the image it is named for (cut
+			// short, or replaced) is never booted
+			if createErr = verifyImageDigest(ctx, vm, sm, imageName); createErr != nil {
+				return createErr
+			}
 		}
 	}
 
