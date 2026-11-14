@@ -1,6 +1,7 @@
 package v1alpha1
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
@@ -12,25 +13,35 @@ import (
 )
 
 // EncodeYAML writes vm as YAML that reads back as vm. It is yaml.Marshal,
-// except where go-yaml writes YAML it cannot read itself: a string of
-// several lines whose first line starts with a tab comes out as a literal
-// block (|-) that go-yaml then refuses ("found a tab character where an
-// indentation space is expected"). A spec holding one, in user data or an
-// input file, would be stored in the domain's metadata, or printed, as YAML
-// foundry cannot load.
+// except where go-yaml writes a string of several lines in a form it does
+// not read back as written:
 //
-// When the YAML does not parse, every string of several lines is written
-// double-quoted instead, which escapes its tabs and line breaks. go-yaml
-// picks the style only from a node tree, so the spec is encoded with such
-// strings swapped for placeholders, and the strings put back into the tree.
+//   - A first line that starts with a tab comes out as a literal block (|-)
+//     that go-yaml then refuses ("found a tab character where an indentation
+//     space is expected").
+//   - A first line that is empty comes out as a block with an indentation
+//     indicator (|4-); in a mapping that is an item of a sequence, such as an
+//     input file or a fw_cfg entry, go-yaml reads the indicator from a
+//     different column than it wrote it from, and the string silently reads
+//     back as another one ("\n#" reads back as "", its "#" taken for a
+//     comment).
+//
+// A spec holding such a string, in user data, an input file or a fw_cfg
+// string, would be stored in the domain's metadata, or printed, as YAML
+// foundry cannot load, or loads as a different spec.
+//
+// So the YAML is read back and written again; if that does not give the
+// same YAML, every string of several lines is written double-quoted instead,
+// which escapes its tabs and line breaks. go-yaml picks the style only from a
+// node tree, so the spec is encoded with such strings swapped for
+// placeholders, and the strings put back into the tree.
 func EncodeYAML(vm *VirtualMachine) ([]byte, error) {
-	out, err := yaml.Marshal(vm)
+	want, err := yaml.Marshal(vm)
 	if err != nil {
 		return nil, err
 	}
-	var check yaml.Node
-	if yaml.Unmarshal(out, &check) == nil {
-		return out, nil
+	if vm == nil || readsBackAs(want, want) {
+		return want, nil
 	}
 
 	token := make([]byte, 16)
@@ -53,14 +64,27 @@ func EncodeYAML(vm *VirtualMachine) ([]byte, error) {
 		return nil, err
 	}
 	restoreStrings(&n, held)
-	out, err = yaml.Marshal(&n)
+	out, err := yaml.Marshal(&n)
 	if err != nil {
 		return nil, err
 	}
-	if err := yaml.Unmarshal(out, &check); err != nil {
-		return nil, fmt.Errorf("the spec does not make YAML that reads back: %w", err)
+	if !readsBackAs(out, want) {
+		return nil, fmt.Errorf("the spec does not make YAML that reads back")
 	}
 	return out, nil
+}
+
+// readsBackAs reports whether out reads back as a spec that yaml.Marshal
+// writes as want. Comparing the YAML, not the specs, lets through what YAML
+// does not keep apart and foundry does not either: a nil list and an empty
+// one, a time beyond the second.
+func readsBackAs(out, want []byte) bool {
+	var got VirtualMachine
+	if yaml.Unmarshal(out, &got) != nil {
+		return false
+	}
+	again, err := yaml.Marshal(&got)
+	return err == nil && bytes.Equal(again, want)
 }
 
 // substituteStrings returns a deep copy of v with every string s, map keys

@@ -68,10 +68,15 @@ git history.
 
 - The spec is stored in the domain's metadata as escaped XML text. A spec whose strings held `&` or `<` (a
   shell script in `rawUserData`) made invalid XML, so the VM started and was left without its stored spec.
-- A spec holding a string of several lines that starts with a tab (in user data, an input file, an
-  annotation) is stored in the domain's metadata, and printed by `get -o yaml`, with its strings of several
-  lines double-quoted. go-yaml wrote such a string as a block it could not read back, so the VM lost its
-  stored spec. Found by the new fuzz target for the stored spec.
+- A spec holding a string of several lines that starts with a tab (in user data, an input file, a fw_cfg
+  string, an annotation) is stored in the domain's metadata, and printed by `get -o yaml`, with its strings of
+  several lines double-quoted. go-yaml wrote such a string as a block it could not read back, so the VM lost
+  its stored spec. Found by the new fuzz target for the stored spec.
+- The same holds for a string of several lines whose first line is empty, in an input file or a fw_cfg
+  string: go-yaml wrote it as a block with an indentation indicator that it read back as another string
+  (`"\n#"` as `""`), so the stored spec loaded as a different one. The YAML written must now read back and
+  marshal to the same YAML, not only parse. Found by the fuzz target for the stored spec, now given input
+  files and fw_cfg strings too.
 - `foundry image import` refuses a qcow2 image with a backing file or an external data file, which would
   hand the guest the content of a file on the host, and one whose version, incompatible features or header
   extensions it cannot vouch for.
