@@ -14,6 +14,16 @@ CI/CD automation for Foundry.
 
 ---
 
+### [integration.yml](integration.yml) - Integration Tests
+
+**Trigger**: By hand (workflow_dispatch)
+
+**What it does**: Installs libvirt, QEMU and OVMF on a GitHub-hosted Ubuntu runner and runs `make test-integration`, which creates, reads and destroys real VMs under KVM. Fails at once if the runner has no `/dev/kvm`.
+
+**Why by hand**: It installs packages and starts VMs, which takes minutes, and it depends on the runner keeping KVM available; the unit tests on every pull request stay fast. The lane also runs on any machine with libvirt (README, Integration Tests).
+
+---
+
 ### [release.yml](release.yml) - Release Automation
 
 **Trigger**: Version tags (`v*.*.*`)
@@ -39,7 +49,7 @@ Enables attestations (SBOM for supply chain security). Without it, the build fai
 
 ## Key Decisions
 
-**Two workflows**: Fast CI on every commit, slow release only on tags
+**Three workflows**: Fast CI on every commit, integration tests by hand, slow release only on tags
 
 **GoReleaser**: Industry standard, handles builds/Docker/changelog/checksums automatically
 

@@ -445,7 +445,35 @@ make test-unit
 
 # With coverage
 make coverage
+
+# Fuzz each fuzz target for 20s (FUZZTIME=2m make fuzz for longer)
+make fuzz
 ```
+
+### Integration Tests
+
+`make test-integration` runs foundry against a real libvirt and QEMU: it imports images, creates, reads and
+destroys VMs, and creates an isolated network and, when missing, foundry's default pools, removing all of it
+again. Run it only against a disposable libvirt, such as a throwaway VM's, never one whose VMs matter. It
+needs the libvirt's socket in `FOUNDRY_INTEGRATION_SOCKET`, and fails when that is not set, since a lane that
+ran no test proves nothing. The machine needs KVM (nested virtualization in a VM), UEFI firmware and a C
+compiler (the tests run with `-race`):
+
+```bash
+# Fedora, CentOS Stream, RHEL
+sudo dnf install -y libvirt-daemon-kvm qemu-kvm edk2-ovmf gcc make git
+sudo systemctl enable --now virtqemud.socket virtnetworkd.socket virtstoraged.socket
+# Debian, Ubuntu
+sudo apt-get install -y libvirt-daemon-system qemu-system-x86 ovmf gcc make git
+
+ls /dev/kvm   # must exist
+sudo env PATH="$PATH" FOUNDRY_INTEGRATION_SOCKET=/run/libvirt/virtqemud-sock make test-integration  # modular daemons
+sudo env PATH="$PATH" FOUNDRY_INTEGRATION_SOCKET=/run/libvirt/libvirt-sock make test-integration    # monolithic libvirtd
+```
+
+Run it as root (as above, keeping the `PATH` that has Go 1.27) or as a user who may write to the socket. The GitHub
+Actions workflow `Integration` runs the same lane on a GitHub-hosted runner, started by hand. What the tests
+cover and create is in [DESIGN.md](DESIGN.md#integration-tests).
 
 ### Linting
 
@@ -473,9 +501,12 @@ foundry/
 │   ├── libvirt/        # Libvirt client and domain operations
 │   └── vm/             # VM lifecycle operations (create, destroy, list, get)
 ├── examples/           # Example configurations
+├── tools/              # Scripts for make targets (the integration lane)
+├── CHANGELOG.md        # Notable changes per release
 └── DESIGN.md          # Detailed design document
 ```
 
 ## Documentation
 
 - [DESIGN.md](DESIGN.md) - Complete design specification
+- [CHANGELOG.md](CHANGELOG.md) - Notable changes per release

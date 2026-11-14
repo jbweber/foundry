@@ -89,7 +89,7 @@ type FoundryMetadata struct {
 // This allows the spec to persist with the VM itself.
 func (c *Client) Store(domain libvirt.Domain, vm *v1alpha1.VirtualMachine) error {
 	// Serialize the entire VirtualMachine (including TypeMeta, ObjectMeta, Spec) to YAML
-	yamlData, err := yaml.Marshal(vm)
+	yamlData, err := v1alpha1.EncodeYAML(vm)
 	if err != nil {
 		return fmt.Errorf("failed to marshal VM spec to YAML: %w", err)
 	}

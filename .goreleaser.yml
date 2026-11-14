@@ -33,6 +33,7 @@ archives:
       - LICENSE*
       - README*
       - DESIGN.md
+      - CHANGELOG.md
 
 checksum:
   name_template: "checksums.txt"
