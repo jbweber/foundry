@@ -11,6 +11,15 @@ git history.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-14
+
+All earlier versions, v0.1.0 to v0.6.1, are retracted: Go no longer picks them, and `go list -m -u` warns
+about them. They can lose data. `foundry destroy` could delete the disks of a guest that was still running or
+paused, and the disks of another VM whose name starts with the same name and `_`. A failed create could delete
+volumes it did not make. And the VM's spec was lost the first time the VM stopped, after which `destroy`
+refused the VM as not foundry's. Upgrade to v0.7.0; see the upgrade note under Fixed for VMs created by
+earlier versions.
+
 ### Added
 
 - `--socket` picks the libvirt socket for every command, for example one forwarded over SSH from a libvirt on
@@ -183,4 +192,5 @@ git history.
   instance-id is the VM name, and SSH keys go to the image's default user, not root; CLOUDINIT.md's validation
   list and example spec match the loader.
 
-[Unreleased]: https://github.com/jbweber/foundry/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/jbweber/foundry/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/jbweber/foundry/compare/v0.6.1...v0.7.0
