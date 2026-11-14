@@ -93,11 +93,18 @@ func (m *Manager) DeletePool(ctx context.Context, name string, force bool) error
 			return fmt.Errorf("failed to list volumes: %w", err)
 		}
 
+		// Delete every volume it can, then stop with the pool kept if any
+		// failed: undefining the pool would leave those files behind with
+		// no pool to see them through
+		var failed []string
 		for _, vol := range volumes {
 			if err := m.client.StorageVolDelete(vol, 0); err != nil {
-				// Continue deleting other volumes even if one fails
-				continue
+				failed = append(failed, fmt.Sprintf("%s (%v)", vol.Name, err))
 			}
+		}
+		if len(failed) > 0 {
+			return fmt.Errorf("pool %s kept: %d of %d volumes could not be deleted: %s",
+				name, len(failed), len(volumes), strings.Join(failed, ", "))
 		}
 	}
 

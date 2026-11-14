@@ -112,3 +112,40 @@ func TestManager_DeleteImage_Refuses(t *testing.T) {
 		t.Error("unused.qcow2 was not deleted")
 	}
 }
+
+// failingDelete is the mock with one volume that cannot be deleted.
+type failingDelete struct {
+	*mockLibvirtClient
+	name string
+}
+
+func (f failingDelete) StorageVolDelete(vol libvirt.StorageVol, flags libvirt.StorageVolDeleteFlags) error {
+	if vol.Name == f.name {
+		return errors.New("Permission denied")
+	}
+	return f.mockLibvirtClient.StorageVolDelete(vol, flags)
+}
+
+// TestManager_DeletePool_ForceReportsFailures: pool delete --force that
+// cannot delete a volume says so and keeps the pool, rather than reporting
+// success and leaving the file behind with no pool.
+func TestManager_DeletePool_ForceReportsFailures(t *testing.T) {
+	ctx := context.Background()
+	client := newMockLibvirtClient()
+	mgr := NewManager(client)
+	if err := mgr.CreatePool(ctx, "scratch", PoolTypeDir, "/scratch"); err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range []string{"a.qcow2", "stuck.qcow2"} {
+		if err := mgr.CreateVolume(ctx, "scratch", VolumeSpec{Name: n, Type: VolumeTypeData, Format: VolumeFormatQCOW2, CapacityGB: 1}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	err := NewManager(failingDelete{client, "stuck.qcow2"}).DeletePool(ctx, "scratch", true)
+	if err == nil || !strings.Contains(err.Error(), "stuck.qcow2") || !strings.Contains(err.Error(), "kept") {
+		t.Fatalf("got %v, want an error naming stuck.qcow2 and keeping the pool", err)
+	}
+	if _, ok := client.pools["scratch"]; !ok {
+		t.Error("pool undefined although a volume could not be deleted")
+	}
+}

@@ -167,5 +167,7 @@ git history.
 - `foundry image delete` refuses an image that is the backing file of a volume in any pool, such as a VM's boot
   disk, which could then no longer start, and refuses a Secure Boot key profile (`foundry varstore delete` manages
   those). It deleted both.
+- `foundry pool delete --force` that cannot delete a volume says which and keeps the pool; it reported success
+  and left the files behind with no pool.
 
 [Unreleased]: https://github.com/jbweber/foundry/compare/v0.6.1...HEAD
