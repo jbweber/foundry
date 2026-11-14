@@ -11,6 +11,37 @@ git history.
 
 ## [Unreleased]
 
+### Changed
+
+- Every dependency is updated to its newest release, the tools (golangci-lint, goimports, govulncheck) and
+  their dependencies included (`go get -u ./...`, `go get -u tool`, `go mod tidy`). Among them go-libvirt
+  moves to `v0.0.0-20261013170128-efbbdf578ac8` and golang.org/x/crypto to v0.59.0.
+- go.mod's `go` line moves from 1.27.0 to 1.27.4, the newest Go 1.27 patch release. For an application the
+  `go` line is the minimum toolchain, so every build from source now uses a standard library with the 1.27
+  patch releases' security fixes (with `GOTOOLCHAIN=auto`, the default, an older Go fetches 1.27.4). The
+  README's "Before Starting New Work" now raises the `go` line too, which Dependabot does not move.
+
+### Security
+
+- GO-2026-5932 (golang.org/x/crypto/openpgp is unmaintained and unsafe by design) is cleared: x/crypto moves
+  from v0.56.0 to v0.59.0. foundry never called that package; govulncheck listed it at module level. With
+  that, govulncheck finds nothing at symbol, package or module level, in foundry's packages and in its tools.
+- Built with Go 1.27.0, the standard library had 15 advisories that govulncheck lists at package or module
+  level (none at symbol level), all fixed by 1.27.4: GO-2026-6599, GO-2026-6600, GO-2026-6603,
+  GO-2026-6604, GO-2026-6605, GO-2026-6607, GO-2026-6608, GO-2026-6609, GO-2026-6610, GO-2026-6611,
+  GO-2026-6612, GO-2026-6613, GO-2026-6617, GO-2026-6809 and GO-2026-6859. The `go 1.27.4` line rules
+  that toolchain out.
+- Three modules in the full module graph (`go list -m all`) still have advisories. No package of foundry or of
+  its tools imports them, they are not in go.mod, and Go never downloads them; they appear only because a
+  tool dependency's own go.mod names them for its tests. They cannot be raised from here: `go mod tidy`
+  drops a minimum requirement on a module that no package needs, and the modules that name them are already
+  at their newest release. Each clears when the named module raises its requirement.
+  - github.com/jackc/pgx/v5 v5.5.4 (GO-2026-4771, GO-2026-4772, fixed in 5.9.0; GO-2026-5004, fixed in
+    5.9.2), named by github.com/ryanrolds/sqlclosecheck v0.6.0, a golangci-lint linter.
+  - github.com/klauspost/compress v1.20.1 (GO-2026-6865, fixed in 1.20.2), named by
+    github.com/prometheus/client_golang v1.25.0.
+  - github.com/yuin/goldmark v1.4.13 (GO-2026-5320, fixed in 1.7.17), named by golang.org/x/tools v0.52.0.
+
 ## [0.7.0] - 2026-11-14
 
 All earlier versions, v0.1.0 to v0.6.1, are retracted: Go no longer picks them, and `go list -m -u` warns
