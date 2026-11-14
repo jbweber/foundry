@@ -3,6 +3,7 @@ package vm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -46,7 +47,11 @@ const (
 // Volume cleanup is best-effort - if volumes can't be deleted, warnings are logged
 // but the operation continues.
 //
-// Returns an error if the VM doesn't exist, is refused, or if critical libvirt
+// A name with no domain but volumes left of one (a create killed before it
+// defined its domain) has those volumes removed: see destroyLeftovers.
+//
+// Returns an error if the VM doesn't exist (no domain and nothing left of
+// one), is refused, or if critical libvirt
 // operations fail. A VM that cannot be stopped, or whose state cannot be
 // read, and domains that cannot be listed, are errors with the definition
 // and volumes left as they are, also with force.
@@ -84,6 +89,10 @@ func destroyWithDeps(ctx context.Context, vmName string, lv LibvirtClient, sm st
 	log.Printf("Looking up VM '%s'...", vmName)
 	domain, err := lv.DomainLookupByName(vmName)
 	if err != nil {
+		var le libvirt.Error
+		if errors.As(err, &le) && le.Code == uint32(libvirt.ErrNoDomain) {
+			return destroyLeftovers(ctx, vmName, lv, sm, err)
+		}
 		return fmt.Errorf("VM '%s' not found: %w", vmName, err)
 	}
 
@@ -128,11 +137,22 @@ func destroyWithDeps(ctx context.Context, vmName string, lv LibvirtClient, sm st
 	// active domain does not stop it, it only makes it transient, and its
 	// disks would be deleted under it. One that cannot be stopped is an
 	// error, with the definition and volumes left as they are.
+	// An interrupt (Ctrl-C) before the domain is undefined stops the
+	// destroy with nothing undefined or deleted; the graceful shutdown's
+	// wait is not cut short by it, so an interrupt never turns into a
+	// forced stop. After the undefine the destroy runs to its end.
+	if ctx.Err() != nil {
+		return fmt.Errorf("VM '%s': interrupted, nothing changed", vmName)
+	}
 	if state != domainStateShutoff {
-		if err := stopActiveDomain(ctx, lv, domain, state, shutdownTimeout); err != nil {
+		if err := stopActiveDomain(context.WithoutCancel(ctx), lv, domain, state, shutdownTimeout); err != nil {
 			return fmt.Errorf("VM '%s' could not be stopped, nothing deleted: %w", vmName, err)
 		}
 	}
+	if ctx.Err() != nil {
+		return fmt.Errorf("VM '%s': interrupted after it was stopped; nothing undefined or deleted, run destroy again to finish", vmName)
+	}
+	ctx = context.WithoutCancel(ctx)
 
 	// Step 5: Undefine domain with NVRAM cleanup
 	log.Printf("Undefining domain...")
@@ -145,6 +165,32 @@ func destroyWithDeps(ctx context.Context, vmName string, lv LibvirtClient, sm st
 	deletedCount := deleteVolumes(ctx, sm, vmVolumes(ctx, sm, vmName, spec, others))
 
 	log.Printf("VM '%s' destroyed successfully (%d volumes deleted)", vmName, deletedCount)
+	return nil
+}
+
+// destroyLeftovers removes what is left of a VM whose domain is not defined:
+// its volumes in the VMs pool, as destroy finds them ("<vmName>_...", less
+// those of another defined VM whose name starts with "<vmName>_"). With no
+// spec there is no other pool to search. A VM is in that state after a
+// create killed before it defined its domain (a second Ctrl-C, a crash), or
+// when the domain was undefined by other means; create refuses the name
+// ("boot volume already exists") until the volumes are gone. With nothing
+// left, the name is unknown and notFound is returned, as before.
+func destroyLeftovers(ctx context.Context, vmName string, lv LibvirtClient, sm storageManager, notFound error) error {
+	log.Printf("VM '%s' is not defined; looking for volumes left of it...", vmName)
+	others, err := otherVMPrefixes(lv, vmName)
+	if err != nil {
+		return fmt.Errorf("VM '%s': cannot list the domains whose volumes it must keep, nothing changed: %w", vmName, err)
+	}
+	volumes := vmVolumes(ctx, sm, vmName, nil, others)
+	if len(volumes) == 0 {
+		return fmt.Errorf("VM '%s' not found: %w", vmName, notFound)
+	}
+	deleted := deleteVolumes(context.WithoutCancel(ctx), sm, volumes)
+	log.Printf("Leftovers of VM '%s' removed (%d of %d volumes deleted)", vmName, deleted, len(volumes))
+	if deleted < len(volumes) {
+		return fmt.Errorf("VM '%s': %d of %d leftover volumes could not be deleted", vmName, len(volumes)-deleted, len(volumes))
+	}
 	return nil
 }
 

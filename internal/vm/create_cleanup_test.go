@@ -300,3 +300,39 @@ func TestCreateFromConfigWithDeps_PathImageChecked(t *testing.T) {
 		}
 	})
 }
+
+// TestCreateFromConfigWithDeps_Interrupted: an interrupt (Ctrl-C) between
+// steps stops the create and its cleanup removes what was made so far, though
+// the context has ended.
+func TestCreateFromConfigWithDeps_Interrupted(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	vm := testVMConfigWithDataDisks() // vdb, vdc
+	lv := newMockLibvirtClient()
+	sm := newMockStorageManager()
+	sm.createVolumeFunc = func(_ context.Context, _ string, spec storage.VolumeSpec) error {
+		if spec.Name == "test-vm_data-vdb.qcow2" {
+			cancel() // Ctrl-C while the first data disk is made
+		}
+		return nil
+	}
+	sm.deleteVolumeFunc = func(c context.Context, _, _ string) error {
+		if c.Err() != nil {
+			return errors.New("cleanup ran with an ended context")
+		}
+		return nil
+	}
+
+	err := createFromConfigWithDeps(ctx, vm, lv, sm, newMockMetadataClient(lv))
+	if err == nil || !strings.Contains(err.Error(), "interrupted") {
+		t.Fatalf("got %v, want an interrupted error", err)
+	}
+	if strings.Contains(err.Error(), "cleanup incomplete") {
+		t.Errorf("cleanup failed: %v", err)
+	}
+	if got := strings.Join(sm.deleteVolumeCalls, " "); got != "foundry-vms/test-vm_boot.qcow2 foundry-vms/test-vm_data-vdb.qcow2" {
+		t.Errorf("deleted %q, want the boot and first data volume", got)
+	}
+	if len(lv.domainDefineXMLCalls) != 0 {
+		t.Error("defined the domain after the interrupt")
+	}
+}

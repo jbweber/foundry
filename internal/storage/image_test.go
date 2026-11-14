@@ -243,14 +243,12 @@ func TestManager_DeleteImage(t *testing.T) {
 	tests := []struct {
 		name      string
 		imageName string
-		force     bool
 		setup     func(*mockLibvirtClient, *Manager)
 		wantErr   bool
 	}{
 		{
 			name:      "delete existing image",
 			imageName: "test-image",
-			force:     false,
 			setup: func(m *mockLibvirtClient, mgr *Manager) {
 				_ = mgr.CreatePool(context.Background(), DefaultImagesPool, PoolTypeDir, DefaultImagesPath)
 				_ = mgr.CreateVolume(context.Background(), DefaultImagesPool, VolumeSpec{
@@ -265,7 +263,6 @@ func TestManager_DeleteImage(t *testing.T) {
 		{
 			name:      "delete non-existent image",
 			imageName: "nonexistent",
-			force:     false,
 			setup: func(m *mockLibvirtClient, mgr *Manager) {
 				_ = mgr.CreatePool(context.Background(), DefaultImagesPool, PoolTypeDir, DefaultImagesPath)
 			},
@@ -279,7 +276,7 @@ func TestManager_DeleteImage(t *testing.T) {
 			mgr := NewManager(mockClient)
 			tt.setup(mockClient, mgr)
 
-			err := mgr.DeleteImage(context.Background(), tt.imageName, tt.force)
+			err := mgr.DeleteImage(context.Background(), tt.imageName)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("DeleteImage() error = %v, wantErr %v", err, tt.wantErr)
 			}

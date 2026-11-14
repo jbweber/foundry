@@ -246,6 +246,7 @@ type mockStorageManager struct {
 	deleteVolumeFunc       func(ctx context.Context, poolName, volumeName string) error
 	getImagePathFunc       func(ctx context.Context, imageName string) (string, error)
 	imageExistsFunc        func(ctx context.Context, imageName string) (bool, error)
+	imageCapacityFunc      func(ctx context.Context, imageName string) (uint64, error)
 	writeVolumeDataFunc    func(ctx context.Context, poolName, volumeName string, data []byte) error
 	listVolumesFunc        func(ctx context.Context, poolName string) ([]storage.VolumeInfo, error)
 	volumeSHA256Func       func(ctx context.Context, poolName, volumeName string) (string, error)
@@ -288,6 +289,10 @@ func newMockStorageManager() *mockStorageManager {
 		// Default: image exists
 		imageExistsFunc: func(ctx context.Context, imageName string) (bool, error) {
 			return true, nil
+		},
+		// Default: a 1 GiB image, smaller than any boot disk the tests ask for
+		imageCapacityFunc: func(ctx context.Context, imageName string) (uint64, error) {
+			return 1 << 30, nil
 		},
 		// Default: write succeeds
 		writeVolumeDataFunc: func(ctx context.Context, poolName, volumeName string, data []byte) error {
@@ -344,6 +349,12 @@ func (m *mockStorageManager) ImageExists(ctx context.Context, imageName string) 
 	defer m.mu.Unlock()
 	m.imageExistsCalls = append(m.imageExistsCalls, imageName)
 	return m.imageExistsFunc(ctx, imageName)
+}
+
+func (m *mockStorageManager) ImageCapacity(ctx context.Context, imageName string) (uint64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.imageCapacityFunc(ctx, imageName)
 }
 
 func (m *mockStorageManager) WriteVolumeData(ctx context.Context, poolName, volumeName string, data []byte) error {

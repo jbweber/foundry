@@ -111,6 +111,9 @@ type storageManager interface {
 	// ImageExists checks if an image exists in the foundry-images pool
 	ImageExists(ctx context.Context, imageName string) (bool, error)
 
+	// ImageCapacity returns an image volume's capacity (its virtual size)
+	ImageCapacity(ctx context.Context, imageName string) (uint64, error)
+
 	// WriteVolumeData writes data to a volume (for cloud-init ISOs)
 	WriteVolumeData(ctx context.Context, poolName, volumeName string, data []byte) error
 

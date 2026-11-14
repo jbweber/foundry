@@ -79,8 +79,10 @@ type VarstoreInfo struct {
 // ImportVarstore stores a key profile's varstore as a volume of the
 // foundry-images pool, sized to the byte, through the libvirt API
 // (StorageVolCreateXML, then StorageVolUpload). With replace, an existing
-// volume of the same profile and architecture is deleted first; VMs created
-// from it keep their own copy, which libvirt made on their first start.
+// volume of the same profile and architecture is read back, then deleted,
+// and put back as it was if the new one cannot be written, so a failed
+// replace leaves the old profile in place; VMs created from it keep their
+// own copy, which libvirt made on their first start.
 func (m *Manager) ImportVarstore(ctx context.Context, profile, arch string, data []byte, replace bool) error {
 	if err := ValidateVarstore(data); err != nil {
 		return err
@@ -90,14 +92,36 @@ func (m *Manager) ImportVarstore(ctx context.Context, profile, arch string, data
 	if err != nil {
 		return err
 	}
+	var old []byte
 	if exists {
 		if !replace {
 			return fmt.Errorf("varstore %s already exists in %s (use --replace)", name, DefaultImagesPool)
+		}
+		// libvirt has no rename, so the new profile can't be written
+		// beside the old one under its name: keep the old one's content
+		// (a varstore is small) to put it back if writing the new fails
+		if old, err = m.readVolume(DefaultImagesPool, name, MaxVarstoreSize); err != nil {
+			return fmt.Errorf("failed to read the old varstore, nothing changed: %w", err)
 		}
 		if err := m.DeleteVolume(ctx, DefaultImagesPool, name); err != nil {
 			return fmt.Errorf("failed to delete the old varstore: %w", err)
 		}
 	}
+	if err := m.writeVarstore(ctx, name, data); err != nil {
+		if old == nil {
+			return err
+		}
+		if rerr := m.writeVarstore(ctx, name, old); rerr != nil {
+			return fmt.Errorf("%w; the old varstore could not be put back either, import it again: %v", err, rerr)
+		}
+		return fmt.Errorf("%w; the old varstore was put back", err)
+	}
+	return nil
+}
+
+// writeVarstore creates the varstore volume name, sized to the byte, and
+// uploads data into it; on a failed upload it deletes the volume again.
+func (m *Manager) writeVarstore(ctx context.Context, name string, data []byte) error {
 	spec := VolumeSpec{
 		Name:          name,
 		Type:          VolumeTypeVarstore,
@@ -108,10 +132,41 @@ func (m *Manager) ImportVarstore(ctx context.Context, profile, arch string, data
 		return fmt.Errorf("failed to create varstore volume: %w", err)
 	}
 	if err := m.WriteVolumeData(ctx, DefaultImagesPool, name, data); err != nil {
-		_ = m.DeleteVolume(ctx, DefaultImagesPool, name)
+		_ = m.DeleteVolume(context.WithoutCancel(ctx), DefaultImagesPool, name)
 		return fmt.Errorf("failed to upload varstore: %w", err)
 	}
 	return nil
+}
+
+// readVolume reads a volume's content through libvirt (StorageVolDownload),
+// refusing one longer than limit bytes.
+func (m *Manager) readVolume(poolName, volumeName string, limit int) ([]byte, error) {
+	pool, err := m.client.StoragePoolLookupByName(poolName)
+	if err != nil {
+		return nil, fmt.Errorf("pool not found: %w", err)
+	}
+	vol, err := m.client.StorageVolLookupByName(pool, volumeName)
+	if err != nil {
+		return nil, fmt.Errorf("volume not found: %w", err)
+	}
+	buf := limitedBuffer{limit: limit}
+	if err := m.client.StorageVolDownload(vol, &buf, 0, 0, 0); err != nil {
+		return nil, fmt.Errorf("failed to read volume %s/%s: %w", poolName, volumeName, err)
+	}
+	return buf.Bytes(), nil
+}
+
+// limitedBuffer is a bytes.Buffer that refuses to grow past limit bytes.
+type limitedBuffer struct {
+	bytes.Buffer
+	limit int
+}
+
+func (b *limitedBuffer) Write(p []byte) (int, error) {
+	if b.Len()+len(p) > b.limit {
+		return 0, fmt.Errorf("volume is larger than %d bytes", b.limit)
+	}
+	return b.Buffer.Write(p)
 }
 
 // ListVarstores lists the key profile varstores in the foundry-images pool,

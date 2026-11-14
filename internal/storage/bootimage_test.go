@@ -35,7 +35,7 @@ func TestCheckBootImageFile(t *testing.T) {
 			if err := os.WriteFile(path, tt.data, 0o600); err != nil {
 				t.Fatal(err)
 			}
-			got, err := CheckBootImageFile(path)
+			got, _, err := CheckBootImageFile(path)
 			if tt.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 					t.Fatalf("got %v, want an error containing %q", err, tt.wantErr)
@@ -51,8 +51,32 @@ func TestCheckBootImageFile(t *testing.T) {
 		})
 	}
 
-	if _, err := CheckBootImageFile(t.TempDir()); err == nil || !strings.Contains(err.Error(), "not a regular file") {
+	if _, _, err := CheckBootImageFile(t.TempDir()); err == nil || !strings.Contains(err.Error(), "not a regular file") {
 		t.Errorf("directory: got %v, want a not-a-regular-file error", err)
+	}
+}
+
+// TestCheckBootImageFile_Size: the size returned is what a guest booted
+// from the image sees: a qcow2's virtual size, a raw image's length.
+func TestCheckBootImageFile_Size(t *testing.T) {
+	dir := t.TempDir()
+	q := qcow2Fixture(4096)
+	binary.BigEndian.PutUint64(q[24:], 10<<30) // size: 10 GiB virtual
+	for name, tt := range map[string]struct {
+		data []byte
+		want uint64
+	}{
+		"q.qcow2": {q, 10 << 30},
+		"r.raw":   {bootableRaw(4096), 4096},
+	} {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, tt.data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, size, err := CheckBootImageFile(path)
+		if err != nil || size != tt.want {
+			t.Errorf("%s: size %d, err %v; want %d", name, size, err, tt.want)
+		}
 	}
 }
 

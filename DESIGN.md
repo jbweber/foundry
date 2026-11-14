@@ -268,8 +268,12 @@ pool's directory. It costs reading the whole image once per create.
   disk; the device is part of the volume name, so no `_` or `/`), and no duplicate device names
 - `serial` (boot disk and data disks) is 1-20 characters from `A-Z a-z 0-9 - _ .`, unique
   among the VM's disks (see [Disk Serials](#disk-serials))
-- At least one network interface, each with `ip`, `gateway`, `bridge`
-- No duplicate IP addresses in network interfaces
+- At least one network interface, each with `ip`, `gateway`, `bridge`; `ip` is an IPv4 address
+  with a prefix length (`net.ParseCIDR`; the MAC and host-side device name are derived from the
+  IPv4 address), `gateway` an IP address (`net.ParseIP`)
+- No duplicate IP addresses in network interfaces, compared as addresses (`10.0.0.5/24` and
+  `10.0.0.5/16` are the same)
+- `spec.cloudInit.passwordHash` is a single line (cloud-init passes it to `chpasswd` as one line)
 - `networkInterfaces[].hostDevice`, when set, is a Linux interface name of 1-15 characters
   (not `.` or `..`, printable ASCII without `/`, `:`, `%` or space), not starting with `vnet`, `vif`,
   `macvtap` or `macvlan`; no two interfaces share a host-side name, set or derived (see
@@ -288,7 +292,8 @@ pool's directory. It costs reading the whole image once per create.
   is 1-64 characters from `A-Z a-z 0-9 . _ -`; `spec.smbios` strings are 1-64
   characters from `A-Z a-z 0-9`, space and `. _ - + ( ) / :`, without leading
   or trailing space; `spec.smbios.uuid` is a UUID (lower-cased on load)
-- `spec.fwCfg[].name` starts with `opt/`, is at most 55 characters (QEMU's
+- `spec.fwCfg[].name` is `opt/` and then `A-Z a-z 0-9 . _ / -` only (libvirt passes it to QEMU
+  unescaped), is at most 55 characters (QEMU's
   limit), is not under `opt/ovmf/` or `opt/org.qemu/`, and is unique; each entry has exactly one of `file` or
   `string`, a `string` at most 128 KiB less 128 bytes (libvirt passes it to QEMU as one command-line argument,
   and exec refuses one of 128 KiB or more) and without a comma (libvirt doesn't escape it)
@@ -302,8 +307,6 @@ pool's directory. It costs reading the whole image once per create.
 
 **Not yet enforced** (documented intent, no implementation):
 - `spec.cloudInit.fqdn` format: valid FQDN (hostname + domain with dots)
-- IP addresses parse as valid CIDR — a malformed IP currently surfaces later, as a
-  MAC/interface-name generation error rather than a config validation error
 - SSH keys have valid format (ssh-rsa, ssh-ed25519, etc.)
 - Password hash starts with `$` (crypt format)
 
@@ -314,7 +317,9 @@ pool's directory. It costs reading the whole image once per create.
 - None of the VM's volumes (boot, data, cloud-init, input) exists yet in its pool: a leftover or
   a volume made by other means fails the create, naming the volume, before anything is made;
   each `inputDisks` `file` is a regular file, and the files of one disk hold at most 16 MiB
-- Boot disk image exists (unless empty: true)
+- Boot disk image exists (unless empty: true), and `spec.bootDisk.sizeGB` is at least its
+  virtual size (the volume's capacity in `foundry-images`; for a path image, a qcow2's header
+  size or a raw file's length)
 - Boot disk image volume has the sha256 `spec.bootDisk.imageSHA256` states, when it states one
 - Bridge exists on hypervisor (future: fuzzy match)
 
@@ -383,7 +388,9 @@ or an image.
 ### VM Destruction Workflow
 
 ```
-1. Check VM exists and is foundry's (refused otherwise, unless --force)
+1. Check VM exists and is foundry's (refused otherwise, unless --force). With no domain of that
+   name, remove its leftover `<vm>_` volumes in foundry-vms (sparing other VMs', as in step 5),
+   or report "not found" when there are none
 1b. List the domains, for the other VMs whose names start with `<vm>_`; if
    they cannot be listed: error, nothing changed (also with --force)
 2. Get domain state
@@ -1220,7 +1227,8 @@ xz -dc fedora-43.qcow2.xz | foundry image import - fedora-43.qcow2
 # Download and import image from URL (TODO: not yet implemented)
 foundry image pull <url> --name <image-name> [--checksum sha256:...]
 
-# Delete base image
+# Delete base image (refused while a volume in any pool is backed by it, and for a
+# Secure Boot key profile)
 foundry image delete <image-name>
 
 # Show image details and usage

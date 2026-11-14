@@ -350,6 +350,11 @@ never deleted by name prefix, so an image called `my-vm_base.qcow2` stays. Only 
 domain without foundry's spec in its metadata is refused with nothing changed, and `foundry destroy --force
 my-vm` destroys it anyway (its `my-vm_...` volumes in foundry-vms only).
 
+With no domain of that name, destroy removes the `my-vm_...` volumes left in
+foundry-vms, as after a create that was killed before it defined the domain.
+Ctrl-C during a create removes what it made so far; during a destroy, it stops
+before the domain is undefined. A second Ctrl-C ends foundry at once.
+
 ### Manage Images
 
 ```bash
@@ -368,6 +373,10 @@ foundry image info fedora-43.qcow2
 # Delete image
 foundry image delete fedora-43.qcow2
 ```
+
+`image delete` refuses an image that is the backing file of a VM's disk
+(destroy those VMs first) and a Secure Boot key profile (`foundry varstore
+delete` manages those).
 
 ### Manage Storage Pools
 

@@ -177,7 +177,8 @@ func (m *mockLibvirtClient) StorageVolLookupByName(pool libvirt.StoragePool, nam
 
 	vol, ok := vols[name]
 	if !ok {
-		return libvirt.StorageVol{}, fmt.Errorf("storage volume not found: %s", name)
+		// As libvirt answers for a name the pool has no volume of
+		return libvirt.StorageVol{}, libvirt.Error{Code: uint32(libvirt.ErrNoStorageVol), Message: "Storage volume not found: " + name}
 	}
 
 	return libvirt.StorageVol{
@@ -217,6 +218,18 @@ func (m *mockLibvirtClient) StorageVolCreateXML(pool libvirt.StoragePool, xml st
 		Pool: pool.Name,
 		Name: vol.name,
 	}, nil
+}
+
+func (m *mockLibvirtClient) StorageVolGetXMLDesc(vol libvirt.StorageVol, flags uint32) (string, error) {
+	vols, ok := m.volumes[vol.Pool]
+	if !ok {
+		return "", fmt.Errorf("storage pool not found: %s", vol.Pool)
+	}
+	v, ok := vols[vol.Name]
+	if !ok {
+		return "", libvirt.Error{Code: uint32(libvirt.ErrNoStorageVol), Message: "Storage volume not found: " + vol.Name}
+	}
+	return v.xml, nil
 }
 
 func (m *mockLibvirtClient) StorageVolDelete(vol libvirt.StorageVol, flags libvirt.StorageVolDeleteFlags) error {

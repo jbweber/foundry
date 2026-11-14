@@ -3,11 +3,13 @@ package storage
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
 	"strings"
 
+	"github.com/digitalocean/go-libvirt"
 	libvirtxml "libvirt.org/go/libvirtxml"
 )
 
@@ -97,7 +99,7 @@ func (m *Manager) ListVolumes(_ context.Context, poolName string) ([]VolumeInfo,
 			Pool:       poolName,
 			Capacity:   capacity,
 			Allocation: allocation,
-			// Type and Format would require parsing XML, skip for now
+			Format:     volumeFormat(m.client, vol),
 		})
 	}
 
@@ -163,11 +165,17 @@ func (m *Manager) VolumeExists(_ context.Context, poolName, volumeName string) (
 		return false, fmt.Errorf("pool not found: %w", err)
 	}
 
-	// Try to look up the volume
+	// Look up the volume: only libvirt's "no such volume" means it is
+	// absent; any other failure (a lost connection, a pool not running)
+	// says nothing about it, and taken as "absent" it would let create
+	// go ahead over a volume that is there
 	_, err = m.client.StorageVolLookupByName(pool, volumeName)
 	if err != nil {
-		// Volume doesn't exist
-		return false, nil
+		var le libvirt.Error
+		if errors.As(err, &le) && le.Code == uint32(libvirt.ErrNoStorageVol) {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to look up volume %s/%s: %w", poolName, volumeName, err)
 	}
 
 	return true, nil
@@ -260,4 +268,18 @@ func VolumeMode(t VolumeType) string {
 		return "0644"
 	}
 	return "0600"
+}
+
+// volumeFormat returns a volume's format (qcow2, raw, iso) as its XML
+// states it, or "" when the XML can't be read.
+func volumeFormat(client LibvirtClient, vol libvirt.StorageVol) VolumeFormat {
+	desc, err := client.StorageVolGetXMLDesc(vol, 0)
+	if err != nil {
+		return ""
+	}
+	var x libvirtxml.StorageVolume
+	if err := x.Unmarshal(desc); err != nil || x.Target == nil || x.Target.Format == nil {
+		return ""
+	}
+	return VolumeFormat(x.Target.Format.Type)
 }

@@ -174,11 +174,24 @@ func createFromConfigWithDeps(ctx context.Context, vm *v1alpha1.VirtualMachine, 
 	var createErr error
 	defer func() {
 		if createErr != nil {
-			if err := cleanupWithDeps(ctx, vm, sm, lv, domainDefined, made); err != nil {
+			// The cleanup runs to its end even when the create was
+			// interrupted (Ctrl-C): that is when it is needed
+			if err := cleanupWithDeps(context.WithoutCancel(ctx), vm, sm, lv, domainDefined, made); err != nil {
 				retErr = fmt.Errorf("%w; cleanup incomplete: %w", retErr, err)
 			}
 		}
 	}()
+
+	// interrupted reports whether ctx has ended (Ctrl-C, SIGTERM), setting
+	// createErr so the cleanup removes what was made so far. Create checks
+	// it between the steps that make something.
+	interrupted := func() bool {
+		if err := ctx.Err(); err != nil {
+			createErr = fmt.Errorf("interrupted: %w", err)
+			return true
+		}
+		return false
+	}
 
 	// Step 1: Check if VM already exists
 	log.Printf("Checking if VM '%s' already exists...", vm.Name)
@@ -244,8 +257,12 @@ func createFromConfigWithDeps(ctx context.Context, vm *v1alpha1.VirtualMachine, 
 			// File path - checked as import checks an image, its format
 			// taken from its content, before anything is made
 			backingVolume = vm.Spec.BootDisk.Image
-			backingFormat, createErr = storage.CheckBootImageFile(backingVolume)
+			var imageSize uint64
+			backingFormat, imageSize, createErr = storage.CheckBootImageFile(backingVolume)
 			if createErr != nil {
+				return createErr
+			}
+			if createErr = checkBootDiskSize(vm, imageSize); createErr != nil {
 				return createErr
 			}
 			log.Printf("Using backing image (file, %s): %s", backingFormat, backingVolume)
@@ -269,6 +286,15 @@ func createFromConfigWithDeps(ctx context.Context, vm *v1alpha1.VirtualMachine, 
 			}
 			log.Printf("Using backing image (volume): %s", backingVolume)
 
+			var imageSize uint64
+			imageSize, createErr = sm.ImageCapacity(ctx, imageName)
+			if createErr != nil {
+				return fmt.Errorf("failed to get image size: %w", createErr)
+			}
+			if createErr = checkBootDiskSize(vm, imageSize); createErr != nil {
+				return createErr
+			}
+
 			// The image's digest, when the spec states one, before anything
 			// is made: a volume that is not the image it is named for (cut
 			// short, or replaced) is never booted
@@ -276,6 +302,10 @@ func createFromConfigWithDeps(ctx context.Context, vm *v1alpha1.VirtualMachine, 
 				return createErr
 			}
 		}
+	}
+
+	if interrupted() {
+		return createErr
 	}
 
 	// Step 4: Create boot disk volume
@@ -295,6 +325,9 @@ func createFromConfigWithDeps(ctx context.Context, vm *v1alpha1.VirtualMachine, 
 
 	// Step 5: Create data disk volumes
 	for _, dataDisk := range vm.Spec.DataDisks {
+		if interrupted() {
+			return createErr
+		}
 		log.Printf("Creating data disk volume %s (%dGB)...", dataDisk.Device, dataDisk.SizeGB)
 		dataSpec := storage.VolumeSpec{
 			Name:       getDataVolumeName(vm, dataDisk.Device),
@@ -306,6 +339,10 @@ func createFromConfigWithDeps(ctx context.Context, vm *v1alpha1.VirtualMachine, 
 			return fmt.Errorf("failed to create data volume %s: %w", dataDisk.Device, createErr)
 		}
 		made = append(made, dataSpec.Name)
+	}
+
+	if interrupted() {
+		return createErr
 	}
 
 	// Step 6: Generate and create cloud-init ISO volume (if configured)
@@ -345,6 +382,10 @@ func createFromConfigWithDeps(ctx context.Context, vm *v1alpha1.VirtualMachine, 
 		log.Printf("Skipping cloud-init (not configured)")
 	}
 
+	if interrupted() {
+		return createErr
+	}
+
 	// Step 7: Create the input disk volumes and upload their images
 	if createErr = createInputVolumes(ctx, vm, sm, inputImages, &made); createErr != nil {
 		return createErr
@@ -366,6 +407,10 @@ func createFromConfigWithDeps(ctx context.Context, vm *v1alpha1.VirtualMachine, 
 	domainXML, createErr = foundrylibvirt.GenerateDomainXML(domainVM, hostArch)
 	if createErr != nil {
 		return fmt.Errorf("failed to generate domain XML: %w", createErr)
+	}
+
+	if interrupted() {
+		return createErr
 	}
 
 	// Step 10: Define domain in libvirt
@@ -394,6 +439,10 @@ func createFromConfigWithDeps(ctx context.Context, vm *v1alpha1.VirtualMachine, 
 	log.Printf("Setting autostart to %d...", autostartValue)
 	if createErr = lv.DomainSetAutostart(domain, int32(autostartValue)); createErr != nil {
 		return fmt.Errorf("failed to set autostart: %w", createErr)
+	}
+
+	if interrupted() {
+		return createErr
 	}
 
 	// Step 12: Start VM
@@ -547,6 +596,19 @@ func checkVolumesAbsent(ctx context.Context, vm *v1alpha1.VirtualMachine, sm sto
 		if exists {
 			return fmt.Errorf("%s volume already exists: %s/%s", v.kind, pool, v.name)
 		}
+	}
+	return nil
+}
+
+// checkBootDiskSize refuses a boot disk smaller than its image's virtual
+// size: the overlay would be made at the smaller size without a warning, and
+// the guest would see a disk cut off in the middle of its partitions (no GPT
+// backup header, a truncated file system).
+func checkBootDiskSize(vm *v1alpha1.VirtualMachine, imageSize uint64) error {
+	const gib = 1 << 30
+	if disk := uint64(vm.Spec.BootDisk.SizeGB) * gib; disk < imageSize {
+		return fmt.Errorf("spec.bootDisk.sizeGB is %d, smaller than its image (%d bytes, so at least %d GiB)",
+			vm.Spec.BootDisk.SizeGB, imageSize, (imageSize+gib-1)/gib)
 	}
 	return nil
 }

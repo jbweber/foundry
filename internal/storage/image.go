@@ -10,7 +10,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
+
+	libvirtxml "libvirt.org/go/libvirtxml"
 
 	"github.com/jbweber/foundry/internal/naming"
 )
@@ -329,22 +332,82 @@ func (m *Manager) ListImages(ctx context.Context) ([]VolumeInfo, error) {
 	return images, nil
 }
 
-// DeleteImage deletes a base image from the foundry-images pool.
-// If force is true, the image is deleted even if it's being used as a backing file.
-func (m *Manager) DeleteImage(ctx context.Context, imageName string, force bool) error {
-	// TODO: If force is false, check if the image is being used as a backing file
-	// This would require iterating through all VMs and checking their backing stores
-	// For now, we just delete the image regardless of force flag
-
-	// Note: force parameter is reserved for future use when we implement backing file checks
-	_ = force
-
+// DeleteImage deletes a base image from the foundry-images pool. It refuses
+// a Secure Boot key profile ('foundry varstore delete' manages those) and an
+// image that is the backing file of a volume in any pool, such as a VM's
+// boot disk: deleting it would leave that VM unable to start. The check
+// reads every pool's volumes; one it cannot read is an error, as the image
+// may be in use there.
+func (m *Manager) DeleteImage(ctx context.Context, imageName string) error {
+	if _, _, ok := naming.ParseVolumeNameVarstore(imageName); ok {
+		return fmt.Errorf("%s is a Secure Boot key profile; use 'foundry varstore delete'", imageName)
+	}
+	path, err := m.GetImagePath(ctx, imageName)
+	if err != nil {
+		return err
+	}
+	users, err := m.backingUsers(path)
+	if err != nil {
+		return fmt.Errorf("cannot tell whether image %s is in use, not deleted: %w", imageName, err)
+	}
+	if len(users) > 0 {
+		return fmt.Errorf("image %s is the backing file of %s; destroy the VMs that use it first", imageName, strings.Join(users, ", "))
+	}
 	return m.DeleteVolume(ctx, DefaultImagesPool, imageName)
+}
+
+// backingUsers returns the volumes, as "pool/volume", in any pool whose
+// backing file is path.
+func (m *Manager) backingUsers(path string) ([]string, error) {
+	pools, _, err := m.client.ConnectListAllStoragePools(1, 0)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list pools: %w", err)
+	}
+	var users []string
+	for _, pool := range pools {
+		vols, _, err := m.client.StoragePoolListAllVolumes(pool, 1, 0)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list the volumes of pool %s: %w", pool.Name, err)
+		}
+		for _, vol := range vols {
+			desc, err := m.client.StorageVolGetXMLDesc(vol, 0)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read volume %s/%s: %w", pool.Name, vol.Name, err)
+			}
+			var x libvirtxml.StorageVolume
+			if err := x.Unmarshal(desc); err != nil {
+				return nil, fmt.Errorf("failed to parse volume %s/%s: %w", pool.Name, vol.Name, err)
+			}
+			if x.BackingStore != nil && x.BackingStore.Path == path {
+				users = append(users, pool.Name+"/"+vol.Name)
+			}
+		}
+	}
+	return users, nil
 }
 
 // GetImagePath gets the full filesystem path for a base image.
 func (m *Manager) GetImagePath(ctx context.Context, imageName string) (string, error) {
 	return m.GetVolumePath(ctx, DefaultImagesPool, imageName)
+}
+
+// ImageCapacity returns the capacity of an image volume in the
+// foundry-images pool: the disk size a guest booted from it sees (for a
+// qcow2 image, its virtual size, as libvirt reads it from the header).
+func (m *Manager) ImageCapacity(_ context.Context, imageName string) (uint64, error) {
+	pool, err := m.client.StoragePoolLookupByName(DefaultImagesPool)
+	if err != nil {
+		return 0, fmt.Errorf("pool not found: %w", err)
+	}
+	vol, err := m.client.StorageVolLookupByName(pool, imageName)
+	if err != nil {
+		return 0, fmt.Errorf("image not found: %w", err)
+	}
+	_, capacity, _, err := m.client.StorageVolGetInfo(vol)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get image info: %w", err)
+	}
+	return capacity, nil
 }
 
 // ImageExists checks if a base image exists in the foundry-images pool.

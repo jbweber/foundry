@@ -155,5 +155,27 @@ git history.
   detected from its content and named as the boot overlay's backing format; it was guessed from the file
   name, so a raw image named `.qcow2`, or one named without `.raw` or `.img`, was opened as the wrong
   format.
+- The loader checks addresses and a few strings it took as given: `ip` must be an IPv4 address with a prefix
+  length and `gateway` an IP address (a bad one failed only after volumes were made), duplicate addresses are
+  found whatever their prefix length (`10.0.0.5/24` and `10.0.0.5/16` got the same MAC), fw_cfg names take only
+  `A-Z a-z 0-9 . _ / -` after `opt/` (a comma kept the VM from starting), and `passwordHash` must be one line.
+- `foundry create` refuses a boot disk smaller than its image's virtual size, before it makes anything. The
+  disk was made at the smaller size without a warning, and the guest saw a disk cut off in the middle of its
+  partitions.
+- Ctrl-C or SIGTERM during `foundry create` stops it and removes what it made so far; during `foundry destroy` it
+  stops before the domain is undefined. A second Ctrl-C ends foundry at once. Before, an interrupted create left
+  volumes behind and `foundry destroy` answered that the VM did not exist; it now removes the `<vm>_...` volumes
+  left in foundry-vms of a name that has no domain.
+- A volume check that fails for another reason than "no such volume" (a lost connection, a stopped pool) is an
+  error; it was taken as "absent", so create could go ahead over a volume that was there. `image list` and
+  `image info` show the image's format, which was blank.
+- `foundry image delete` refuses an image that is the backing file of a volume in any pool, such as a VM's boot
+  disk, which could then no longer start, and refuses a Secure Boot key profile (`foundry varstore delete` manages
+  those). It deleted both.
+- `foundry pool delete --force` that cannot delete a volume says which and keeps the pool; it reported success
+  and left the files behind with no pool.
+- `foundry varstore import --replace` keeps the old profile when the new one cannot be written: it reads the
+  old one back before deleting it and puts it back on failure. It deleted the old one first, so a failed upload
+  lost it.
 
 [Unreleased]: https://github.com/jbweber/foundry/compare/v0.6.1...HEAD

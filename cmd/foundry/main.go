@@ -31,9 +31,37 @@ var (
 )
 
 func main() {
-	if err := rootCmd.Execute(); err != nil {
+	ctx, stop := interruptContext()
+	err := rootCmd.ExecuteContext(ctx)
+	stop()
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
+	}
+}
+
+// interruptContext returns a context that ends on the first SIGINT (Ctrl-C)
+// or SIGTERM, so a command stops and cleans up what it made: create removes
+// the volumes and domain it made so far, destroy stops before it undefines.
+// Once it has ended, the signals are back to their default: a second Ctrl-C
+// ends foundry at once, should the cleanup hang (what is left then is
+// removed by 'foundry destroy').
+func interruptContext() (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(context.Background())
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		select {
+		case <-sigs:
+			signal.Stop(sigs)
+			fmt.Fprintln(os.Stderr, "Interrupted; cleaning up (press Ctrl-C again to quit at once)...")
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	return ctx, func() {
+		signal.Stop(sigs)
+		cancel()
 	}
 }
 
@@ -86,8 +114,7 @@ network settings, and cloud-init configuration.`,
 		configPath := args[0]
 		fmt.Printf("Creating VM from config: %s\n", configPath)
 
-		ctx := context.Background()
-		if err := vm.Create(ctx, configPath); err != nil {
+		if err := vm.Create(cmd.Context(), configPath); err != nil {
 			return fmt.Errorf("failed to create VM: %w", err)
 		}
 
@@ -121,8 +148,7 @@ metadata, or whose spec cannot be read, is refused with nothing changed.
 		vmName := args[0]
 		fmt.Printf("Destroying VM: %s\n", vmName)
 
-		ctx := context.Background()
-		if err := vm.Destroy(ctx, vmName, destroyForce); err != nil {
+		if err := vm.Destroy(cmd.Context(), vmName, destroyForce); err != nil {
 			return fmt.Errorf("failed to destroy VM: %w", err)
 		}
 
@@ -481,7 +507,7 @@ Example:
 		}
 
 		// Delete the image
-		if err := mgr.DeleteImage(ctx, imageName, false); err != nil {
+		if err := mgr.DeleteImage(ctx, imageName); err != nil {
 			return fmt.Errorf("failed to delete image: %w", err)
 		}
 
