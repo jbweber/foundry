@@ -1242,6 +1242,9 @@ When storing VM metadata using `yaml.Marshal()` and `xml.Marshal()`:
 - **Nil values**: `yaml.Marshal(nil)` returns `"null\n"` without error
 - **Empty structs**: Both marshalers handle empty structs gracefully
 - **Marshal errors**: Practically impossible to trigger for well-formed Go structs
+- **Special characters**: the YAML is the metadata element's XML text (`xml:",chardata"`),
+  escaped on store and unescaped on load, so a spec string holding `<` or `&` (a shell
+  script in `rawUserData`, an inline input file) stores valid XML and reads back unchanged
 - **Test coverage**: Don't worry about covering marshal error paths for standard types
 
 This is why the `metadata.Store()` function achieves only 81.8% coverage - the error paths for YAML/XML marshaling failures (lines 51, 63 in storage.go) are unreachable in practice with valid struct types.
