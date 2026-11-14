@@ -137,5 +137,11 @@ git history.
   hand on the hypervisor, as root, with `chmod 0711` on the foundry-vms directory and `chmod 0600` on the
   VMs' volumes in it (`virsh pool-dumpxml foundry-vms` shows the path), and the same for VM volumes in
   another pool a spec's `storagePool` names.
+- A boot image given as a host path (`bootDisk.image: /path/...`) is checked as `foundry image import`
+  checks an image, before anything is made: a regular file holding a qcow2 or a bootable raw image, and a
+  qcow2 without a backing file or an external data file, which QEMU would read from the host. Its format is
+  detected from its content and named as the boot overlay's backing format; it was guessed from the file
+  name, so a raw image named `.qcow2`, or one named without `.raw` or `.img`, was opened as the wrong
+  format.
 
 [Unreleased]: https://github.com/jbweber/foundry/compare/v0.6.1...HEAD

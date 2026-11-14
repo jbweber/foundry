@@ -208,7 +208,11 @@ status:
 **Image Reference Formats:**
 - Volume name: `fedora-43.qcow2` (uses `imagePool` or defaults to `foundry-images`)
 - Full reference: `foundry-images:fedora-43.qcow2` (explicit pool:volume format)
-- File path: `/path/to/image.qcow2` (direct filesystem path, not recommended)
+- File path: `/path/to/image.qcow2` (direct filesystem path, not recommended). Checked as an
+  import checks an image, before anything is made: a regular file, a qcow2 or bootable raw image
+  by its content, and a qcow2 without a backing or external data file. Its format is taken from
+  its content, never from its name, and named as the overlay's backing format. foundry reads the
+  file on the machine it runs on, the hypervisor unless libvirt is reached over `--socket`
 
 **Image digest** (`spec.bootDisk.imageSHA256`, optional): the sha256 of the
 image volume's bytes, 64 lower-case hex digits as `sha256sum` prints them for

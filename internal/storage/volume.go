@@ -218,6 +218,11 @@ func generateVolumeXML(_ string, spec VolumeSpec, _ *Manager) (string, error) {
 		if ext == ".raw" || ext == ".img" {
 			backingFormat = "raw"
 		}
+		// A format detected from the content wins over the extension: a
+		// boot image given as a host path is named freely
+		if spec.BackingFormat != "" {
+			backingFormat = string(spec.BackingFormat)
+		}
 
 		vol.BackingStore = &libvirtxml.StorageVolumeBackingStore{
 			Path: spec.BackingVolume,

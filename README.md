@@ -202,6 +202,17 @@ foundry-vms directory other users can't list (0711); base images and key
 profiles stay readable by all (0644), as they are shared and hold nothing
 secret.
 
+### Trust a Spec Like a Script
+
+Running a spec is like running a script: it can name any file on the host
+that your user can read, and hand its content to the guest. Input disk
+`file`s go onto an ISO the guest reads; a kernel, initrd, fw_cfg `file`,
+NVRAM template or a boot image given as a path is opened on the hypervisor.
+Only run specs from people you would let read those files. A boot image
+given as a path is checked as `foundry image import` checks an image (a
+qcow2 that would make QEMU read another file is refused), and its format is
+taken from its content, never from its name.
+
 ### Input Disks
 
 `spec.inputDisks` gives the guest a few small files on read-only disks, such as

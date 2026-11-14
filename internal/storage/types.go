@@ -43,6 +43,7 @@ type VolumeSpec struct {
 	CapacityGB    uint64       // Capacity in GB
 	CapacityBytes uint64       // Optional: exact capacity in bytes, used instead of CapacityGB (e.g. a UEFI varstore, which QEMU maps as a flash device of exactly its size)
 	BackingVolume string       // Optional: backing volume path for qcow2 snapshots (filesystem path, not pool:volume - required because backing images are typically in a different pool like foundry-images)
+	BackingFormat VolumeFormat // Optional: the backing volume's format, as detected from its content; without it the format follows the backing path's extension (an imported image, whose name import checked against its content)
 }
 
 // Validate checks if the volume spec is valid.
