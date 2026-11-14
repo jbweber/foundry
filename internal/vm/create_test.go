@@ -729,12 +729,17 @@ func TestCreateFromConfigWithDeps_ImagePathHandling(t *testing.T) {
 		wantErr   string
 	}{
 		{
-			name:  "file path image",
-			image: "/var/lib/libvirt/images/fedora.qcow2",
+			// A path image is checked on disk (see
+			// TestCreateFromConfigWithDeps_PathImageChecked), not looked up
+			// in a pool: a missing file fails before anything is made
+			name:  "file path image missing",
+			image: "/nonexistent/fedora.qcow2",
 			setupMock: func(sm *mockStorageManager) {
-				// File paths shouldn't trigger image existence checks
+				sm.imageExistsFunc = func(context.Context, string) (bool, error) {
+					return false, errors.New("file paths must not be looked up in a pool")
+				}
 			},
-			wantErr: "",
+			wantErr: "failed to open boot image",
 		},
 		{
 			name:  "image check error",

@@ -8,13 +8,6 @@ import (
 	"testing"
 )
 
-// bootableRaw is a raw image with the boot sector signature, size bytes long.
-func bootableRaw(size int) []byte {
-	b := make([]byte, size)
-	copy(b[510:], mbrSignature)
-	return b
-}
-
 // TestCheckBootImageFile: a boot image given as a host path is checked as an
 // import is, and its format comes from its content, not its name.
 func TestCheckBootImageFile(t *testing.T) {
