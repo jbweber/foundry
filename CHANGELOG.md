@@ -68,6 +68,9 @@ git history.
   volume names. A data disk's `device` must be `vdb` to `vdzz` (`^vd[b-z]{1,2}$`). Both are checked when a
   spec is loaded for `create` and `render`; existing VMs are listed, shown and destroyed as before,
   whatever their name.
+- Volumes and pools are created without an owner or group, which libvirt sets itself while a domain uses a
+  volume; foundry no longer reads the QEMU user from `/etc/libvirt/qemu.conf`, so a remote libvirt over
+  `--socket` no longer needs matching QEMU UIDs.
 
 ### Fixed
 
@@ -127,5 +130,12 @@ git history.
   disks deleted. The cleanup's failures are no longer only logged: the create's error says what was left
   behind. A domain that may still be running (it could not be stopped, or its state could not be read) is
   left defined with its volumes, for `foundry destroy` to remove, instead of being undefined while it runs.
+- A VM's own volumes (boot and data disks, the cloud-init ISO with its password hash, input disks) are created
+  0600, and the foundry-vms pool's directory 0711; they were 0644 and 0755, readable and listable by every
+  local user. Base images and Secure Boot key profiles stay 0644 and other pools 0755: they are shared and
+  hold nothing secret. libvirt keeps the mode of volumes and pool directories made before: tighten them by
+  hand on the hypervisor, as root, with `chmod 0711` on the foundry-vms directory and `chmod 0600` on the
+  VMs' volumes in it (`virsh pool-dumpxml foundry-vms` shows the path), and the same for VM volumes in
+  another pool a spec's `storagePool` names.
 
 [Unreleased]: https://github.com/jbweber/foundry/compare/v0.6.1...HEAD

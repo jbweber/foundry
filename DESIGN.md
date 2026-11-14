@@ -922,6 +922,15 @@ and the input disks) carry none: a guest finds those by their volume label.
 - Support for different backends: dir, LVM, ZFS, NFS, Ceph
 - CLI commands for pool management
 
+**Modes and ownership:** foundry sets no owner or group on a pool or volume; libvirt
+gives a disk to QEMU's user (and its SELinux label) while a domain uses it, and back
+after. A VM's own volumes (boot, data, cloud-init, input) are 0600: they hold its data
+and secrets such as the password hash. Base images and Secure Boot key profiles are 0644:
+shared backing files and varstore templates (certificates, no private keys). The
+foundry-vms directory is 0711, so QEMU can open a volume by path but other users can't
+list the VMs' disks; other pools, foundry-images included, are 0755. libvirt applies a
+mode only when it makes the volume or builds the pool, so older ones keep theirs.
+
 **Volume Naming Convention** (flat namespace within pools):
 - Boot disk: `{vm-name}_boot`
 - Data disks: `{vm-name}_data-{device}` (e.g., `web-server_data-vdb`)

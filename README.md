@@ -185,6 +185,23 @@ QEMU can read it: only use specs from people who may read that file as root.
 `smbios.uuid` can't change on an existing VM (libvirt keeps a domain's UUID);
 set it at creation.
 
+### Keep Secrets out of the Spec
+
+A spec must hold no secrets: no private keys, tokens or plain passwords, in
+user data, inline input files, fw_cfg strings or annotations. foundry stores
+the whole spec as plain text in the domain's metadata, and any local user can
+read a domain's XML through libvirt's read-only socket. fw_cfg strings also
+show on QEMU's command line, which every local user can see. Deliver secrets
+another way, for example from a secret store the guest fetches from at first
+boot. A `passwordHash` is stored the same way, and should be a strong hash
+of a password used nowhere else.
+
+On the hypervisor, the VM's own volumes (boot and data disks, the cloud-init
+seed, input disks) are created readable by their owner only (0600), in a
+foundry-vms directory other users can't list (0711); base images and key
+profiles stay readable by all (0644), as they are shared and hold nothing
+secret.
+
 ### Input Disks
 
 `spec.inputDisks` gives the guest a few small files on read-only disks, such as
@@ -385,9 +402,7 @@ foundry --socket /tmp/libvirt.sock list
 ```
 
 Domains and volumes live on the far end. Files foundry reads itself (the VM
-config, an image to import) come from the machine foundry runs on. Volume
-ownership comes from the local `/etc/libvirt/qemu.conf` and QEMU user, so the
-QEMU user's UID and GID should match on both machines.
+config, an image to import) come from the machine foundry runs on.
 
 ## Configuration
 

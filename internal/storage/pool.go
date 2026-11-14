@@ -226,18 +226,15 @@ func (m *Manager) RefreshPool(ctx context.Context, name string) error {
 
 // generateDirPoolXML generates XML for a directory-based storage pool.
 func generateDirPoolXML(name, path string) (string, error) {
-	// Get the QEMU user/group IDs for this system
-	uid, gid, _ := GetQEMUUserGroup()
-
 	pool := &libvirtxml.StoragePool{
 		Type: "dir",
 		Name: name,
 		Target: &libvirtxml.StoragePoolTarget{
 			Path: path,
+			// No owner or group: the directory is libvirt's (root's); QEMU
+			// only traverses it to open a volume by path. See PoolMode.
 			Permissions: &libvirtxml.StoragePoolTargetPermissions{
-				Owner: uid,
-				Group: gid,
-				Mode:  "0755",
+				Mode: PoolMode(name),
 			},
 		},
 	}
@@ -253,4 +250,18 @@ func generateDirPoolXML(name, path string) (string, error) {
 	xml = strings.TrimSpace(xml)
 
 	return xml, nil
+}
+
+// PoolMode is the mode of a pool's directory when foundry builds it. QEMU
+// only needs to traverse it to open a volume by path, so the VMs pool,
+// whose volumes are private (VolumeMode), is 0711: other local users
+// cannot list which VMs and disks it holds. Other pools, the images pool
+// among them, are 0755: base images are shared, not secret. libvirt applies
+// the mode only when it builds the pool: a pool that exists keeps its
+// directory's mode.
+func PoolMode(name string) string {
+	if name == DefaultVMsPool {
+		return "0711"
+	}
+	return "0755"
 }
