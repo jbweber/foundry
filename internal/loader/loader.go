@@ -316,6 +316,12 @@ func validateSMBIOS(vm *v1alpha1.VirtualMachine) error {
 	return nil
 }
 
+// fwCfgMaxName is the longest fw_cfg name QEMU takes: FW_CFG_MAX_FILE_PATH is
+// 56 bytes including the terminating NUL
+// (https://gitlab.com/qemu-project/qemu/-/blob/v10.1.0/include/standard-headers/linux/qemu_fw_cfg.h).
+// A longer name passes libvirt's define and fails when QEMU starts.
+const fwCfgMaxName = 55
+
 // validateFwCfg checks a list of fw_cfg entries.
 //
 // libvirt only accepts names under "opt/" and reserves "opt/ovmf/" and
@@ -327,6 +333,9 @@ func validateFwCfg(field string, entries []v1alpha1.FwCfgEntrySpec) error {
 	for i, e := range entries {
 		if !strings.HasPrefix(e.Name, "opt/") {
 			return fmt.Errorf("%s[%d].name %q must start with \"opt/\"", field, i, e.Name)
+		}
+		if len(e.Name) > fwCfgMaxName {
+			return fmt.Errorf("%s[%d].name %q is %d characters; QEMU allows at most %d", field, i, e.Name, len(e.Name), fwCfgMaxName)
 		}
 		if strings.HasPrefix(e.Name, "opt/ovmf/") || strings.HasPrefix(e.Name, "opt/org.qemu/") {
 			return fmt.Errorf("%s[%d].name %q is reserved by libvirt", field, i, e.Name)

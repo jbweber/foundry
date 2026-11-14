@@ -91,6 +91,8 @@ func TestValidateSpec_FwCfg(t *testing.T) {
 		{name: "not under opt", entries: []v1alpha1.FwCfgEntrySpec{{Name: "etc/foo", String: "x"}}, wantErr: `spec.fwCfg[0].name "etc/foo" must start with "opt/"`},
 		{name: "reserved ovmf", entries: []v1alpha1.FwCfgEntrySpec{{Name: "opt/ovmf/X-PciMmio64Mb", String: "1"}}, wantErr: "reserved by libvirt"},
 		{name: "reserved qemu", entries: []v1alpha1.FwCfgEntrySpec{{Name: "opt/org.qemu/x", String: "1"}}, wantErr: "reserved by libvirt"},
+		{name: "name too long", entries: []v1alpha1.FwCfgEntrySpec{{Name: "opt/" + strings.Repeat("x", 52), String: "1"}}, wantErr: "is 56 characters; QEMU allows at most 55"},
+		{name: "name at the limit", entries: []v1alpha1.FwCfgEntrySpec{{Name: "opt/" + strings.Repeat("x", 51), String: "1"}}},
 		{name: "neither file nor string", entries: []v1alpha1.FwCfgEntrySpec{{Name: "opt/a"}}, wantErr: "exactly one of file or string"},
 		{name: "both file and string", entries: []v1alpha1.FwCfgEntrySpec{{Name: "opt/a", File: "/f", String: "s"}}, wantErr: "exactly one of file or string"},
 		{name: "duplicate", entries: []v1alpha1.FwCfgEntrySpec{

@@ -225,8 +225,8 @@ status:
   is 1-64 characters from `A-Z a-z 0-9 . _ -`; `spec.smbios` strings are 1-64
   characters from `A-Z a-z 0-9`, space and `. _ - + ( ) / :`, without leading
   or trailing space; `spec.smbios.uuid` is a UUID (lower-cased on load)
-- `spec.fwCfg[].name` starts with `opt/`, is not under `opt/ovmf/` or
-  `opt/org.qemu/`, and is unique; each entry has exactly one of `file` or
+- `spec.fwCfg[].name` starts with `opt/`, is at most 55 characters (QEMU's
+  limit), is not under `opt/ovmf/` or `opt/org.qemu/`, and is unique; each entry has exactly one of `file` or
   `string` (see [SMBIOS and fw_cfg](#smbios-and-fw_cfg))
 
 **Not yet enforced** (documented intent, no implementation):
@@ -564,6 +564,8 @@ one `<sysinfo type='smbios'><system>` block with the serial and whatever
 - libvirt requires the SMBIOS UUID to match the domain's, so a set
   `spec.smbios.uuid` is also the domain UUID; a VM destroyed and created
   again keeps the same identity. Without it libvirt picks the UUID.
+  libvirt does not let a defined domain change its UUID, so set it when the
+  VM is created; changing it later means destroying and creating the VM.
 - The character sets keep every value a plain token in libvirt XML, on QEMU's
   `-smbios` option (no `,` `=` or quotes) and in the guest's sysfs (no
   leading or trailing space, which readers strip).
@@ -571,7 +573,9 @@ one `<sysinfo type='smbios'><system>` block with the serial and whatever
 **fw_cfg.** `spec.fwCfg` entries become one `<sysinfo type='fwcfg'>` block;
 the guest reads each from `/sys/firmware/qemu_fw_cfg/by_name/<name>/raw`
 (with the `qemu_fw_cfg` module). `string` is inline content, `file` a file on
-the hypervisor that QEMU reads at start. libvirt accepts only names under
+the hypervisor that QEMU reads at start. A `file` entry hands that file's
+content to the guest, and libvirt relabels the file so QEMU can read it: only
+run specs written by someone who may already read that file as root. libvirt accepts only names under
 `opt/` and reserves `opt/ovmf/` and `opt/org.qemu/`; validation checks this
 at load time rather than at define time. For example,
 `opt/org.tianocore/EnableLegacyLoader` set to `no` makes OVMF verify a
