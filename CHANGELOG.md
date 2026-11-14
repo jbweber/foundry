@@ -112,5 +112,9 @@ git history.
   only makes it transient, so such a VM kept running on disks destroy had deleted. A VM that cannot be
   stopped, or whose state cannot be read, is now an error with nothing undefined or deleted, also with
   `--force`.
+- `foundry destroy` lists the domains before it changes anything, and stops with nothing changed when it
+  can't, also with `--force`. It listed them after the undefine, to spare the volumes of another VM whose name
+  starts with the destroyed VM's name and `_`, and when the listing failed it only warned and went on with
+  none spared: destroying `web` deleted the volumes of a VM `web_2`.
 
 [Unreleased]: https://github.com/jbweber/foundry/compare/v0.6.1...HEAD

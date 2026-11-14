@@ -30,7 +30,8 @@ const (
 // Destroy destroys a VM by name.
 //
 // This orchestrates the entire VM destruction process:
-//  1. Check if VM exists and is foundry's (its spec is in the domain's metadata)
+//  1. Check if VM exists and is foundry's (its spec is in the domain's metadata),
+//     and list the domains whose volumes it must spare (see vmVolumes)
 //  2. Get VM state
 //  3. Stop it in any state but shut off: graceful shutdown (5s timeout),
 //     or at once a forced destroy when paused, suspended or crashed
@@ -47,8 +48,8 @@ const (
 //
 // Returns an error if the VM doesn't exist, is refused, or if critical libvirt
 // operations fail. A VM that cannot be stopped, or whose state cannot be
-// read, is an error with its definition and volumes left as they are, also
-// with force.
+// read, and domains that cannot be listed, are errors with the definition
+// and volumes left as they are, also with force.
 func Destroy(ctx context.Context, vmName string, force bool) error {
 	// Connect to libvirt
 	log.Printf("Connecting to libvirt...")
@@ -106,6 +107,15 @@ func destroyWithDeps(ctx context.Context, vmName string, lv LibvirtClient, sm st
 		spec = nil
 	}
 
+	// Step 1b: List the other domains whose names start with "<vm>_", whose
+	// volumes destroy must spare, before anything is changed: without the
+	// list, destroying "web" would take the "web_..." volumes of a VM
+	// "web_2", so a failed listing stops the destroy, also when forced
+	others, err := otherVMPrefixes(lv, vmName)
+	if err != nil {
+		return fmt.Errorf("VM '%s': cannot list the domains whose volumes it must keep, nothing changed: %w", vmName, err)
+	}
+
 	// Step 2: Get VM state
 	log.Printf("Checking VM state...")
 	state, _, err := lv.DomainGetState(domain, 0)
@@ -132,7 +142,7 @@ func destroyWithDeps(ctx context.Context, vmName string, lv LibvirtClient, sm st
 
 	// Step 6: Delete storage volumes
 	log.Printf("Cleaning up storage volumes...")
-	deletedCount := deleteVolumes(ctx, sm, vmVolumes(ctx, lv, sm, vmName, spec))
+	deletedCount := deleteVolumes(ctx, sm, vmVolumes(ctx, sm, vmName, spec, others))
 
 	log.Printf("VM '%s' destroyed successfully (%d volumes deleted)", vmName, deletedCount)
 	return nil
@@ -154,22 +164,13 @@ type poolVolume struct {
 // VM. With no spec (a forced destroy of a domain foundry did not make), only
 // the VMs pool is searched.
 //
-// Left out everywhere are the volumes of another defined domain whose own
-// name starts with "<vmName>_" (destroying "web" does not take
-// "web_2_boot.qcow2" from a VM "web_2"). Pools that cannot be listed are
+// Left out everywhere are the volumes starting with one of others, the
+// prefixes of the other defined domains whose names start with "<vmName>_"
+// (destroying "web" does not take "web_2_boot.qcow2" from a VM "web_2"; see
+// otherVMPrefixes). Pools that cannot be listed are
 // skipped with a warning.
-func vmVolumes(ctx context.Context, lv LibvirtClient, sm storageManager, vmName string, spec *v1alpha1.VirtualMachine) []poolVolume {
+func vmVolumes(ctx context.Context, sm storageManager, vmName string, spec *v1alpha1.VirtualMachine, others []string) []poolVolume {
 	prefix := vmName + "_"
-	var others []string
-	if domains, _, err := lv.ConnectListAllDomains(1, 0); err != nil {
-		log.Printf("Warning: failed to list domains: %v", err)
-	} else {
-		for _, d := range domains {
-			if strings.HasPrefix(d.Name, prefix) {
-				others = append(others, d.Name+"_")
-			}
-		}
-	}
 
 	type search struct {
 		pool  string
@@ -206,6 +207,26 @@ func vmVolumes(ctx context.Context, lv LibvirtClient, sm storageManager, vmName 
 		}
 	}
 	return found
+}
+
+// otherVMPrefixes returns the volume prefixes ("<name>_") of the other
+// defined domains whose names start with "<vmName>_": their volumes also
+// start with "<vmName>_", and vmVolumes leaves them out. An error means the
+// domains could not be listed, and so which volumes are another VM's is
+// unknown.
+func otherVMPrefixes(lv LibvirtClient, vmName string) ([]string, error) {
+	domains, _, err := lv.ConnectListAllDomains(1, 0)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list domains: %w", err)
+	}
+	prefix := vmName + "_"
+	var others []string
+	for _, d := range domains {
+		if strings.HasPrefix(d.Name, prefix) {
+			others = append(others, d.Name+"_")
+		}
+	}
+	return others, nil
 }
 
 // ownVolume reports whether volume is one foundry makes for the VM vmName

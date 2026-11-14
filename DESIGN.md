@@ -374,6 +374,8 @@ or an image.
 
 ```
 1. Check VM exists and is foundry's (refused otherwise, unless --force)
+1b. List the domains, for the other VMs whose names start with `<vm>_`; if
+   they cannot be listed: error, nothing changed (also with --force)
 2. Get domain state
 3. If not shut off (running, blocked, paused, shutting down, crashed,
    suspended):
@@ -402,7 +404,9 @@ anyway, searching foundry-vms only for its volumes (with no spec there is no
 Step 5 takes every volume in foundry-vms named `<vm>_...`, so what a failed
 create left there goes too, except those of another defined VM whose name
 starts with `<vm>_` (destroying `web` leaves `web_2`'s) and Secure Boot key
-profiles. It never searches the images pool by prefix: image names are free
+profiles. Those VMs are found by listing the domains in step 1b, before
+anything is changed: without the list destroy can't tell their volumes from
+the VM's own, so a failed listing stops it. It never searches the images pool by prefix: image names are free
 text, so an image `rhel_10.qcow2` would go with a VM named `rhel`. When the
 VM's stored spec puts its disks in another pool (`spec.storagePool`, the
 images pool included), destroy deletes there only the names foundry gives
