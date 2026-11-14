@@ -24,6 +24,12 @@ git history.
 
 ### Changed
 
+- `foundry` prints each error once; it printed most twice. The usage text is shown for a mistake in the
+  arguments or flags only, no longer when a command fails (such as `create` with a missing file).
+- An existing default pool (foundry-images, foundry-vms, foundry-logs) is checked rather than trusted: it must
+  be a dir pool with an absolute, clean target path, at any such path, as the logs pool already was. Create
+  also checks, before it makes anything, that foundry-images and foundry-vms are running.
+
 - `foundry destroy` also deletes the VM's serial log and its rotated copies, by exact name, and removes a log
   left of a VM whose domain is gone. A create that fails after defining the domain deletes the log too.
 - `pool delete` refuses foundry-logs as it refuses the other default pools; `pool list` and `storage status`

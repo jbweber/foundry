@@ -101,6 +101,10 @@ type storageManager interface {
 	// back (virtlogd's console logs) show as volumes
 	RefreshPool(ctx context.Context, name string) error
 
+	// CheckDirPool checks that a pool is a running dir pool with an absolute,
+	// clean path, and returns that path (see storage.Manager.CheckDirPool)
+	CheckDirPool(ctx context.Context, name string) (string, error)
+
 	// LogsDir returns the logs pool's directory, checked (see storage.Manager.LogsDir)
 	LogsDir(ctx context.Context) (string, error)
 
