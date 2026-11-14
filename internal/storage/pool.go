@@ -3,20 +3,26 @@ package storage
 import (
 	"context"
 	"fmt"
+	"path"
 	"strings"
 
 	"github.com/digitalocean/go-libvirt"
 	libvirtxml "libvirt.org/go/libvirtxml"
 )
 
-// EnsurePool ensures a storage pool exists, creating it if necessary.
-// If the pool already exists, this is a no-op.
+// EnsurePool ensures a storage pool exists, creating it at path if
+// necessary. A pool that exists is kept where it is, at whatever path it
+// has, but its definition is checked as CheckDirPool checks it (a dir pool
+// with an absolute, clean target path), so a pool of that name that foundry
+// could not use is an error here rather than later. Whether it runs is
+// not checked here: create checks that (CheckDirPool) for the pools it
+// writes to, while destroy and the listings still work with a stopped pool.
 func (m *Manager) EnsurePool(ctx context.Context, name string, poolType PoolType, path string) error {
 	// Check if pool already exists
-	_, err := m.client.StoragePoolLookupByName(name)
+	pool, err := m.client.StoragePoolLookupByName(name)
 	if err == nil {
-		// Pool exists, nothing to do
-		return nil
+		_, err := m.dirPoolPath(pool)
+		return err
 	}
 
 	// Pool doesn't exist, create it
@@ -275,4 +281,52 @@ func PoolMode(name string) string {
 		return "0711"
 	}
 	return "0755"
+}
+
+// CheckDirPool checks that the pool name is one foundry can write to and
+// name files in, and returns its directory as libvirt reports it: a dir pool
+// (libvirt can be told a file path in it, and foundry builds no other kind),
+// running (a pool that is not running cannot be refreshed or take new
+// volumes), whose target is an absolute, clean path other than "/". The
+// path is not compared with foundry's default: a pool defined elsewhere
+// before foundry first ran, on another disk say, is used where it is.
+// foundry never relies on a pool's path itself, only on what libvirt
+// reports for it. Anything else is an error naming what is wrong.
+func (m *Manager) CheckDirPool(_ context.Context, name string) (string, error) {
+	pool, err := m.client.StoragePoolLookupByName(name)
+	if err != nil {
+		return "", fmt.Errorf("pool %s: %w", name, err)
+	}
+	state, _, _, _, err := m.client.StoragePoolGetInfo(pool)
+	if err != nil {
+		return "", fmt.Errorf("pool %s: failed to get pool info: %w", name, err)
+	}
+	if libvirt.StoragePoolState(state) != libvirt.StoragePoolRunning {
+		return "", fmt.Errorf("pool %s is not running (start it with 'virsh pool-start %s')", name, name)
+	}
+	return m.dirPoolPath(pool)
+}
+
+// dirPoolPath reads a pool's definition and returns its target path when it
+// is a dir pool with an absolute, clean target path other than "/".
+func (m *Manager) dirPoolPath(pool libvirt.StoragePool) (string, error) {
+	xmlDesc, err := m.client.StoragePoolGetXMLDesc(pool, 0)
+	if err != nil {
+		return "", fmt.Errorf("pool %s: failed to get pool XML: %w", pool.Name, err)
+	}
+	var def libvirtxml.StoragePool
+	if err := def.Unmarshal(xmlDesc); err != nil {
+		return "", fmt.Errorf("pool %s: failed to parse pool XML: %w", pool.Name, err)
+	}
+	if def.Type != string(PoolTypeDir) {
+		return "", fmt.Errorf("pool %s is a %q pool; foundry uses dir pools only", pool.Name, def.Type)
+	}
+	dir := ""
+	if def.Target != nil {
+		dir = def.Target.Path
+	}
+	if dir == "" || !path.IsAbs(dir) || path.Clean(dir) != dir || dir == "/" {
+		return "", fmt.Errorf("pool %s has target path %q; it must be an absolute, clean directory path", pool.Name, dir)
+	}
+	return dir, nil
 }

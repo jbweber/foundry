@@ -209,6 +209,13 @@ func createFromConfigWithDeps(ctx context.Context, vm *v1alpha1.VirtualMachine, 
 		return createErr
 	}
 
+	// Step 1c: The pools create writes to must be usable before anything is
+	// made: running dir pools with an absolute, clean path (an existing
+	// pool's path is foundry's default or not, as long as it is one)
+	if createErr = checkPools(ctx, vm, sm); createErr != nil {
+		return createErr
+	}
+
 	// Step 2: Check that none of the VM's boot, data and cloud-init volumes
 	// exists yet (pre-flight check; input volumes are checked in step 2c)
 	log.Printf("Checking that the VM's volumes do not exist yet...")
@@ -593,6 +600,29 @@ func removeDomain(lv LibvirtClient, name string) error {
 		return fmt.Errorf("domain '%s' left defined (stopped): %w", name, err)
 	}
 	log.Printf("Domain undefined successfully")
+	return nil
+}
+
+// checkPools checks, with storage.Manager.CheckDirPool, the pools a create
+// writes to or reads from: foundry-images (images and key profiles),
+// foundry-vms, and the pool spec.storagePool names for the VM's disks when
+// it is another one. A pool that does not exist, is not running, is not a
+// dir pool or has no absolute, clean path fails the create before anything
+// is made. The logs pool is checked by LogsDir.
+func checkPools(ctx context.Context, vm *v1alpha1.VirtualMachine, sm storageManager) error {
+	for _, p := range []string{storage.DefaultImagesPool, storage.DefaultVMsPool} {
+		if _, err := sm.CheckDirPool(ctx, p); err != nil {
+			return err
+		}
+	}
+	// Any other dir pool may hold the VM's disks (destroy finds them there
+	// by their exact names); one that is missing, stopped or not a dir pool
+	// is refused here rather than half way through the create
+	if p := getStoragePool(vm); p != storage.DefaultImagesPool && p != storage.DefaultVMsPool {
+		if _, err := sm.CheckDirPool(ctx, p); err != nil {
+			return fmt.Errorf("spec.storagePool: %w", err)
+		}
+	}
 	return nil
 }
 

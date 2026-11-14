@@ -11,6 +11,10 @@ git history.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-14
+
+A guest network filter (libvirt's traffic filtering per VM interface) is planned for a later version.
+
 ### Added
 
 - Serial console log: every VM's serial console is written, appended across boots, to `<vm>-serial.log` in a new
@@ -23,6 +27,14 @@ git history.
   through libvirt only, so it works with `--socket` against a libvirt on another machine.
 
 ### Changed
+
+- `foundry` prints each error once; it printed most twice. The usage text is shown for a mistake in the
+  arguments or flags only, no longer when a command fails (such as `create` with a missing file).
+- An existing default pool (foundry-images, foundry-vms, foundry-logs) is checked rather than trusted: it must
+  be a dir pool with an absolute, clean target path, at any such path, as the logs pool already was. Create
+  also checks, before it makes anything, that foundry-images and foundry-vms are running.
+- Create refuses, before it makes anything, a `spec.storagePool` that does not exist, is not running, is not a
+  dir pool or has no absolute, clean path, with an error naming the field. Other dir pools are still allowed.
 
 - `foundry destroy` also deletes the VM's serial log and its rotated copies, by exact name, and removes a log
   left of a VM whose domain is gone. A create that fails after defining the domain deletes the log too.
@@ -238,5 +250,6 @@ earlier versions.
   instance-id is the VM name, and SSH keys go to the image's default user, not root; CLOUDINIT.md's validation
   list and example spec match the loader.
 
-[Unreleased]: https://github.com/jbweber/foundry/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/jbweber/foundry/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/jbweber/foundry/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/jbweber/foundry/compare/v0.6.1...v0.7.0

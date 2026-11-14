@@ -253,6 +253,7 @@ type mockStorageManager struct {
 	volumeSHA256Func       func(ctx context.Context, poolName, volumeName string) (string, error)
 	refreshPoolFunc        func(ctx context.Context, name string) error
 	logsDirFunc            func(ctx context.Context) (string, error)
+	checkDirPoolFunc       func(ctx context.Context, name string) (string, error)
 	downloadVolumeFunc     func(ctx context.Context, poolName, volumeName string, w io.Writer) error
 
 	// Call tracking
@@ -267,6 +268,7 @@ type mockStorageManager struct {
 	volumeSHA256Calls       []string // format: "pool/volume"
 	refreshPoolCalls        []string // pool names
 	downloadVolumeCalls     []string // format: "pool/volume"
+	checkDirPoolCalls       []string // pool names
 }
 
 // newMockStorageManager creates a new mock storage manager with default behavior.
@@ -319,6 +321,10 @@ func newMockStorageManager() *mockStorageManager {
 		// Default: the logs pool at its default path
 		logsDirFunc: func(ctx context.Context) (string, error) {
 			return storage.DefaultLogsPath, nil
+		},
+		// Default: every pool is a running dir pool
+		checkDirPoolFunc: func(ctx context.Context, name string) (string, error) {
+			return "/var/lib/libvirt/images/foundry/" + name, nil
 		},
 		// Default: every volume is empty
 		downloadVolumeFunc: func(ctx context.Context, poolName, volumeName string, w io.Writer) error {
@@ -401,6 +407,13 @@ func (m *mockStorageManager) RefreshPool(ctx context.Context, name string) error
 	defer m.mu.Unlock()
 	m.refreshPoolCalls = append(m.refreshPoolCalls, name)
 	return m.refreshPoolFunc(ctx, name)
+}
+
+func (m *mockStorageManager) CheckDirPool(ctx context.Context, name string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.checkDirPoolCalls = append(m.checkDirPoolCalls, name)
+	return m.checkDirPoolFunc(ctx, name)
 }
 
 func (m *mockStorageManager) LogsDir(ctx context.Context) (string, error) {

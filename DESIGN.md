@@ -987,6 +987,14 @@ and the input disks) carry none: a guest finds those by their volume label.
   - Default pool for VM creation
 - `foundry-logs` - the VMs' serial console logs at `/var/log/libvirt/qemu/foundry/` (see Serial Console Log)
 
+The paths are where foundry builds a default pool that does not exist. A default pool that exists is used
+where it is, at any path: foundry never relies on a pool's path, only on what libvirt reports for it (volume
+paths, the logs pool's directory). It is checked instead, by the same rule as the logs pool: it must be a
+`dir` pool with an absolute, clean target path (other than `/`), or every command that ensures the default
+pools fails, naming the pool. Create also requires the pools it uses to be running, and checks all of this
+before it makes anything. Refusing a default pool at an unexpected path was the alternative; it would break a
+host whose pools were put on another disk, for no gain, and the logs pool already works this way.
+
 **Custom Pools** (user-managed):
 - Users can add pools for specific storage needs (SSD, bulk, network storage)
 - Support for different backends: dir, LVM, ZFS, NFS, Ceph
@@ -1037,7 +1045,9 @@ mode only when it makes the volume or builds the pool, so older ones keep theirs
 
 **Pool selection:** a VM's disks go in `spec.storagePool` (default `foundry-vms`); images
 come from `foundry-images`. There is no CLI flag, environment variable or config file for
-either.
+either. `spec.storagePool` may name any dir pool; create refuses, before it makes anything, one that does
+not exist, is not running, is not a dir pool, or has no absolute, clean target path, as it checks the
+default pools. Destroy deletes the VM's volumes in that pool by their exact names.
 
 **Image Format Validation** (added v0.2.0):
 

@@ -73,7 +73,14 @@ var rootCmd = &cobra.Command{
 It provides commands to create, destroy, and list virtual machines using
 declarative configuration files.`,
 	Version: fmt.Sprintf("%s (commit: %s)", version, commit),
+	// main prints the error, once; cobra would print it a second time
+	SilenceErrors: true,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		// Flags and arguments are parsed and checked by now: a mistake in
+		// them has already failed with the usage text. An error from here on
+		// is the command's own (a missing file, libvirt refusing something),
+		// which the usage text does not help with
+		cmd.SilenceUsage = true
 		libvirt.SetSocket(socketPath)
 	},
 }
