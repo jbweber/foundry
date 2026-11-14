@@ -2,8 +2,11 @@ package storage
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"os"
 	"path/filepath"
@@ -260,6 +263,48 @@ func (s *sizedReader) failure() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.err
+}
+
+// ErrImageDigest is wrapped by the error for an image volume whose sha256 is
+// not the one a spec states.
+var ErrImageDigest = errors.New("image digest mismatch")
+
+// hashWriter hashes what is written to it until ctx ends.
+type hashWriter struct {
+	ctx context.Context
+	h   hash.Hash
+}
+
+func (w hashWriter) Write(p []byte) (int, error) {
+	if err := w.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return w.h.Write(p)
+}
+
+// VolumeSHA256 returns the sha256, in lower-case hex, of a volume's bytes as
+// stored, read through libvirt (StorageVolDownload) to the end of the
+// volume. The download is streamed: a volume of any size takes little
+// memory, but time in proportion to its size. When ctx ends, it stops with
+// ctx's error.
+func (m *Manager) VolumeSHA256(ctx context.Context, poolName, volumeName string) (string, error) {
+	pool, err := m.client.StoragePoolLookupByName(poolName)
+	if err != nil {
+		return "", fmt.Errorf("pool not found: %w", err)
+	}
+	vol, err := m.client.StorageVolLookupByName(pool, volumeName)
+	if err != nil {
+		return "", fmt.Errorf("volume not found: %w", err)
+	}
+	h := sha256.New()
+	// Length 0 reads to the end of the volume
+	if err := m.client.StorageVolDownload(vol, hashWriter{ctx, h}, 0, 0, 0); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return "", fmt.Errorf("reading volume %s/%s stopped: %w", poolName, volumeName, ctxErr)
+		}
+		return "", fmt.Errorf("failed to read volume %s/%s: %w", poolName, volumeName, err)
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // PullImage downloads and imports a base image from a URL.

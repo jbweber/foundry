@@ -15,6 +15,9 @@ import (
 	"github.com/jbweber/foundry/internal/naming"
 )
 
+// imagesPool is the pool create takes a boot disk's image volume from.
+const imagesPool = "foundry-images"
+
 // MaxVlanID is the highest assignable 802.1Q VLAN ID. The 12-bit VLAN field
 // spans 0-4095, but 0 denotes a priority-tagged frame and 4095 is reserved,
 // so the usable range is 1-4094.
@@ -129,7 +132,7 @@ func applyDefaults(vm *v1alpha1.VirtualMachine) {
 		vm.Spec.BootDisk.Format = "qcow2"
 	}
 	if vm.Spec.BootDisk.ImagePool == "" {
-		vm.Spec.BootDisk.ImagePool = "foundry-images"
+		vm.Spec.BootDisk.ImagePool = imagesPool
 	}
 	if vm.Spec.Autostart == nil {
 		autostart := true
@@ -209,6 +212,9 @@ func validateSpec(vm *v1alpha1.VirtualMachine) error {
 	}
 	if vm.Spec.BootDisk.Image != "" && vm.Spec.BootDisk.Empty {
 		return fmt.Errorf("spec.bootDisk cannot specify both 'image' and 'empty: true'")
+	}
+	if err := validateImageSHA256(vm.Spec.BootDisk); err != nil {
+		return err
 	}
 
 	// Validate data disks
@@ -639,4 +645,37 @@ func validateInputDisks(vm *v1alpha1.VirtualMachine) error {
 		return fmt.Errorf("spec.inputDisks inline strings total %d bytes; at most %d (1 MiB) are allowed, put larger content in a file", inline, maxInputStringBytes)
 	}
 	return nil
+}
+
+// validateImageSHA256 checks spec.bootDisk.imageSHA256: 64 lower-case hex
+// digits, as sha256sum prints them, and only for an image volume in
+// foundry-images. Create checks the digest by reading that volume back
+// through libvirt; a file path is not a volume, and create takes the image
+// from foundry-images whatever pool the spec names, so a digest for another
+// pool would be checked against a volume other than the one booted.
+func validateImageSHA256(disk v1alpha1.BootDiskSpec) error {
+	d := disk.ImageSHA256
+	if d == "" {
+		return nil
+	}
+	img := disk.Image
+	if img == "" || strings.HasPrefix(img, ".") || strings.Contains(img, "/") {
+		return fmt.Errorf("spec.bootDisk.imageSHA256 goes with an image volume, not an empty disk or a file path")
+	}
+	if !isSHA256(d) {
+		return fmt.Errorf("spec.bootDisk.imageSHA256 %q: must be 64 lower-case hex digits", d)
+	}
+	pool := disk.ImagePool
+	if p, _, ok := strings.Cut(img, ":"); ok {
+		pool = p
+	}
+	if pool = strings.TrimSpace(pool); pool != "" && pool != imagesPool {
+		return fmt.Errorf("spec.bootDisk.imageSHA256: the image is in pool %q; digests are checked for images in %s", pool, imagesPool)
+	}
+	return nil
+}
+
+// isSHA256 reports whether s is a sha256 digest in lower-case hex.
+func isSHA256(s string) bool {
+	return len(s) == 64 && strings.Trim(s, "0123456789abcdef") == ""
 }

@@ -248,6 +248,7 @@ type mockStorageManager struct {
 	imageExistsFunc        func(ctx context.Context, imageName string) (bool, error)
 	writeVolumeDataFunc    func(ctx context.Context, poolName, volumeName string, data []byte) error
 	listVolumesFunc        func(ctx context.Context, poolName string) ([]storage.VolumeInfo, error)
+	volumeSHA256Func       func(ctx context.Context, poolName, volumeName string) (string, error)
 
 	// Call tracking
 	ensureDefaultPoolsCalls int
@@ -258,6 +259,7 @@ type mockStorageManager struct {
 	imageExistsCalls        []string
 	writeVolumeDataCalls    []string // format: "pool/volume"
 	listVolumesCalls        []string // pool names
+	volumeSHA256Calls       []string // format: "pool/volume"
 }
 
 // newMockStorageManager creates a new mock storage manager with default behavior.
@@ -294,6 +296,10 @@ func newMockStorageManager() *mockStorageManager {
 		// Default: no volumes
 		listVolumesFunc: func(ctx context.Context, poolName string) ([]storage.VolumeInfo, error) {
 			return []storage.VolumeInfo{}, nil
+		},
+		// Default: every volume hashes as the empty input
+		volumeSHA256Func: func(ctx context.Context, poolName, volumeName string) (string, error) {
+			return "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", nil
 		},
 	}
 }
@@ -352,6 +358,13 @@ func (m *mockStorageManager) ListVolumes(ctx context.Context, poolName string) (
 	defer m.mu.Unlock()
 	m.listVolumesCalls = append(m.listVolumesCalls, poolName)
 	return m.listVolumesFunc(ctx, poolName)
+}
+
+func (m *mockStorageManager) VolumeSHA256(ctx context.Context, poolName, volumeName string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.volumeSHA256Calls = append(m.volumeSHA256Calls, poolName+"/"+volumeName)
+	return m.volumeSHA256Func(ctx, poolName, volumeName)
 }
 
 // newMockMetadataClient creates a mock metadata.Client for testing.

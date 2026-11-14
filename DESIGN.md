@@ -121,6 +121,7 @@ spec:
     sizeGB: 50                # Disk size in GB
     image: fedora-43.qcow2    # Image reference (see formats below)
     imagePool: foundry-images # Optional: pool containing base image (default: foundry-images)
+    imageSHA256: 8582f6...    # Optional: sha256 of the image; checked before anything is made
     # OR for empty boot disk:
     # empty: true             # Create empty disk instead of snapshot
     # serial: root            # Optional: disk serial (/dev/disk/by-id/virtio-root)
@@ -206,6 +207,28 @@ status:
 - Full reference: `foundry-images:fedora-43.qcow2` (explicit pool:volume format)
 - File path: `/path/to/image.qcow2` (direct filesystem path, not recommended)
 
+**Image digest** (`spec.bootDisk.imageSHA256`, optional): the sha256 of the
+image volume's bytes, 64 lower-case hex digits as `sha256sum` prints them for
+the file that was imported. Create reads the volume back through libvirt
+(`StorageVolDownload`, streamed, to the volume's end), hashes it and refuses
+one that differs (`storage.ErrImageDigest`), as its last check before it makes
+anything, so a refused image leaves nothing behind. This catches a volume that
+is not the image the spec was written for: an import cut short by a crash, an
+image deleted and imported again with other content, or a file changed in the
+pool's directory. It costs reading the whole image once per create.
+
+- Only for an image volume: a file path is not a volume and an empty disk has
+  no image, so the loader refuses the field with either.
+- Only for `foundry-images`: create takes the image from that pool whatever
+  pool the reference names, so a digest for another pool would be checked
+  against a volume other than the one booted. The loader refuses it.
+- The stored volume hashes as the file did because an import uploads the file
+  byte for byte, and a raw image's volume is exactly the file's size. A qcow2
+  image smaller than the empty qcow2 file libvirt creates for the volume
+  (a few hundred KiB) may keep that file's tail after the upload, and then
+  fails the check; real images are far larger.
+- The digest is not stored with the image: the VM file keeps it.
+
 ### Configuration Validation Rules
 
 **Required:**
@@ -224,6 +247,8 @@ status:
 - `metadata.name` is non-empty
 - VCPUs > 0, memoryGiB > 0, disk sizes > 0
 - `spec.bootDisk` specifies exactly one of `image` or `empty: true`
+- `spec.bootDisk.imageSHA256`, when set, is 64 lower-case hex digits, with an image volume
+  (not a file path or an empty disk) in `foundry-images` (see Image digest above)
 - Data disks have a device name, and no duplicate device names
 - `serial` (boot disk and data disks) is 1-20 characters from `A-Z a-z 0-9 - _ .`, unique
   among the VM's disks (see [Disk Serials](#disk-serials))
@@ -272,6 +297,7 @@ status:
 - No input disk volume exists yet; each `inputDisks` `file` is a regular file, and the files of
   one disk hold at most 16 MiB
 - Boot disk image exists (unless empty: true)
+- Boot disk image volume has the sha256 `spec.bootDisk.imageSHA256` states, when it states one
 - Bridge exists on hypervisor (future: fuzzy match)
 
 ## Core Workflows

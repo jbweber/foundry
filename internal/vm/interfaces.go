@@ -116,4 +116,7 @@ type storageManager interface {
 
 	// ListVolumes lists all volumes in a pool
 	ListVolumes(ctx context.Context, poolName string) ([]storage.VolumeInfo, error)
+
+	// VolumeSHA256 hashes a volume's bytes as stored, read through libvirt
+	VolumeSHA256(ctx context.Context, poolName, volumeName string) (string, error)
 }

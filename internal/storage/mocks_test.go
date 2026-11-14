@@ -283,6 +283,26 @@ func (m *mockLibvirtClient) StorageVolUpload(vol libvirt.StorageVol, reader io.R
 	return nil
 }
 
+func (m *mockLibvirtClient) StorageVolDownload(vol libvirt.StorageVol, writer io.Writer, offset uint64, length uint64, flags libvirt.StorageVolDownloadFlags) error {
+	vols, ok := m.volumes[vol.Pool]
+	if !ok {
+		return fmt.Errorf("storage pool not found: %s", vol.Pool)
+	}
+	v, ok := vols[vol.Name]
+	if !ok {
+		return fmt.Errorf("storage volume not found: %s", vol.Name)
+	}
+	end := offset + length
+	if length == 0 || end > uint64(len(v.data)) {
+		end = uint64(len(v.data))
+	}
+	if offset > end {
+		return fmt.Errorf("offset %d past the end", offset)
+	}
+	_, err := writer.Write(v.data[offset:end])
+	return err
+}
+
 func (m *mockLibvirtClient) ConnectListAllStoragePools(needResults int32, flags libvirt.ConnectListAllStoragePoolsFlags) ([]libvirt.StoragePool, uint32, error) {
 	var result []libvirt.StoragePool
 	for name, pool := range m.pools {

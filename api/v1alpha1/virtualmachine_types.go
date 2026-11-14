@@ -273,6 +273,16 @@ type BootDiskSpec struct {
 	// +optional
 	Image string `json:"image,omitempty" yaml:"image,omitempty"`
 
+	// ImageSHA256 is the sha256 of the image volume's bytes, in lower-case
+	// hex, as sha256sum prints it for the file that was imported. When set,
+	// create reads the volume back through libvirt and refuses one that
+	// differs before it makes anything, so a truncated or replaced image is
+	// not booted. Only with an image volume in foundry-images, not a file
+	// path or an empty disk.
+	// +optional
+	// +kubebuilder:validation:Pattern=`^[0-9a-f]{64}$`
+	ImageSHA256 string `json:"imageSHA256,omitempty" yaml:"imageSHA256,omitempty"`
+
 	// ImagePool is the storage pool containing the base image.
 	// Defaults to "foundry-images" if not specified.
 	// Only used when Image is a volume name without pool prefix.

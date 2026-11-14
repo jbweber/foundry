@@ -28,7 +28,7 @@ This project isn't suggested for general purpose use, and really exists because 
 - **Storage Management**: QCOW2 boot disks with backing images, plus additional data disks
 - **Disk Serials**: Optional serial per disk, so the guest finds it in `/dev/disk/by-id`
 - **Pool Management**: Create, list, and manage libvirt storage pools
-- **Image Management**: Import, list, and manage base OS images
+- **Image Management**: Import (from a file or standard input), list, and manage base OS images; qcow2 images that would read host files are refused, and a spec can pin its image by sha256
 - **UEFI Boot**: Modern UEFI firmware support, with pinned firmware files and Secure Boot key profiles
 - **SMBIOS and fw_cfg**: Optional SMBIOS system serial and identity, and QEMU fw_cfg entries for the guest
 - **Input Disks**: Optional small read-only disks with files for the guest, found by their label
@@ -281,6 +281,29 @@ mkfs.xfs /dev/disk/by-id/virtio-data-0
 
 The limit is 20 characters because a virtio disk's serial holds 20 bytes and
 QEMU cuts a longer one without a word.
+
+### Image Safety
+
+An import checks that the content is what the name says (`.qcow2` a qcow2
+image, `.raw` a bootable raw disk) and refuses a qcow2 image that would make
+qemu read another file on the host: a backing file or an external data file.
+A raw image's volume is exactly the file's size. A failed or interrupted
+import deletes its partial volume.
+
+A VM file can pin its image by digest, so a VM never boots from an image that
+is not the one it was written for (a truncated import, or a replaced image):
+
+```yaml
+spec:
+  bootDisk:
+    sizeGB: 50
+    image: fedora-43.qcow2
+    imageSHA256: 8582f6...        # 64 lower-case hex digits, as sha256sum prints them for the file
+```
+
+`foundry create` reads the image volume back through libvirt and compares
+before it makes anything, which takes about as long as reading the image once.
+The digest goes with an image volume in `foundry-images` only, not a file path.
 
 ### List VMs
 

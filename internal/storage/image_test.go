@@ -3,6 +3,7 @@ package storage
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -602,5 +603,55 @@ func TestManager_ImportImage_NamedPipe(t *testing.T) {
 	}
 	if got := client.volumes[DefaultImagesPool]["disk.raw"].data; !bytes.Equal(got, data) {
 		t.Errorf("uploaded %d bytes, want the %d written", len(got), len(data))
+	}
+}
+
+// VolumeSHA256 hashes the volume as stored, to its end.
+func TestManager_VolumeSHA256(t *testing.T) {
+	client, m := newImagesManager(t)
+	ctx := context.Background()
+	client.volumes[DefaultImagesPool]["a.raw"] = &mockVolume{name: "a.raw", data: []byte("hello")}
+	got, err := m.VolumeSHA256(ctx, DefaultImagesPool, "a.raw")
+	// sha256 of "hello"
+	if want := "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"; err != nil || got != want {
+		t.Errorf("%s, %v; want %s", got, err, want)
+	}
+	if _, err := m.VolumeSHA256(ctx, DefaultImagesPool, "none.raw"); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Errorf("no volume: %v", err)
+	}
+	if _, err := m.VolumeSHA256(ctx, "no-pool", "a.raw"); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Errorf("no pool: %v", err)
+	}
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := m.VolumeSHA256(cancelled, DefaultImagesPool, "a.raw"); !errors.Is(err, context.Canceled) {
+		t.Errorf("cancelled: %v", err)
+	}
+}
+
+// An imported image hashes, read back, as its file does: what a spec's
+// imageSHA256, taken with sha256sum from the file, is checked against.
+func TestManager_ImportImage_ReadBackHashesAsFile(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		data []byte
+	}{
+		{"raw", bootableRaw(4096 + 3)},
+		{"qcow2", qcow2Fixture(8192)},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, mgr := newImagesManager(t)
+			name := "disk." + tt.name
+			if err := mgr.ImportImageFromReader(context.Background(), bytes.NewReader(tt.data), name); err != nil {
+				t.Fatal(err)
+			}
+			got, err := mgr.VolumeSHA256(context.Background(), DefaultImagesPool, name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want := fmt.Sprintf("%x", sha256.Sum256(tt.data)); got != want {
+				t.Errorf("volume sha256 %s, file sha256 %s", got, want)
+			}
+		})
 	}
 }
