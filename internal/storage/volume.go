@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"path/filepath"
 	"strings"
 
@@ -127,7 +128,13 @@ func (m *Manager) GetVolumePath(_ context.Context, poolName, volumeName string) 
 }
 
 // WriteVolumeData uploads data to a volume (used for cloud-init ISOs).
-func (m *Manager) WriteVolumeData(_ context.Context, poolName, volumeName string, data []byte) error {
+func (m *Manager) WriteVolumeData(ctx context.Context, poolName, volumeName string, data []byte) error {
+	return m.WriteVolumeFrom(ctx, poolName, volumeName, bytes.NewReader(data), uint64(len(data)))
+}
+
+// WriteVolumeFrom uploads size bytes read from r to a volume, streamed
+// (StorageVolUpload), so a large image is never held in memory.
+func (m *Manager) WriteVolumeFrom(_ context.Context, poolName, volumeName string, r io.Reader, size uint64) error {
 	// Look up the pool
 	pool, err := m.client.StoragePoolLookupByName(poolName)
 	if err != nil {
@@ -141,8 +148,7 @@ func (m *Manager) WriteVolumeData(_ context.Context, poolName, volumeName string
 	}
 
 	// Upload data to volume
-	reader := bytes.NewReader(data)
-	if err := m.client.StorageVolUpload(vol, reader, 0, uint64(len(data)), 0); err != nil {
+	if err := m.client.StorageVolUpload(vol, r, 0, size, 0); err != nil {
 		return fmt.Errorf("failed to upload data to volume: %w", err)
 	}
 

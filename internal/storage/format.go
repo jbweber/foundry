@@ -42,7 +42,11 @@ func DetectImageFormat(filePath string) (VolumeFormat, error) {
 		return "", fmt.Errorf("failed to open file: %w", err)
 	}
 	defer func() { _ = f.Close() }()
+	return detectImageFormat(f)
+}
 
+// detectImageFormat is DetectImageFormat on content already open.
+func detectImageFormat(f io.ReadSeeker) (VolumeFormat, error) {
 	// Read first 4 bytes to check for QCOW2 magic
 	magic := make([]byte, 4)
 	if _, err := io.ReadFull(f, magic); err != nil {
@@ -56,7 +60,7 @@ func DetectImageFormat(filePath string) (VolumeFormat, error) {
 
 	// Not QCOW2, check if it's a bootable RAW image
 	// MBR signature: 0x55 0xaa at offset 510 (end of first 512-byte boot sector)
-	if _, err := f.Seek(510, 0); err != nil {
+	if _, err := f.Seek(510, io.SeekStart); err != nil {
 		return "", fmt.Errorf("failed to seek to boot sector signature: %w", err)
 	}
 

@@ -886,6 +886,20 @@ Foundry validates disk images on import to ensure they are bootable OS images:
 - **Required extension** - Image names must have `.qcow2` or `.raw` extension matching actual format
 - **Format mismatch detection** - Rejects files where extension doesn't match detected format
 - **Non-bootable rejection** - RAW images without boot sector signature are rejected
+- **Regular files only** - the source path must be a regular file (a symlink to one is
+  followed). A directory or a device is refused: its size is not the size of what it would
+  stream. The file is opened once, and checked and uploaded from that one open file, so a
+  path replaced meanwhile changes nothing.
+- **Streamed upload** - the file is streamed to the volume (`StorageVolUpload`), not read into
+  memory first. Exactly the size the file had when it was opened is sent: a file that ends
+  early fails the import, and one that grew is imported as it was.
+- **Exact raw size** - a raw image's volume is exactly the file's size, not rounded up to whole
+  GiB: the guest sees no padding, and the volume read back hashes as the file does (see
+  `spec.bootDisk.imageSHA256`). A qcow2 volume's capacity does not matter: the upload replaces
+  the header libvirt wrote, and the image's header gives the guest-visible size.
+- **No partial images** - when the upload fails, or is interrupted (Ctrl-C, SIGTERM), the volume
+  is deleted, so no partial image stays under the name a VM would boot from. If that delete
+  fails too, the error names the volume left behind.
 
 This prevents common issues like:
 - Importing non-bootable files that cause VM boot failures

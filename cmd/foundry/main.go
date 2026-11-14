@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -246,8 +248,13 @@ The tool validates that:
   - QCOW2 images have the correct magic bytes (QFI\xfb)
   - RAW images have a valid boot sector signature (0x55aa)
   - The file extension matches the detected format
+  - The source is a regular file (or a symlink to one)
 
 This ensures only valid, bootable OS images are imported.
+
+The file is streamed to libvirt, not read into memory. A raw image's volume
+is exactly the file's size. If the import fails or is interrupted (Ctrl-C),
+the partly written volume is deleted.
 
 Examples:
   # Import a QCOW2 image
@@ -261,15 +268,25 @@ Examples:
 
   # This will fail - format mismatch
   foundry image import /path/to/fedora.qcow2 fedora.raw`,
-	Args: cobra.ExactArgs(2),
+	Args:         cobra.ExactArgs(2),
+	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		sourcePath := args[0]
 		imageName := args[1]
 
+		// A bad name fails before connecting or reading anything
+		if err := storage.CheckImageName(imageName); err != nil {
+			return err
+		}
+
 		fmt.Printf("Importing image from %s as %s...\n", sourcePath, imageName)
 
+		// Ctrl-C or SIGTERM cancels the upload, so the import deletes its
+		// partial volume instead of leaving it under the image's name
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+
 		// Connect to libvirt
-		ctx := context.Background()
 		client, err := libvirt.Connect("", 5*time.Second)
 		if err != nil {
 			return fmt.Errorf("failed to connect to libvirt: %w", err)

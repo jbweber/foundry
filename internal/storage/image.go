@@ -2,79 +2,181 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/jbweber/foundry/internal/naming"
 )
 
-// ImportImage imports a base image from a local file into the foundry-images pool.
+// Image name extensions ImportImage accepts, each with the content it
+// requires.
+const (
+	ImageExtQCOW2 = ".qcow2" // QCOW2 magic
+	ImageExtRaw   = ".raw"   // a boot sector signature (a bootable disk image)
+)
+
+// CheckImageName refuses an image name without one of the accepted
+// extensions, before anything is read.
+func CheckImageName(imageName string) error {
+	switch filepath.Ext(imageName) {
+	case ImageExtQCOW2, ImageExtRaw:
+		return nil
+	}
+	return fmt.Errorf("image name must have .qcow2 or .raw extension (got: %q)", imageName)
+}
+
+// ImportImage imports a base image from a local file into the foundry-images
+// pool.
+//
+// The name's extension says what the file must be: .qcow2 a QCOW2 image,
+// .raw a bootable raw disk image. The file must be a regular file (a symlink
+// to one is followed): a directory or a device is refused, as its size is not
+// the size of what it would stream. The file is streamed to libvirt, not read
+// into memory, and if it ends before the size it had when it was opened, the
+// import fails. On any failure after the volume is created, the volume is
+// deleted.
 func (m *Manager) ImportImage(ctx context.Context, filePath, imageName string) error {
-	// Check that the file exists
-	info, err := os.Stat(filePath)
+	if err := CheckImageName(imageName); err != nil {
+		return err
+	}
+	f, err := os.Open(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to open image file: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+	// Stat the open file, not the path, so the checks and the upload see the
+	// same file even if the path is replaced meanwhile
+	info, err := f.Stat()
 	if err != nil {
 		return fmt.Errorf("failed to stat image file: %w", err)
 	}
-
-	// Get file size in GB (rounded up)
-	sizeGB := uint64(info.Size()/(1024*1024*1024)) + 1
-
-	// Validate image name has required extension
-	ext := filepath.Ext(imageName)
-	if ext != ".qcow2" && ext != ".raw" {
-		return fmt.Errorf("image name must have .qcow2 or .raw extension (got: %q)", imageName)
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("image file %s is not a regular file (%s)", filePath, info.Mode().Type())
 	}
+	return m.importImageFile(ctx, f, info.Size(), imageName)
+}
 
-	// Detect actual format from file content
-	detectedFormat, err := DetectImageFormat(filePath)
+// importImageFile checks the first size bytes of f against imageName,
+// creates the image's volume and streams them into it.
+func (m *Manager) importImageFile(ctx context.Context, f io.ReaderAt, size int64, imageName string) error {
+	spec, err := imageVolumeSpec(imageName, io.NewSectionReader(f, 0, size), size)
 	if err != nil {
-		return fmt.Errorf("failed to detect image format: %w", err)
-	}
-
-	// Determine expected format from image name extension
-	var expectedFormat VolumeFormat
-	if ext == ".qcow2" {
-		expectedFormat = VolumeFormatQCOW2
-	} else {
-		expectedFormat = VolumeFormatRaw
-	}
-
-	// Validate format matches extension
-	if detectedFormat != expectedFormat {
-		return fmt.Errorf("format mismatch: file is %q but image name %q expects %q",
-			detectedFormat, imageName, expectedFormat)
-	}
-
-	// Read the image file
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		return fmt.Errorf("failed to read image file: %w", err)
-	}
-
-	// Use detected format for volume creation
-	format := detectedFormat
-
-	// Create a volume in the foundry-images pool
-	spec := VolumeSpec{
-		Name:       imageName,
-		Type:       VolumeTypeBaseImage,
-		Format:     format,
-		CapacityGB: sizeGB,
+		return err
 	}
 
 	if err := m.CreateVolume(ctx, DefaultImagesPool, spec); err != nil {
 		return fmt.Errorf("failed to create image volume: %w", err)
 	}
 
-	// Upload the image data to the volume
-	if err := m.WriteVolumeData(ctx, DefaultImagesPool, imageName, data); err != nil {
-		// Clean up the volume if upload fails
-		_ = m.DeleteVolume(ctx, DefaultImagesPool, imageName)
-		return fmt.Errorf("failed to upload image data: %w", err)
+	// The volume is this call's from here on: delete it on any failure, so
+	// no partial image is left under the name a VM would use
+	src := &sizedReader{ctx: ctx, r: io.NewSectionReader(f, 0, size), left: size}
+	err = m.WriteVolumeFrom(ctx, DefaultImagesPool, imageName, src, uint64(size))
+	if readErr := src.failure(); readErr != nil {
+		err = fmt.Errorf("failed to read image: %w", readErr)
+	} else if err != nil {
+		err = fmt.Errorf("failed to upload image data: %w", err)
+	}
+	if err != nil {
+		if delErr := m.DeleteVolume(context.WithoutCancel(ctx), DefaultImagesPool, imageName); delErr != nil {
+			return fmt.Errorf("%w; the partial volume %s/%s is left behind: %v", err, DefaultImagesPool, imageName, delErr)
+		}
+		return err
+	}
+	return nil
+}
+
+// imageVolumeSpec checks that an image's content is what its name's
+// extension says, and returns the spec of the volume for it. content is the
+// image; size is its length.
+func imageVolumeSpec(imageName string, content *io.SectionReader, size int64) (VolumeSpec, error) {
+	spec := VolumeSpec{
+		Name: imageName,
+		Type: VolumeTypeBaseImage,
 	}
 
-	return nil
+	// Detect actual format from file content
+	detectedFormat, err := detectImageFormat(content)
+	if err != nil {
+		return spec, fmt.Errorf("failed to detect image format: %w", err)
+	}
+
+	// Determine expected format from image name extension
+	expectedFormat := VolumeFormatRaw
+	if filepath.Ext(imageName) == ImageExtQCOW2 {
+		expectedFormat = VolumeFormatQCOW2
+	}
+
+	// Validate format matches extension
+	if detectedFormat != expectedFormat {
+		return spec, fmt.Errorf("format mismatch: file is %q but image name %q expects %q",
+			detectedFormat, imageName, expectedFormat)
+	}
+	spec.Format = detectedFormat
+	if detectedFormat == VolumeFormatQCOW2 {
+		// Size in GiB, rounded up: the upload replaces the header qemu-img
+		// wrote, and the guest-visible size with it
+		spec.CapacityGB = uint64(size/(1024*1024*1024)) + 1
+		return spec, nil
+	}
+	// A raw volume's file is its capacity long, so exactly the image's size:
+	// no padding the guest would see as disk, and read back to its end the
+	// volume hashes as the image does
+	spec.CapacityBytes = uint64(size)
+	return spec, nil
+}
+
+// sizedReader reads exactly left bytes from r, and remembers why reading
+// failed: go-libvirt reports a failed upload with libvirt's answer to the
+// aborted stream, not the reader's error. Content that ends early is
+// io.ErrUnexpectedEOF; a ctx that ends stops the read with ctx's error.
+type sizedReader struct {
+	ctx  context.Context
+	r    io.Reader
+	left int64
+
+	mu  sync.Mutex
+	err error
+}
+
+func (s *sizedReader) Read(p []byte) (int, error) {
+	if err := s.ctx.Err(); err != nil {
+		return 0, s.fail(err)
+	}
+	if s.left <= 0 {
+		return 0, io.EOF
+	}
+	if int64(len(p)) > s.left {
+		p = p[:s.left]
+	}
+	n, err := s.r.Read(p)
+	s.left -= int64(n)
+	switch {
+	case errors.Is(err, io.EOF) && s.left > 0:
+		return n, s.fail(io.ErrUnexpectedEOF)
+	case err != nil && !errors.Is(err, io.EOF):
+		return n, s.fail(err)
+	}
+	return n, err
+}
+
+func (s *sizedReader) fail(err error) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.err == nil {
+		s.err = err
+	}
+	return err
+}
+
+func (s *sizedReader) failure() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.err
 }
 
 // PullImage downloads and imports a base image from a URL.

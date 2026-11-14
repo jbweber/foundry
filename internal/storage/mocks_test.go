@@ -30,6 +30,7 @@ type mockVolume struct {
 	capacity  uint64
 	allocated uint64
 	data      []byte
+	xml       string // the XML it was created with
 }
 
 func newMockLibvirtClient() *mockLibvirtClient {
@@ -208,6 +209,7 @@ func (m *mockLibvirtClient) StorageVolCreateXML(pool libvirt.StoragePool, xml st
 		path:      "/var/lib/libvirt/images/foundry/" + pool.Name + "/" + name,
 		capacity:  100 * 1024 * 1024 * 1024, // 100 GB default
 		allocated: 0,
+		xml:       xml,
 	}
 	vols[name] = vol
 

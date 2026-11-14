@@ -1,9 +1,14 @@
 package storage
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -348,4 +353,130 @@ func TestManager_PullImage(t *testing.T) {
 	if err == nil {
 		t.Errorf("PullImage() should return error for unimplemented feature")
 	}
+}
+
+// bootableRaw is a raw disk image of size bytes (at least 512) with a boot
+// sector signature.
+func bootableRaw(size int) []byte {
+	data := make([]byte, size)
+	data[510], data[511] = 0x55, 0xaa
+	return data
+}
+
+// newImagesManager returns a manager over a mock with the images pool.
+func newImagesManager(t *testing.T) (*mockLibvirtClient, *Manager) {
+	t.Helper()
+	client := newMockLibvirtClient()
+	mgr := NewManager(client)
+	if err := mgr.CreatePool(context.Background(), DefaultImagesPool, PoolTypeDir, DefaultImagesPath); err != nil {
+		t.Fatal(err)
+	}
+	return client, mgr
+}
+
+// A raw image's volume is exactly the file's size, not rounded up to whole
+// GiB: the guest sees no padding, and the volume hashes as the file does.
+func TestManager_ImportImage_RawExactSize(t *testing.T) {
+	data := bootableRaw(3*512 + 7)
+	path := filepath.Join(t.TempDir(), "disk.raw")
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	client, mgr := newImagesManager(t)
+	if err := mgr.ImportImage(context.Background(), path, "disk.raw"); err != nil {
+		t.Fatalf("ImportImage() error = %v", err)
+	}
+	vol := client.volumes[DefaultImagesPool]["disk.raw"]
+	if !bytes.Equal(vol.data, data) {
+		t.Errorf("uploaded %d bytes, want the file's %d", len(vol.data), len(data))
+	}
+	if want := fmt.Sprintf(`<capacity unit="B">%d</capacity>`, len(data)); !strings.Contains(vol.xml, want) {
+		t.Errorf("volume XML lacks %s: %s", want, vol.xml)
+	}
+}
+
+// Only a regular file (or a symlink to one) is imported from a path: a
+// directory's or device's size is not the size of what it would stream.
+func TestManager_ImportImage_FileTypes(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "disk.raw")
+	if err := os.WriteFile(file, bootableRaw(512), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "link.raw")
+	if err := os.Symlink(file, link); err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		name, path, wantErr string
+	}{
+		{"symlink to a regular file", link, ""},
+		{"directory", dir, "not a regular file"},
+		{"character device", "/dev/null", "not a regular file"},
+		{"missing", filepath.Join(dir, "none.raw"), "no such file"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			client, mgr := newImagesManager(t)
+			err := mgr.ImportImage(context.Background(), tt.path, "disk.raw")
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("ImportImage() error = %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("ImportImage() error = %v, want %q", err, tt.wantErr)
+			}
+			if len(client.volumes[DefaultImagesPool]) != 0 {
+				t.Error("a volume was created for a refused source")
+			}
+		})
+	}
+}
+
+// shortReaderAt holds fewer bytes than the size the import is told: a file
+// that shrank after it was opened.
+type shortReaderAt struct{ data []byte }
+
+func (s shortReaderAt) ReadAt(p []byte, off int64) (int, error) {
+	return bytes.NewReader(s.data).ReadAt(p, off)
+}
+
+// An image that ends early, or an import that is cancelled, leaves no
+// volume: a partial image under the name would boot as if it were whole.
+func TestManager_ImportImage_PartialUploadDeleted(t *testing.T) {
+	data := bootableRaw(4096)
+	t.Run("content shorter than its size", func(t *testing.T) {
+		client, mgr := newImagesManager(t)
+		err := mgr.importImageFile(context.Background(), shortReaderAt{data[:1024]}, int64(len(data)), "disk.raw")
+		if !errors.Is(err, io.ErrUnexpectedEOF) {
+			t.Fatalf("importImageFile() error = %v, want io.ErrUnexpectedEOF", err)
+		}
+		if _, ok := client.volumes[DefaultImagesPool]["disk.raw"]; ok {
+			t.Error("the partial volume is left behind")
+		}
+	})
+	t.Run("cancelled", func(t *testing.T) {
+		client, mgr := newImagesManager(t)
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		err := mgr.importImageFile(ctx, bytes.NewReader(data), int64(len(data)), "disk.raw")
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("importImageFile() error = %v, want context.Canceled", err)
+		}
+		if _, ok := client.volumes[DefaultImagesPool]["disk.raw"]; ok {
+			t.Error("the partial volume is left behind")
+		}
+	})
+	t.Run("content longer than its size", func(t *testing.T) {
+		// Only the size given is sent: a file that grew after it was opened
+		// is imported as it was
+		client, mgr := newImagesManager(t)
+		if err := mgr.importImageFile(context.Background(), bytes.NewReader(data), 1024, "disk.raw"); err != nil {
+			t.Fatalf("importImageFile() error = %v", err)
+		}
+		if got := len(client.volumes[DefaultImagesPool]["disk.raw"].data); got != 1024 {
+			t.Errorf("uploaded %d bytes, want 1024", got)
+		}
+	})
 }
