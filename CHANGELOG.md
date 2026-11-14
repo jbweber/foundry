@@ -164,5 +164,8 @@ git history.
 - A volume check that fails for another reason than "no such volume" (a lost connection, a stopped pool) is an
   error; it was taken as "absent", so create could go ahead over a volume that was there. `image list` and
   `image info` show the image's format, which was blank.
+- `foundry image delete` refuses an image that is the backing file of a volume in any pool, such as a VM's boot
+  disk, which could then no longer start, and refuses a Secure Boot key profile (`foundry varstore delete` manages
+  those). It deleted both.
 
 [Unreleased]: https://github.com/jbweber/foundry/compare/v0.6.1...HEAD

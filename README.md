@@ -375,6 +375,10 @@ foundry image info fedora-43.qcow2
 foundry image delete fedora-43.qcow2
 ```
 
+`image delete` refuses an image that is the backing file of a VM's disk
+(destroy those VMs first) and a Secure Boot key profile (`foundry varstore
+delete` manages those).
+
 ### Manage Storage Pools
 
 ```bash

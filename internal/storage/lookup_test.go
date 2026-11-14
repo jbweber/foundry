@@ -66,3 +66,49 @@ func TestManager_ListVolumes_Format(t *testing.T) {
 		t.Errorf("formats %v, want a.qcow2 qcow2 and b.raw raw", got)
 	}
 }
+
+// TestManager_DeleteImage_Refuses: image delete refuses a Secure Boot key
+// profile and an image that backs a volume in another pool (a VM's boot
+// disk); an unused image is deleted.
+func TestManager_DeleteImage_Refuses(t *testing.T) {
+	ctx := context.Background()
+	client, mgr := newImagesManager(t)
+	if err := mgr.CreatePool(ctx, DefaultVMsPool, PoolTypeDir, "/vms"); err != nil {
+		t.Fatal(err)
+	}
+	for _, spec := range []VolumeSpec{
+		{Name: "used.qcow2", Type: VolumeTypeBaseImage, Format: VolumeFormatQCOW2, CapacityGB: 1},
+		{Name: "unused.qcow2", Type: VolumeTypeBaseImage, Format: VolumeFormatQCOW2, CapacityGB: 1},
+		{Name: "varstore_corp_x86_64.fd", Type: VolumeTypeVarstore, Format: VolumeFormatRaw, CapacityBytes: 540672},
+	} {
+		if err := mgr.CreateVolume(ctx, DefaultImagesPool, spec); err != nil {
+			t.Fatal(err)
+		}
+	}
+	usedPath, err := mgr.GetImagePath(ctx, "used.qcow2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.CreateVolume(ctx, DefaultVMsPool, VolumeSpec{Name: "web_boot.qcow2", Type: VolumeTypeBoot,
+		Format: VolumeFormatQCOW2, CapacityGB: 2, BackingVolume: usedPath}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := mgr.DeleteImage(ctx, "used.qcow2"); err == nil || !strings.Contains(err.Error(), "foundry-vms/web_boot.qcow2") {
+		t.Errorf("image in use: got %v, want an error naming the volume that uses it", err)
+	}
+	if err := mgr.DeleteImage(ctx, "varstore_corp_x86_64.fd"); err == nil || !strings.Contains(err.Error(), "key profile") {
+		t.Errorf("key profile: got %v, want a key profile error", err)
+	}
+	if err := mgr.DeleteImage(ctx, "unused.qcow2"); err != nil {
+		t.Errorf("unused image: %v", err)
+	}
+	for _, name := range []string{"used.qcow2", "varstore_corp_x86_64.fd"} {
+		if _, ok := client.volumes[DefaultImagesPool][name]; !ok {
+			t.Errorf("%s was deleted", name)
+		}
+	}
+	if _, ok := client.volumes[DefaultImagesPool]["unused.qcow2"]; ok {
+		t.Error("unused.qcow2 was not deleted")
+	}
+}

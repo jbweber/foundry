@@ -507,7 +507,7 @@ Example:
 		}
 
 		// Delete the image
-		if err := mgr.DeleteImage(ctx, imageName, false); err != nil {
+		if err := mgr.DeleteImage(ctx, imageName); err != nil {
 			return fmt.Errorf("failed to delete image: %w", err)
 		}
 

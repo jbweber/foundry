@@ -249,7 +249,7 @@ func importImage(t *testing.T, mgr *storage.Manager, name string, content []byte
 		if ok, err := mgr.ImageExists(ctx, name); err != nil || !ok {
 			return
 		}
-		if err := mgr.DeleteImage(ctx, name, false); err != nil {
+		if err := mgr.DeleteImage(ctx, name); err != nil {
 			t.Errorf("clean-up: delete image %s: %v", name, err)
 		}
 	})

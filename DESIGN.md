@@ -1227,7 +1227,8 @@ xz -dc fedora-43.qcow2.xz | foundry image import - fedora-43.qcow2
 # Download and import image from URL (TODO: not yet implemented)
 foundry image pull <url> --name <image-name> [--checksum sha256:...]
 
-# Delete base image
+# Delete base image (refused while a volume in any pool is backed by it, and for a
+# Secure Boot key profile)
 foundry image delete <image-name>
 
 # Show image details and usage
