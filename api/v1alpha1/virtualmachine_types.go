@@ -349,7 +349,8 @@ type NetworkInterfaceSpec struct {
 	// listed 802.1Q ID to the bridge port as a tagged VLAN, so the guest sees
 	// the tags and picks the frames apart itself (a guest that switches or
 	// routes per VLAN). Each ID is 1-4094, listed once, at most 256 IDs.
-	// The bridge must be VLAN-aware and trunk the IDs. Exclusive with Vlan.
+	// The bridge must be VLAN-aware and trunk the IDs. Exclusive with Vlan,
+	// and with PXEBoot: a trunk has no native VLAN for untagged frames.
 	// +kubebuilder:validation:MaxItems=256
 	// +optional
 	VlanTrunk []uint `json:"vlanTrunk,omitempty" yaml:"vlanTrunk,omitempty"`
@@ -370,7 +371,8 @@ type NetworkInterfaceSpec struct {
 	// for a caller that finds the VM's port on the host by name. Without it
 	// the name is derived from the IP ("vm" and its four octets in hex, e.g.
 	// vm0a371616). A Linux interface name: 1 to 15 characters, not "." or
-	// "..", without "/", ":" or white space, and not starting with "vnet",
+	// "..", printable ASCII without "/", ":", "%" (the kernel's template for a
+	// numbered name) or white space, and not starting with "vnet",
 	// "vif", "macvtap" or "macvlan": libvirt reserves those prefixes for the
 	// names it generates and drops such a name from the persistent
 	// definition, so the device would get a generated name that changes

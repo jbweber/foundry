@@ -149,3 +149,31 @@ func TestGenerateDomainXML_VlanTrunk(t *testing.T) {
 		}
 	}
 }
+
+// TestGenerateDomainXML_HostDeviceEscaped: the loader allows any printable
+// ASCII the kernel takes, markup characters included; the XML must still
+// carry the name unchanged.
+func TestGenerateDomainXML_HostDeviceEscaped(t *testing.T) {
+	const name = `a<b>&'"c`
+	vm := extrasTestVM(v1alpha1.NetworkInterfaceSpec{IP: "10.20.30.40/24", Gateway: "10.20.30.1", Bridge: "br0", HostDevice: name})
+	_, domain := generate(t, vm, v1alpha1.ArchX86_64)
+	if got := domain.Devices.Interfaces[0].Target.Dev; got != name {
+		t.Errorf("target dev = %q, want %q", got, name)
+	}
+}
+
+func TestGenerateDomainXML_NetworkExtrasAarch64(t *testing.T) {
+	vm := extrasTestVM(v1alpha1.NetworkInterfaceSpec{
+		IP: "10.20.30.40/24", Gateway: "10.20.30.1", Bridge: "br0",
+		HostDevice: "port-a1", VlanTrunk: []uint{10, 20},
+	})
+	vm.Spec.Arch = v1alpha1.ArchAarch64
+	_, domain := generate(t, vm, v1alpha1.ArchAarch64)
+	iface := domain.Devices.Interfaces[0]
+	if iface.Target == nil || iface.Target.Dev != "port-a1" {
+		t.Errorf("target = %+v, want dev port-a1", iface.Target)
+	}
+	if iface.VLan == nil || iface.VLan.Trunk != "yes" || len(iface.VLan.Tags) != 2 {
+		t.Errorf("vlan = %+v, want a trunk of 10 and 20", iface.VLan)
+	}
+}

@@ -237,7 +237,7 @@ spec:
 
 The host bridge must be VLAN-aware (Open vSwitch, or a Linux bridge with
 libvirt 11.0.0 or later) and carry the IDs; foundry does not configure the host.
-There is no native VLAN. The interface still needs `ip` and `gateway`, as its MAC
+There is no native VLAN, so a trunk can't set `pxeBoot`. The interface still needs `ip` and `gateway`, as its MAC
 and device name come from the IP.
 
 ### Host-side Device Names
@@ -252,7 +252,7 @@ spec:
     - ip: 10.20.30.40/24
       gateway: 10.20.30.1
       bridge: br0
-      hostDevice: port-a1         # 1-15 characters, a Linux interface name
+      hostDevice: port-a1         # 1-15 characters, a Linux interface name without %
 ```
 
 The name stays the same at every start. libvirt reserves names starting with

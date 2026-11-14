@@ -42,6 +42,7 @@ func TestLoadFromYAML_HostDevice(t *testing.T) {
 		{"space", "    - {ip: 10.0.0.2/24, gateway: 10.0.0.1, bridge: br0, hostDevice: 'a b'}\n", "may not contain"},
 		{"tab", "    - {ip: 10.0.0.2/24, gateway: 10.0.0.1, bridge: br0, hostDevice: \"a\\tb\"}\n", "may not contain"},
 		{"non-ascii", "    - {ip: 10.0.0.2/24, gateway: 10.0.0.1, bridge: br0, hostDevice: pört}\n", "may not contain"},
+		{"percent", "    - {ip: 10.0.0.2/24, gateway: 10.0.0.1, bridge: br0, hostDevice: 'port%d'}\n", "may not contain"},
 		{"dot", "    - {ip: 10.0.0.2/24, gateway: 10.0.0.1, bridge: br0, hostDevice: '.'}\n", "cannot be"},
 		{"dotdot", "    - {ip: 10.0.0.2/24, gateway: 10.0.0.1, bridge: br0, hostDevice: '..'}\n", "cannot be"},
 		{"duplicate", "    - {ip: 10.0.0.2/24, gateway: 10.0.0.1, bridge: br0, hostDevice: p1}\n    - {ip: 10.0.1.2/24, gateway: 10.0.1.1, bridge: br1, hostDevice: p1}\n", "host device name"},
@@ -81,6 +82,7 @@ func TestValidateSpec_VlanTrunk(t *testing.T) {
 		{"4095", nil, []uint{101, 4095}, "must be between 1 and 4094"},
 		{"duplicate", nil, []uint{101, 102, 101}, "lists 101 twice"},
 		{"over the limit", nil, ids(MaxVlanTrunk + 1), "at most 256"},
+		{"with pxeBoot", nil, []uint{101}, "cannot set both pxeBoot and vlanTrunk"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -90,6 +92,7 @@ func TestValidateSpec_VlanTrunk(t *testing.T) {
 				Bridge:    "br0",
 				Vlan:      tt.vlan,
 				VlanTrunk: tt.trunk,
+				PXEBoot:   tt.name == "with pxeBoot",
 			})
 			checkErr(t, validateSpec(vm), tt.wantErr)
 		})

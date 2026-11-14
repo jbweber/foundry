@@ -64,7 +64,7 @@ spec:
 
       # Optional, instead of vlan: make the port a trunk that carries these
       # 802.1Q IDs tagged into the guest, for a guest that splits the VLANs
-      # itself. 1-256 IDs of 1-4094, each once; no native VLAN.
+      # itself. 1-256 IDs of 1-4094, each once; no native VLAN, so no pxeBoot.
       # vlanTrunk: [101, 102, 103]
 
       # Optional: the host-side device name (the tap device on the bridge).

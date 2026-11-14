@@ -230,11 +230,11 @@ status:
 - At least one network interface, each with `ip`, `gateway`, `bridge`
 - No duplicate IP addresses in network interfaces
 - `networkInterfaces[].hostDevice`, when set, is a Linux interface name of 1-15 characters
-  (not `.` or `..`, printable ASCII without `/`, `:` or space), not starting with `vnet`, `vif`,
+  (not `.` or `..`, printable ASCII without `/`, `:`, `%` or space), not starting with `vnet`, `vif`,
   `macvtap` or `macvlan`; no two interfaces share a host-side name, set or derived (see
   [Network Interface Naming](#network-interface-naming))
 - `networkInterfaces[].vlan` within 1-4094 when set (see [VLAN Tagging](#vlan-tagging))
-- `networkInterfaces[].vlanTrunk`, when set: not beside `vlan`, 1-256 IDs, each 1-4094 and listed once (see [VLAN Trunks](#vlan-trunks))
+- `networkInterfaces[].vlanTrunk`, when set: not beside `vlan` or `pxeBoot`, 1-256 IDs, each 1-4094 and listed once (see [VLAN Trunks](#vlan-trunks))
 - At most one interface sets `defaultRoute`, and at most one sets `pxeBoot`
 - `spec.arch`, when set, is `x86_64` or `aarch64` (see [Guest Architecture](#guest-architecture))
 - `spec.cpuMode` is not `host-model` for an `aarch64` guest
@@ -405,7 +405,9 @@ so libvirt keeps it in the persistent definition and the device has it at every 
 Checked by the loader:
 - 1 to 15 characters (IFNAMSIZ is 16 with the terminating NUL), not `.` or `..`, no `/`, `:` or white
   space: the kernel's rule (`dev_valid_name` in
-  [net/core/dev.c](https://github.com/torvalds/linux/blob/master/net/core/dev.c)).
+  [net/core/dev.c](https://github.com/torvalds/linux/blob/master/net/core/dev.c)). Printable ASCII only.
+- No `%`: the kernel takes a name with one as a template (`port%d`) and gives the device the first
+  free number (`dev_alloc_name` in the same file), so it would not have the name the caller set.
 - Not starting with `vnet`, `vif`, `macvtap` or `macvlan`. libvirt: "the name should not start with either
   'vnet', 'vif', 'macvtap', or 'macvlan', which are prefixes reserved by libvirt and certain hypervisors.
   Manually specified targets using these prefixes may be ignored"
@@ -495,6 +497,8 @@ than an access port ([formatdomain: Setting VLAN tag](https://libvirt.org/format
 
 **Rules**: exclusive with `vlan`; 1 to 256 IDs, each 1-4094, none twice. There
 is no native (untagged) VLAN: untagged frames from the guest are not given one.
+So a trunk can't network boot (the firmware's DHCP is untagged), and `pxeBoot`
+is refused on it.
 The host bridge must be VLAN-aware and carry the IDs; foundry does not configure
 the host.
 

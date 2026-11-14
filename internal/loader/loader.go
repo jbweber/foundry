@@ -265,6 +265,11 @@ func validateSpec(vm *v1alpha1.VirtualMachine) error {
 		if err := validateVlanTrunk(i, iface); err != nil {
 			return err
 		}
+		// A trunk has no native VLAN, so the firmware's untagged DHCP and
+		// TFTP frames go nowhere and a network boot cannot work.
+		if iface.PXEBoot && len(iface.VlanTrunk) > 0 {
+			return fmt.Errorf("spec.networkInterfaces[%d] cannot set both pxeBoot and vlanTrunk: a trunk carries no untagged frames", i)
+		}
 
 		// Boot order and the default route are both domain-wide, so only one
 		// interface may claim either.
@@ -340,13 +345,16 @@ func ValidateHostDevice(name string) error {
 		return fmt.Errorf("must be 1 to %d characters", maxHostDeviceLen)
 	}
 	// The kernel refuses ".", "..", "/", ":" and white space in a name
-	// (dev_valid_name); foundry also keeps to printable ASCII.
+	// (dev_valid_name); foundry also keeps to printable ASCII. It also
+	// refuses "%": the kernel takes a name with one as a template ("port%d")
+	// and hands out the first free number (dev_alloc_name), so the device
+	// would not have the name the caller looks for.
 	if name == "." || name == ".." {
 		return fmt.Errorf("cannot be %q", name)
 	}
 	for _, r := range name {
-		if r <= ' ' || r >= 0x7f || r == '/' || r == ':' {
-			return fmt.Errorf("may not contain %q (printable ASCII without '/', ':' or space)", r)
+		if r <= ' ' || r >= 0x7f || r == '/' || r == ':' || r == '%' {
+			return fmt.Errorf("may not contain %q (printable ASCII without '/', ':', '%%' or space)", r)
 		}
 	}
 	for _, p := range reservedHostDevicePrefixes {
