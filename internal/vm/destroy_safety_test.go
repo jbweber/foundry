@@ -155,6 +155,37 @@ func TestDestroyWithDeps_KeepsOtherVMsVolumes(t *testing.T) {
 	}
 }
 
+// TestDestroyWithDeps_ListingFails: when the domains can't be listed,
+// destroy can't tell another VM's "web_..." volumes from its own, so it
+// stops before it changes anything, also when forced: not stopped, not
+// undefined, no volume deleted.
+func TestDestroyWithDeps_ListingFails(t *testing.T) {
+	for _, force := range []bool{false, true} {
+		t.Run(fmt.Sprintf("force=%v", force), func(t *testing.T) {
+			lv, sm := poolMocks("foundry-vms/web_boot.qcow2", "foundry-vms/web_2_boot.qcow2", "foundry-vms/web_2_data-vdb.qcow2")
+			lv.domainGetStateFunc = func(libvirt.Domain, uint32) (int32, int32, error) { return domainStateRunning, 0, nil }
+			lv.connectListAllDomainsFunc = func(int32, libvirt.ConnectListAllDomainsFlags) ([]libvirt.Domain, uint32, error) {
+				return nil, 0, fmt.Errorf("connection reset")
+			}
+			if force {
+				noSpec(lv)
+			} else {
+				withSpec(t, lv, &v1alpha1.VirtualMachine{ObjectMeta: v1alpha1.ObjectMeta{Name: "web"}})
+			}
+
+			err := destroyWithDeps(context.Background(), "web", lv, sm, force)
+			if err == nil || !strings.Contains(err.Error(), "cannot list the domains") || !strings.Contains(err.Error(), "nothing changed") {
+				t.Fatalf("got %v, want an error saying the domains cannot be listed and nothing changed", err)
+			}
+			if len(lv.domainShutdownCalls) != 0 || len(lv.domainDestroyCalls) != 0 ||
+				len(lv.domainUndefineFlagsCalls) != 0 || len(sm.deleteVolumeCalls) != 0 {
+				t.Errorf("changed something although the domains could not be listed: shutdowns %d, destroys %d, undefines %d, deleted %s",
+					len(lv.domainShutdownCalls), len(lv.domainDestroyCalls), len(lv.domainUndefineFlagsCalls), deleted(sm))
+			}
+		})
+	}
+}
+
 // TestDestroyWithDeps_RefusesForeignDomain: a domain without foundry's spec,
 // or with one that cannot be read, is refused with a clear error and
 // nothing changed: not stopped, not undefined, no volume deleted.
