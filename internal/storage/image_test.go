@@ -17,9 +17,7 @@ func TestManager_ImportImage(t *testing.T) {
 
 	// Helper to create QCOW2 test file
 	createQCOW2 := func(path string) error {
-		data := []byte{0x51, 0x46, 0x49, 0xfb, 0x00, 0x00, 0x00, 0x03} // QCOW2 magic + version
-		data = append(data, make([]byte, 504)...)                      // Pad to 512 bytes
-		return os.WriteFile(path, data, 0644)
+		return os.WriteFile(path, qcow2Fixture(512), 0644)
 	}
 
 	// Helper to create bootable RAW test file

@@ -886,6 +886,25 @@ Foundry validates disk images on import to ensure they are bootable OS images:
 - **Required extension** - Image names must have `.qcow2` or `.raw` extension matching actual format
 - **Format mismatch detection** - Rejects files where extension doesn't match detected format
 - **Non-bootable rejection** - RAW images without boot sector signature are rejected
+- **No qcow2 that reads host files** - a qcow2 image can name other files for qemu to read: a
+  backing file (whose content shows through wherever the image has none) or an external data
+  file (which holds all of the guest's data). A VM booted from such an image reads that file,
+  any file qemu may open on the host. The import refuses:
+  - a backing file (`backing_file_offset` or `backing_file_size` set) or a backing format
+    header extension;
+  - an external data file (incompatible feature bit 2, or the external data file name
+    extension);
+  - what the check cannot vouch for: a version other than 2 or 3, an incompatible feature bit
+    the [qcow2 specification](https://www.qemu.org/docs/master/interop/qcow2.html) does not
+    define (0-4: dirty, corrupt, external data file, compression type, extended L2; qemu
+    refuses unknown ones too), and header extensions that do not end within the first 64 KiB
+    (qemu reads them up to the end of the first cluster, and 64 KiB is qemu-img's default
+    cluster size).
+
+  No Go library for qcow2 headers is among foundry's dependencies and foundry does not run
+  qemu-img, so `internal/storage/format.go` reads those few big-endian fields itself. A boot
+  disk is a new qcow2 whose backing file is the image, so the image itself must have none.
+  An image given as a host path in `spec.bootDisk.image` is not imported and not checked.
 - **Regular files only** - the source path must be a regular file (a symlink to one is
   followed). A directory or a device is refused: its size is not the size of what it would
   stream. The file is opened once, and checked and uploaded from that one open file, so a

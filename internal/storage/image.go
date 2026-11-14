@@ -33,7 +33,9 @@ func CheckImageName(imageName string) error {
 // pool.
 //
 // The name's extension says what the file must be: .qcow2 a QCOW2 image,
-// .raw a bootable raw disk image. The file must be a regular file (a symlink
+// .raw a bootable raw disk image. A qcow2 image that would make qemu read
+// another file (a backing file, an external data file) is refused
+// (checkQCOW2Header). The file must be a regular file (a symlink
 // to one is followed): a directory or a device is refused, as its size is not
 // the size of what it would stream. The file is streamed to libvirt, not read
 // into memory, and if it ends before the size it had when it was opened, the
@@ -118,6 +120,13 @@ func imageVolumeSpec(imageName string, content *io.SectionReader, size int64) (V
 	}
 	spec.Format = detectedFormat
 	if detectedFormat == VolumeFormatQCOW2 {
+		head := make([]byte, min(size, qcow2HeadBytes))
+		if _, err := content.ReadAt(head, 0); err != nil {
+			return spec, fmt.Errorf("failed to read the qcow2 header: %w", err)
+		}
+		if err := checkQCOW2Header(head); err != nil {
+			return spec, err
+		}
 		// Size in GiB, rounded up: the upload replaces the header qemu-img
 		// wrote, and the guest-visible size with it
 		spec.CapacityGB = uint64(size/(1024*1024*1024)) + 1
