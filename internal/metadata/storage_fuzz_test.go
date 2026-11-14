@@ -19,6 +19,12 @@ func FuzzStoreLoad(f *testing.F) {
 	f.Add("]]><C/>", "\t\n0") // go-yaml's Marshal writes a block it cannot read back
 	f.Add("0", "\n#")         // a block with an indentation indicator, read back as ""
 	f.Fuzz(func(t *testing.T, text, note string) {
+		// Each string is stored up to three times and escaped (up to six
+		// bytes a character); stay clear of MaxRecordBytes, which
+		// TestEncode_Bound covers
+		if 18*(len(text)+len(note)) > MaxRecordBytes {
+			t.Skip("inputs exceed the record bound")
+		}
 		vm := newTestVM("fuzz")
 		vm.Annotations = map[string]string{"note": note}
 		vm.Spec.CloudInit = &v1alpha1.CloudInitSpec{RawUserData: text}
