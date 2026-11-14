@@ -1,7 +1,6 @@
 # Foundry
 
 [![CI](https://github.com/jbweber/foundry/workflows/CI/badge.svg)](https://github.com/jbweber/foundry/actions)
-[![Go Report Card](https://goreportcard.com/badge/github.com/jbweber/foundry)](https://goreportcard.com/report/github.com/jbweber/foundry)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/jbweber/foundry)](https://github.com/jbweber/foundry/blob/main/go.mod)
 [![License](https://img.shields.io/github/license/jbweber/foundry)](https://github.com/jbweber/foundry/blob/main/LICENSE)
 [![Release](https://img.shields.io/github/v/release/jbweber/foundry)](https://github.com/jbweber/foundry/releases)
@@ -463,7 +462,32 @@ status:
 
 A fully annotated example covering every field lives in [examples/vm.yaml](examples/vm.yaml). For the complete configuration reference, see [DESIGN.md](DESIGN.md#configuration-format).
 
+## Verify a Release
+
+Release archives, `checksums.txt` and the `ghcr.io/jbweber/foundry` image
+carry build provenance signed by the release workflow. Check it with the
+GitHub CLI before you use them:
+
+```bash
+gh attestation verify foundry_<version>_linux_amd64.tar.gz --repo jbweber/foundry
+gh attestation verify oci://ghcr.io/jbweber/foundry:<version> --repo jbweber/foundry
+```
+
 ## Development
+
+### Before Starting New Work
+
+Bring the dependencies up to date and check them first, in a commit of its
+own:
+
+```bash
+go get -u ./... && go mod tidy
+make vuln     # govulncheck: fails when a known vulnerability is reachable
+make check
+```
+
+Fix what `make vuln` finds before anything else. That commit supersedes any
+Dependabot pull requests still waiting; close them.
 
 ### Running Tests
 

@@ -74,6 +74,11 @@ git history.
 - `spec.bootDisk.imagePool` and the `pool:volume` image form accept only `foundry-images`; any other pool is
   refused when the spec is loaded. Create always took the image from foundry-images, whatever pool the spec
   named, so a VM could boot another image than the one meant.
+- Release archives, checksums and the ghcr.io image carry signed build provenance; check it with
+  `gh attestation verify` (README, Verify a Release). CI pins every action by commit, runs with read-only
+  permissions, and runs govulncheck (`make vuln`) on every push, pull request and weekly.
+- Dependencies: golang.org/x/crypto 0.56.0 (through the lint tooling); golang.org/x/vuln 1.9.0 for
+  govulncheck as a Go tool.
 
 ### Fixed
 

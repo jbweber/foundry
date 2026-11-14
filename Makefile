@@ -1,4 +1,4 @@
-.PHONY: help build test test-unit test-integration fuzz coverage lint fmt fmt-check vet clean install deps tidy check all goimports
+.PHONY: help build test test-unit test-integration fuzz coverage lint fmt fmt-check vet vuln clean install deps tidy check all goimports
 
 # Default target
 .DEFAULT_GOAL := help
@@ -109,6 +109,11 @@ fmt-check:
 		echo "Run 'make goimports' to fix them."; \
 		exit 1; \
 	fi
+
+## vuln: Report known vulnerabilities in the code paths foundry calls (govulncheck, symbol level)
+vuln:
+	@echo "Running govulncheck..."
+	$(GOCMD) tool govulncheck ./...
 
 ## vet: Run go vet, also on the integration tests, so that they build though only the integration lane runs them
 vet:
