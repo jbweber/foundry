@@ -263,8 +263,8 @@ func TestCreateFromConfigWithDeps_InputDisksStartFails(t *testing.T) {
 			t.Errorf("%s not deleted: %v", v, sm.deleteVolumeCalls)
 		}
 	}
-	if len(lv.domainUndefineCalls) != 1 {
-		t.Errorf("domain undefined %d times", len(lv.domainUndefineCalls))
+	if len(lv.domainUndefineFlagsCalls) != 1 {
+		t.Errorf("domain undefined %d times", len(lv.domainUndefineFlagsCalls))
 	}
 }
 

@@ -147,3 +147,100 @@ func TestCreateFromConfigWithDeps_RefusesExistingVolume(t *testing.T) {
 		})
 	}
 }
+
+// TestCreateFromConfigWithDeps_CleanupUndefinesWithNvram: a failed create
+// undefines its domain with VIR_DOMAIN_UNDEFINE_NVRAM. A UEFI domain whose
+// start got as far as making its varstore can't be undefined without it
+// ("cannot undefine domain with nvram"), which left a defined domain with no
+// disks.
+func TestCreateFromConfigWithDeps_CleanupUndefinesWithNvram(t *testing.T) {
+	lv := newMockLibvirtClient()
+	lv.domainCreateFunc = func(libvirt.Domain) error { return errors.New("Cannot get interface MTU on 'br0': No such device") }
+	lv.domainGetStateFunc = func(libvirt.Domain, uint32) (int32, int32, error) { return domainStateShutoff, 0, nil }
+	lv.domainUndefineFunc = func(libvirt.Domain) error {
+		return libvirt.Error{Code: uint32(libvirt.ErrOperationInvalid), Message: "cannot undefine domain with nvram"}
+	}
+	var flags []libvirt.DomainUndefineFlagsValues
+	lv.domainUndefineFlagsFunc = func(_ libvirt.Domain, f libvirt.DomainUndefineFlagsValues) error {
+		flags = append(flags, f)
+		return nil
+	}
+	sm := newMockStorageManager()
+
+	err := createFromConfigWithDeps(context.Background(), testVMConfig(), lv, sm, newMockMetadataClient(lv))
+	if err == nil {
+		t.Fatal("create succeeded although the start failed")
+	}
+	if strings.Contains(err.Error(), "cleanup incomplete") {
+		t.Errorf("cleanup reported a failure: %v", err)
+	}
+	if len(flags) != 1 || flags[0]&libvirt.DomainUndefineNvram == 0 || len(lv.domainUndefineCalls) != 0 {
+		t.Errorf("undefine flags %v, plain undefines %d: want one undefine with VIR_DOMAIN_UNDEFINE_NVRAM", flags, len(lv.domainUndefineCalls))
+	}
+	if !hasCall(sm.deleteVolumeCalls, "foundry-vms/test-vm_boot.qcow2") {
+		t.Errorf("boot volume not deleted: %v", sm.deleteVolumeCalls)
+	}
+}
+
+// TestCreateFromConfigWithDeps_CleanupKeepsDomainItCannotStop: when the
+// failed create's domain may still be running (the forced stop fails, or its
+// state can't be read), the domain stays defined and its volumes stay, and
+// the create's error says so. Undefining it would only make it transient,
+// running on deleted disks.
+func TestCreateFromConfigWithDeps_CleanupKeepsDomainItCannotStop(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		setup func(lv *mockLibvirtClient)
+	}{
+		{"stop fails", func(lv *mockLibvirtClient) {
+			lv.domainGetStateFunc = func(libvirt.Domain, uint32) (int32, int32, error) { return domainStateRunning, 0, nil }
+			lv.domainDestroyFunc = func(libvirt.Domain) error { return errors.New("Failed to terminate process: Device or resource busy") }
+		}},
+		{"state unreadable", func(lv *mockLibvirtClient) {
+			lv.domainGetStateFunc = func(libvirt.Domain, uint32) (int32, int32, error) { return 0, 0, errors.New("connection reset") }
+		}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			lv := newMockLibvirtClient()
+			lv.domainCreateFunc = func(libvirt.Domain) error { return errors.New("start timed out") }
+			tt.setup(lv)
+			sm := newMockStorageManager()
+
+			err := createFromConfigWithDeps(context.Background(), testVMConfig(), lv, sm, newMockMetadataClient(lv))
+			if err == nil {
+				t.Fatal("create succeeded although the start failed")
+			}
+			for _, want := range []string{"start timed out", "may still be running", "foundry-vms/test-vm_boot.qcow2", "foundry destroy test-vm"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q does not mention %q", err, want)
+				}
+			}
+			if len(lv.domainUndefineFlagsCalls)+len(lv.domainUndefineCalls) != 0 || len(sm.deleteVolumeCalls) != 0 {
+				t.Errorf("undefined %d, deleted %v: a domain that may run must keep its definition and disks",
+					len(lv.domainUndefineFlagsCalls)+len(lv.domainUndefineCalls), sm.deleteVolumeCalls)
+			}
+		})
+	}
+}
+
+// TestCreateFromConfigWithDeps_CleanupReportsDomainLeftDefined: a stopped
+// domain that can't be undefined is reported in the create's error; its
+// volumes, which no running guest uses, are deleted.
+func TestCreateFromConfigWithDeps_CleanupReportsDomainLeftDefined(t *testing.T) {
+	lv := newMockLibvirtClient()
+	lv.domainCreateFunc = func(libvirt.Domain) error { return errors.New("start failed") }
+	lv.domainGetStateFunc = func(libvirt.Domain, uint32) (int32, int32, error) { return domainStateShutoff, 0, nil }
+	lv.domainUndefineFlagsFunc = func(libvirt.Domain, libvirt.DomainUndefineFlagsValues) error { return errors.New("undefine failed") }
+	sm := newMockStorageManager()
+
+	err := createFromConfigWithDeps(context.Background(), testVMConfig(), lv, sm, newMockMetadataClient(lv))
+	if err == nil || !strings.Contains(err.Error(), "domain 'test-vm' left defined") {
+		t.Fatalf("got %v, want an error saying the domain was left defined", err)
+	}
+	if len(lv.domainDestroyCalls) != 0 {
+		t.Errorf("stopped a domain that was shut off")
+	}
+	if !hasCall(sm.deleteVolumeCalls, "foundry-vms/test-vm_boot.qcow2") {
+		t.Errorf("boot volume not deleted: %v", sm.deleteVolumeCalls)
+	}
+}

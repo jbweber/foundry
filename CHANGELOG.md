@@ -122,5 +122,10 @@ git history.
   `spec.storagePool` names) was deleted. Create now also checks, before it makes anything, that none of the
   VM's boot, data and cloud-init volumes exists, as it did for the boot and input volumes, and names the one
   that does.
+- A failed `foundry create` undefines its domain with its UEFI varstore (`VIR_DOMAIN_UNDEFINE_NVRAM`). Once
+  a start had made the varstore, libvirt refused the plain undefine, so the domain was left defined with its
+  disks deleted. The cleanup's failures are no longer only logged: the create's error says what was left
+  behind. A domain that may still be running (it could not be stopped, or its state could not be read) is
+  left defined with its volumes, for `foundry destroy` to remove, instead of being undefined while it runs.
 
 [Unreleased]: https://github.com/jbweber/foundry/compare/v0.6.1...HEAD

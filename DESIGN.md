@@ -1372,6 +1372,10 @@ commit it with the fix, so it stays a regression test.
 - Storage creation fails → delete created volumes: create records each volume as it makes it
   and deletes only those, never a volume of the spec's names that it did not make
 - Domain definition fails → clean up storage
+- Start fails → stop the domain if needed and undefine it with its varstore
+  (`VIR_DOMAIN_UNDEFINE_NVRAM`), then delete the created volumes. What the cleanup can't remove is
+  part of the create's error; a domain that may still be running (forced stop failed, state
+  unreadable) is left defined with its volumes for `foundry destroy`
 - Shutdown timeout → force destroy
 
 ### User-Friendly Messages

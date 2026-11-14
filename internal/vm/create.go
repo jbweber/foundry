@@ -3,6 +3,7 @@ package vm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -159,7 +160,7 @@ func CreateFromConfig(ctx context.Context, vm *v1alpha1.VirtualMachine) error {
 
 // createFromConfigWithDeps creates a VM with injected dependencies.
 // This allows for testing by accepting interfaces instead of concrete types.
-func createFromConfigWithDeps(ctx context.Context, vm *v1alpha1.VirtualMachine, lv LibvirtClient, sm storageManager, mc *metadata.Client) error {
+func createFromConfigWithDeps(ctx context.Context, vm *v1alpha1.VirtualMachine, lv LibvirtClient, sm storageManager, mc *metadata.Client) (retErr error) {
 	// State tracking for cleanup
 	var (
 		domainDefined bool
@@ -168,11 +169,14 @@ func createFromConfigWithDeps(ctx context.Context, vm *v1alpha1.VirtualMachine, 
 		made []string
 	)
 
-	// Setup cleanup function that runs on error
+	// Setup cleanup function that runs on error. What the cleanup could not
+	// remove is added to the create's error, so it is not left unnoticed
 	var createErr error
 	defer func() {
 		if createErr != nil {
-			cleanupWithDeps(ctx, vm, sm, lv, domainDefined, made)
+			if err := cleanupWithDeps(ctx, vm, sm, lv, domainDefined, made); err != nil {
+				retErr = fmt.Errorf("%w; cleanup incomplete: %w", retErr, err)
+			}
 		}
 	}()
 
@@ -424,34 +428,29 @@ func resolveKeyProfile(ctx context.Context, vm *v1alpha1.VirtualMachine, sm stor
 	return &resolved, nil
 }
 
-// cleanupWithDeps attempts to clean up the VM resources a failed create made:
-// the domain, if it was defined, and the volumes in made (names in the VM's
+// cleanupWithDeps removes the VM resources a failed create made: the
+// domain, if it was defined, and the volumes in made (names in the VM's
 // pool). This version accepts interfaces for testing.
 //
-// This is best-effort: it logs errors but continues trying to clean up
-// as much as possible. It never returns an error.
-func cleanupWithDeps(ctx context.Context, vm *v1alpha1.VirtualMachine, sm storageManager, lv LibvirtClient, domainDefined bool, made []string) {
+// It carries on past a failure where that is safe, and returns an error that
+// says what was left behind. A domain that may still be running (it could
+// not be stopped, or its state could not be read) is left defined with all
+// its volumes: undefining an active domain only makes it transient, and its
+// disks would be deleted under it. Such a VM's spec is stored, so
+// `foundry destroy` removes it once it can be stopped.
+func cleanupWithDeps(ctx context.Context, vm *v1alpha1.VirtualMachine, sm storageManager, lv LibvirtClient, domainDefined bool, made []string) error {
 	log.Printf("Cleaning up after failed VM creation...")
+	var left []string
 
-	// Clean up libvirt domain if it was defined
 	if domainDefined && lv != nil {
-		log.Printf("Undefining domain '%s'...", vm.Name)
-		domain, err := lv.DomainLookupByName(vm.Name)
-		if err != nil {
-			log.Printf("Warning: failed to lookup domain for cleanup: %v", err)
-		} else {
-			// Try to destroy (force stop) if running
-			if err := lv.DomainDestroy(domain); err != nil {
-				// Ignore error - domain might not be running
-				log.Printf("Note: domain was not running (this is normal): %v", err)
+		if err := removeDomain(lv, vm.Name); err != nil {
+			if errors.Is(err, errDomainMayRun) {
+				for _, name := range made {
+					left = append(left, fmt.Sprintf("volume %s/%s", getStoragePool(vm), name))
+				}
+				return fmt.Errorf("%w; left in place: %s (remove with 'foundry destroy %s')", err, strings.Join(left, ", "), vm.Name)
 			}
-
-			// Undefine the domain
-			if err := lv.DomainUndefine(domain); err != nil {
-				log.Printf("Warning: failed to undefine domain: %v", err)
-			} else {
-				log.Printf("Domain undefined successfully")
-			}
+			left = append(left, err.Error())
 		}
 	}
 
@@ -463,12 +462,52 @@ func cleanupWithDeps(ctx context.Context, vm *v1alpha1.VirtualMachine, sm storag
 		for _, name := range made {
 			if err := sm.DeleteVolume(ctx, getStoragePool(vm), name); err != nil {
 				log.Printf("Warning: failed to delete volume %s: %v", name, err)
+				left = append(left, fmt.Sprintf("volume %s/%s not deleted: %v", getStoragePool(vm), name, err))
 			}
 		}
-		log.Printf("Storage cleanup complete")
 	}
 
+	if len(left) > 0 {
+		return errors.New(strings.Join(left, "; "))
+	}
 	log.Printf("Cleanup complete")
+	return nil
+}
+
+// errDomainMayRun marks a cleanup failure after which the domain may still
+// be running.
+var errDomainMayRun = errors.New("may still be running")
+
+// removeDomain stops (forcibly) and undefines the domain a failed create
+// defined, with its varstore: every foundry domain is UEFI, and once a start
+// has made the varstore libvirt refuses an undefine without
+// VIR_DOMAIN_UNDEFINE_NVRAM ("cannot undefine domain with nvram"). A domain
+// that is already gone is not an error.
+func removeDomain(lv LibvirtClient, name string) error {
+	log.Printf("Undefining domain '%s'...", name)
+	domain, err := lv.DomainLookupByName(name)
+	if err != nil {
+		var le libvirt.Error
+		if errors.As(err, &le) && le.Code == uint32(libvirt.ErrNoDomain) {
+			return nil
+		}
+		return fmt.Errorf("domain '%s' %w: lookup failed: %w", name, errDomainMayRun, err)
+	}
+	state, _, err := lv.DomainGetState(domain, 0)
+	if err != nil {
+		return fmt.Errorf("domain '%s' %w: its state cannot be read: %w", name, errDomainMayRun, err)
+	}
+	if state != domainStateShutoff {
+		if err := lv.DomainDestroy(domain); err != nil {
+			return fmt.Errorf("domain '%s' %w: it could not be stopped: %w", name, errDomainMayRun, err)
+		}
+	}
+	if err := lv.DomainUndefineFlags(domain, libvirt.DomainUndefineNvram); err != nil {
+		log.Printf("Warning: failed to undefine domain: %v", err)
+		return fmt.Errorf("domain '%s' left defined (stopped): %w", name, err)
+	}
+	log.Printf("Domain undefined successfully")
+	return nil
 }
 
 // checkVolumesAbsent fails if the VM's boot volume, a data volume or its
