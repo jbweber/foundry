@@ -11,6 +11,28 @@ git history.
 
 ## [Unreleased]
 
+### Changed
+
+- Every dependency is updated to its newest release, the tools (golangci-lint, goimports, govulncheck) and
+  their dependencies included (`go get -u ./...`, `go get -u tool`, `go mod tidy`). Among them go-libvirt
+  moves to `v0.0.0-20261013170128-efbbdf578ac8` and golang.org/x/crypto to v0.59.0. Go stays at 1.27.
+
+### Security
+
+- GO-2026-5932 (golang.org/x/crypto/openpgp is unmaintained and unsafe by design) is cleared: x/crypto moves
+  from v0.56.0 to v0.59.0. foundry never called that package; govulncheck listed it at module level. With
+  that, govulncheck finds nothing at symbol, package or module level, in foundry's packages and in its tools.
+- Three modules in the full module graph (`go list -m all`) still have advisories. No package of foundry or of
+  its tools imports them, they are not in go.mod, and Go never downloads them; they appear only because a
+  tool dependency's own go.mod names them for its tests. They cannot be raised from here: `go mod tidy`
+  drops a minimum requirement on a module that no package needs, and the modules that name them are already
+  at their newest release. Each clears when the named module raises its requirement.
+  - github.com/jackc/pgx/v5 v5.5.4 (GO-2026-4771, GO-2026-4772, fixed in 5.9.0; GO-2026-5004, fixed in
+    5.9.2), named by github.com/ryanrolds/sqlclosecheck v0.6.0, a golangci-lint linter.
+  - github.com/klauspost/compress v1.20.1 (GO-2026-6865, fixed in 1.20.2), named by
+    github.com/prometheus/client_golang v1.25.0.
+  - github.com/yuin/goldmark v1.4.13 (GO-2026-5320, fixed in 1.7.17), named by golang.org/x/tools v0.52.0.
+
 ## [0.7.0] - 2026-11-14
 
 All earlier versions, v0.1.0 to v0.6.1, are retracted: Go no longer picks them, and `go list -m -u` warns
