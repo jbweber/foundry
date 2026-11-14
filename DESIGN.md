@@ -388,7 +388,9 @@ or an image.
 ### VM Destruction Workflow
 
 ```
-1. Check VM exists and is foundry's (refused otherwise, unless --force)
+1. Check VM exists and is foundry's (refused otherwise, unless --force). With no domain of that
+   name, remove its leftover `<vm>_` volumes in foundry-vms (sparing other VMs', as in step 5),
+   or report "not found" when there are none
 1b. List the domains, for the other VMs whose names start with `<vm>_`; if
    they cannot be listed: error, nothing changed (also with --force)
 2. Get domain state

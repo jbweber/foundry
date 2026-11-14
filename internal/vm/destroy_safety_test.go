@@ -240,3 +240,57 @@ func TestDestroyWithDeps_ForceForeignDomain(t *testing.T) {
 		t.Errorf("deleted %s, want only foundry-vms/rhel_boot.qcow2", got)
 	}
 }
+
+// noDomain makes the mock's lookups answer as libvirt does for a name no
+// domain has.
+func noDomain(lv *mockLibvirtClient) {
+	lv.domainLookupByNameFunc = func(name string) (libvirt.Domain, error) {
+		return libvirt.Domain{}, libvirt.Error{Code: uint32(libvirt.ErrNoDomain), Message: "Domain not found: " + name}
+	}
+}
+
+// TestDestroyWithDeps_Leftovers: a name with no domain but volumes left of
+// one (a create killed before its define) has them deleted from the VMs
+// pool, sparing another VM's "web_2_..." volumes; with nothing left it is
+// "not found", as before.
+func TestDestroyWithDeps_Leftovers(t *testing.T) {
+	lv, sm := poolMocks("foundry-vms/web_boot.qcow2", "foundry-vms/web_cloudinit.iso", "foundry-vms/web_2_boot.qcow2", "foundry-images/web_10.qcow2")
+	noDomain(lv)
+	lv.connectListAllDomainsFunc = func(int32, libvirt.ConnectListAllDomainsFlags) ([]libvirt.Domain, uint32, error) {
+		return []libvirt.Domain{{Name: "web_2"}}, 1, nil
+	}
+	if err := destroyWithDeps(context.Background(), "web", lv, sm, false); err != nil {
+		t.Fatalf("destroy of leftovers: %v", err)
+	}
+	if got := deleted(sm); got != "foundry-vms/web_boot.qcow2 foundry-vms/web_cloudinit.iso" {
+		t.Errorf("deleted %s, want web's two volumes in foundry-vms only", got)
+	}
+	if len(lv.domainUndefineFlagsCalls)+len(lv.domainDefineXMLCalls) != 0 {
+		t.Error("defined or undefined a domain for leftovers")
+	}
+
+	lv, sm = poolMocks("foundry-vms/other_boot.qcow2")
+	noDomain(lv)
+	err := destroyWithDeps(context.Background(), "web", lv, sm, false)
+	if err == nil || !strings.Contains(err.Error(), "VM 'web' not found") || len(sm.deleteVolumeCalls) != 0 {
+		t.Errorf("nothing left: got %v, deleted %s; want not found and nothing deleted", err, deleted(sm))
+	}
+}
+
+// TestDestroyWithDeps_Interrupted: an interrupt before the undefine stops
+// the destroy with nothing undefined or deleted; it never turns the
+// graceful shutdown into a forced stop.
+func TestDestroyWithDeps_Interrupted(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	lv, sm := poolMocks("foundry-vms/web_boot.qcow2")
+	withSpec(t, lv, &v1alpha1.VirtualMachine{ObjectMeta: v1alpha1.ObjectMeta{Name: "web"}})
+	err := destroyWithDeps(ctx, "web", lv, sm, false)
+	if err == nil || !strings.Contains(err.Error(), "interrupted") {
+		t.Fatalf("got %v, want an interrupted error", err)
+	}
+	if len(lv.domainDestroyCalls)+len(lv.domainUndefineFlagsCalls)+len(sm.deleteVolumeCalls) != 0 {
+		t.Errorf("changed something after the interrupt: destroys %d, undefines %d, deleted %s",
+			len(lv.domainDestroyCalls), len(lv.domainUndefineFlagsCalls), deleted(sm))
+	}
+}

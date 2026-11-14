@@ -157,5 +157,9 @@ git history.
 - `foundry create` refuses a boot disk smaller than its image's virtual size, before it makes anything. The
   disk was made at the smaller size without a warning, and the guest saw a disk cut off in the middle of its
   partitions.
+- Ctrl-C or SIGTERM during `foundry create` stops it and removes what it made so far; during `foundry destroy` it
+  stops before the domain is undefined. A second Ctrl-C ends foundry at once. Before, an interrupted create left
+  volumes behind and `foundry destroy` answered that the VM did not exist; it now removes the `<vm>_...` volumes
+  left in foundry-vms of a name that has no domain.
 
 [Unreleased]: https://github.com/jbweber/foundry/compare/v0.6.1...HEAD
