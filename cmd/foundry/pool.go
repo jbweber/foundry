@@ -20,7 +20,8 @@ var poolCmd = &cobra.Command{
 	Long: `Manage libvirt storage pools for VM disks and images.
 
 Storage pools are containers for storage volumes (disk images). Foundry uses
-two default pools: foundry-images (base OS images) and foundry-vms (VM disks).`,
+three default pools: foundry-images (base OS images), foundry-vms (VM disks)
+and foundry-logs (the VMs' serial console logs).`,
 }
 
 func init() {
@@ -69,7 +70,7 @@ Shows pool name, type, state, and storage capacity/usage for each pool.`,
 		for _, pool := range pools {
 			// Mark default pools
 			name := pool.Name
-			if pool.Name == storage.DefaultImagesPool || pool.Name == storage.DefaultVMsPool {
+			if storage.IsDefaultPool(pool.Name) {
 				name = pool.Name + " *"
 			}
 
@@ -239,7 +240,7 @@ var poolDeleteCmd = &cobra.Command{
 	Short: "Delete a storage pool",
 	Long: `Delete a storage pool by name.
 
-Cannot delete default pools (foundry-images, foundry-vms).
+Cannot delete default pools (foundry-images, foundry-vms, foundry-logs).
 
 Use --force to delete pools that contain volumes. Without --force,
 only empty pools can be deleted.

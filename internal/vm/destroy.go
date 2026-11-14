@@ -39,6 +39,8 @@ const (
 //  4. Force destroy if still not shut off
 //  5. Undefine domain (with NVRAM cleanup for UEFI VMs)
 //  6. Delete the VM's storage volumes (see vmVolumes)
+//  7. Delete its serial console log from the logs pool, with the copies
+//     virtlogd rotated it into (exact names, see naming.SerialLogCopy)
 //
 // Only foundry's VMs are destroyed: a domain without foundry's spec in its
 // metadata, or whose spec cannot be read, is refused with nothing changed,
@@ -164,13 +166,18 @@ func destroyWithDeps(ctx context.Context, vmName string, lv LibvirtClient, sm st
 	log.Printf("Cleaning up storage volumes...")
 	deletedCount := deleteVolumes(ctx, sm, vmVolumes(ctx, sm, vmName, spec, others))
 
+	// Step 7: Delete the VM's serial log and virtlogd's rotated copies of it
+	// (exact names; the domain is stopped, so virtlogd has closed them)
+	deletedCount += deleteVolumes(ctx, sm, serialLogVolumes(ctx, sm, vmName))
+
 	log.Printf("VM '%s' destroyed successfully (%d volumes deleted)", vmName, deletedCount)
 	return nil
 }
 
 // destroyLeftovers removes what is left of a VM whose domain is not defined:
 // its volumes in the VMs pool, as destroy finds them ("<vmName>_...", less
-// those of another defined VM whose name starts with "<vmName>_"). With no
+// those of another defined VM whose name starts with "<vmName>_"), and its
+// serial log. With no
 // spec there is no other pool to search. A VM is in that state after a
 // create killed before it defined its domain (a second Ctrl-C, a crash), or
 // when the domain was undefined by other means; create refuses the name
@@ -183,6 +190,7 @@ func destroyLeftovers(ctx context.Context, vmName string, lv LibvirtClient, sm s
 		return fmt.Errorf("VM '%s': cannot list the domains whose volumes it must keep, nothing changed: %w", vmName, err)
 	}
 	volumes := vmVolumes(ctx, sm, vmName, nil, others)
+	volumes = append(volumes, serialLogVolumes(ctx, sm, vmName)...)
 	if len(volumes) == 0 {
 		return fmt.Errorf("VM '%s' not found: %w", vmName, notFound)
 	}

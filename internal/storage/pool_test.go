@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -160,6 +161,16 @@ func TestManager_DeletePool(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name:     "cannot delete default logs pool",
+			poolName: DefaultLogsPool,
+			force:    false,
+			setup: func(m *mockLibvirtClient) {
+				mgr := NewManager(m)
+				_ = mgr.CreatePool(context.Background(), DefaultLogsPool, PoolTypeDir, DefaultLogsPath)
+			},
+			wantErr: true,
+		},
+		{
 			name:     "delete non-existent pool",
 			poolName: "nonexistent",
 			force:    false,
@@ -308,5 +319,17 @@ func TestManager_EnsureDefaultPools(t *testing.T) {
 	_, err = mockClient.StoragePoolLookupByName(DefaultVMsPool)
 	if err != nil {
 		t.Errorf("Default VMs pool not found after EnsureDefaultPools()")
+	}
+
+	// The logs pool, at its default path and private (0711)
+	logs, ok := mockClient.pools[DefaultLogsPool]
+	if !ok {
+		t.Fatalf("Default logs pool not found after EnsureDefaultPools()")
+	}
+	if !strings.Contains(logs.xmlDesc, "<path>"+DefaultLogsPath+"</path>") || !strings.Contains(logs.xmlDesc, "<mode>0711</mode>") {
+		t.Errorf("logs pool XML = %s, want path %s and mode 0711", logs.xmlDesc, DefaultLogsPath)
+	}
+	if dir, err := mgr.LogsDir(context.Background()); err != nil || dir != DefaultLogsPath {
+		t.Errorf("LogsDir() = %q, %v; want %q", dir, err, DefaultLogsPath)
 	}
 }

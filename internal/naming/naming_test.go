@@ -216,3 +216,40 @@ func TestParseVolumeNameVarstore(t *testing.T) {
 		})
 	}
 }
+
+func TestSerialLogName(t *testing.T) {
+	if got := SerialLogName("web-server"); got != "web-server-serial.log" {
+		t.Errorf("SerialLogName() = %q, want web-server-serial.log", got)
+	}
+}
+
+// TestSerialLogCopy: the log and virtlogd's numbered copies of it match, by
+// exact name; another VM's log, or another name that starts the same, does not.
+func TestSerialLogCopy(t *testing.T) {
+	tests := []struct {
+		volume string
+		n      int
+		ok     bool
+	}{
+		{"web-serial.log", -1, true},
+		{"web-serial.log.0", 0, true},
+		{"web-serial.log.12", 12, true},
+		{"web-serial.log.", 0, false},
+		{"web-serial.log.01", 0, false},
+		{"web-serial.log.-1", 0, false},
+		{"web-serial.log.bak", 0, false},
+		{"web-serial.log.0.gz", 0, false},
+		{"web-2-serial.log", 0, false},
+		{"web-2-serial.log.0", 0, false},
+		{"xweb-serial.log", 0, false},
+		{"web.log", 0, false},
+		{"web_boot.qcow2", 0, false},
+		{"web-serial.log.99999999999999999999", 0, false},
+	}
+	for _, tt := range tests {
+		n, ok := SerialLogCopy(tt.volume, "web")
+		if ok != tt.ok || (ok && n != tt.n) {
+			t.Errorf("SerialLogCopy(%q, web) = %d, %v; want %d, %v", tt.volume, n, ok, tt.n, tt.ok)
+		}
+	}
+}

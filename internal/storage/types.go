@@ -129,4 +129,25 @@ const (
 	DefaultImagesPath = "/var/lib/libvirt/images/foundry/images"
 	// DefaultVMsPath is the default path for VM disks.
 	DefaultVMsPath = "/var/lib/libvirt/images/foundry/vms"
+	// DefaultLogsPool is the pool of the VMs' serial console logs
+	// ({vm}-serial.log and the copies virtlogd rotates it into, see
+	// naming.SerialLogName). foundry reads them with StorageVolDownload and
+	// deletes them with StorageVolDelete, through libvirt, as it does disks.
+	DefaultLogsPool = "foundry-logs"
+	// DefaultLogsPath is the directory foundry builds the logs pool in when
+	// the pool does not exist. It is inside libvirt's QEMU log directory so
+	// it gets that directory's SELinux type (virt_log_t), which virtlogd may
+	// write. A VM's serial log goes in the directory of the logs pool as
+	// libvirt reports it (Manager.LogsDir), not necessarily this one.
+	DefaultLogsPath = "/var/log/libvirt/qemu/foundry"
 )
+
+// IsDefaultPool reports whether name is one of the pools foundry makes and
+// relies on (images, VMs, logs), which it does not delete.
+func IsDefaultPool(name string) bool {
+	switch name {
+	case DefaultImagesPool, DefaultVMsPool, DefaultLogsPool:
+		return true
+	}
+	return false
+}

@@ -94,7 +94,7 @@ func setup(t *testing.T) (*libvirt.Libvirt, *storage.Manager) {
 	lv := c.Libvirt()
 
 	var missing []string
-	for _, p := range []string{storage.DefaultImagesPool, storage.DefaultVMsPool} {
+	for _, p := range []string{storage.DefaultImagesPool, storage.DefaultVMsPool, storage.DefaultLogsPool} {
 		if _, err := lv.StoragePoolLookupByName(p); err != nil {
 			if !isLibvirtError(err, libvirt.ErrNoStoragePool) {
 				t.Fatalf("look up pool %s: %v", p, err)
@@ -489,4 +489,112 @@ func TestIntegrationCreateDigest(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestIntegrationSerialLog: a VM's serial console is logged to its file in
+// the logs pool from its first boot (the firmware prints to the serial
+// console), logs reads it through libvirt, the file is private to its owner,
+// and destroy deletes it.
+func TestIntegrationSerialLog(t *testing.T) {
+	lv, mgr := setup(t)
+	requireKVM(t, lv)
+	name := uniqueName(t)
+	bridge := isolatedNetwork(t, lv, name)
+	image := name + "-image.raw"
+	content := rawImage()
+	if err := importImage(t, mgr, image, content); err != nil {
+		t.Fatalf("import image %s: %v", image, err)
+	}
+	destroyed := false
+	destroyAtEnd(t, lv, name, &destroyed)
+	if err := vm.CreateFromConfig(ctxT(t), integrationSpec(t, name, bridge, image, digestOf(content), "")); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// The firmware finds nothing to boot on the image and says so on the
+	// serial console; wait for the first bytes
+	var out bytes.Buffer
+	deadline := time.Now().Add(time.Minute)
+	for {
+		out.Reset()
+		err := vm.Logs(ctxT(t), name, vm.LogSerial, &out)
+		if err == nil && out.Len() > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no serial output within a minute: %v (%d bytes)", err, out.Len())
+		}
+		time.Sleep(2 * time.Second)
+	}
+	t.Logf("serial log starts: %q", firstBytes(out.Bytes(), 200))
+
+	t.Run("file", func(t *testing.T) {
+		dir, err := mgr.LogsDir(ctxT(t))
+		if err != nil {
+			t.Fatalf("LogsDir: %v", err)
+		}
+		vols, err := mgr.ListVolumes(ctxT(t), storage.DefaultLogsPool)
+		if err != nil {
+			t.Fatalf("list logs pool: %v", err)
+		}
+		want := dir + "/" + name + "-serial.log"
+		for _, v := range vols {
+			if v.Name != name+"-serial.log" {
+				continue
+			}
+			if v.Path != want {
+				t.Errorf("log at %s, want %s", v.Path, want)
+			}
+			pool, _ := lv.StoragePoolLookupByName(storage.DefaultLogsPool)
+			vol, err := lv.StorageVolLookupByName(pool, v.Name)
+			if err != nil {
+				t.Fatalf("look up log volume: %v", err)
+			}
+			xml, err := lv.StorageVolGetXMLDesc(vol, 0)
+			if err != nil {
+				t.Fatalf("log volume XML: %v", err)
+			}
+			var def libvirtxml.StorageVolume
+			if err := def.Unmarshal(xml); err != nil {
+				t.Fatalf("parse log volume XML: %v", err)
+			}
+			if def.Target == nil || def.Target.Permissions == nil {
+				t.Fatalf("log volume has no permissions: %s", xml)
+			}
+			p := def.Target.Permissions
+			t.Logf("log file mode %s, owner %s, group %s, label %q", p.Mode, p.Owner, p.Group, p.Label)
+			if p.Mode != "0600" {
+				t.Errorf("log file mode %s, want 0600", p.Mode)
+			}
+			return
+		}
+		t.Fatalf("no volume %s-serial.log in %s", name, storage.DefaultLogsPool)
+	})
+
+	t.Run("destroy deletes it", func(t *testing.T) {
+		if err := vm.Destroy(ctxT(t), name, false); err != nil {
+			t.Fatalf("Destroy: %v", err)
+		}
+		destroyed = true
+		if err := mgr.RefreshPool(ctxT(t), storage.DefaultLogsPool); err != nil {
+			t.Fatalf("refresh logs pool: %v", err)
+		}
+		vols, err := mgr.ListVolumes(ctxT(t), storage.DefaultLogsPool)
+		if err != nil {
+			t.Fatalf("list logs pool: %v", err)
+		}
+		for _, v := range vols {
+			if strings.HasPrefix(v.Name, name+"-serial.log") {
+				t.Errorf("left after destroy: %s", v.Name)
+			}
+		}
+		if err := vm.Logs(ctxT(t), name, vm.LogSerial, io.Discard); err == nil {
+			t.Error("logs after destroy succeeded")
+		}
+	})
+}
+
+// firstBytes is at most n bytes of b.
+func firstBytes(b []byte, n int) []byte {
+	return b[:min(n, len(b))]
 }

@@ -35,10 +35,10 @@ func TestGenerateVolumeXML_Modes(t *testing.T) {
 	}
 }
 
-// TestGenerateDirPoolXML_Modes: the VMs pool's directory is 0711, others
+// TestGenerateDirPoolXML_Modes: the VMs and logs pools' directories are 0711, others
 // 0755, without an owner or group.
 func TestGenerateDirPoolXML_Modes(t *testing.T) {
-	for pool, mode := range map[string]string{DefaultVMsPool: "0711", DefaultImagesPool: "0755", "fast": "0755"} {
+	for pool, mode := range map[string]string{DefaultVMsPool: "0711", DefaultLogsPool: "0711", DefaultImagesPool: "0755", "fast": "0755"} {
 		xml, err := generateDirPoolXML(pool, "/var/lib/foundry/"+pool)
 		if err != nil {
 			t.Fatalf("generateDirPoolXML(%s): %v", pool, err)

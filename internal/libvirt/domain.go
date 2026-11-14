@@ -2,6 +2,7 @@ package libvirt
 
 import (
 	"fmt"
+	"path"
 
 	"libvirt.org/go/libvirtxml"
 
@@ -47,7 +48,21 @@ func GetInputVolumeName(vm *v1alpha1.VirtualMachine, label string) string {
 	return naming.VolumeNameInput(vm.Name, label)
 }
 
-// GenerateDomainXML generates libvirt domain XML from VM configuration.
+// GenerateDomainXML generates libvirt domain XML from VM configuration, with
+// the serial console log in storage.DefaultLogsPath: what create defines with
+// the default pool layout, and what render shows. See
+// GenerateDomainXMLWithLogDir.
+func GenerateDomainXML(vm *v1alpha1.VirtualMachine, hostArch string) (string, error) {
+	return GenerateDomainXMLWithLogDir(vm, hostArch, storage.DefaultLogsPath)
+}
+
+// GenerateDomainXMLWithLogDir generates libvirt domain XML from VM
+// configuration.
+//
+// logDir is the directory on the hypervisor the serial console log is written
+// to, as {logDir}/{vm}-serial.log (naming.SerialLogName). create passes the
+// logs pool's directory as libvirt reports it (storage.Manager.LogsDir), so
+// the log is a volume of that pool.
 //
 // hostArch is the architecture of the machine libvirt runs on, in libvirt's
 // names (see HostArch). A guest of that architecture runs under KVM, any
@@ -56,7 +71,7 @@ func GetInputVolumeName(vm *v1alpha1.VirtualMachine, label string) string {
 //
 // x86_64 guests use the q35 machine; aarch64 guests use the virt machine,
 // with the differences applied by applyAarch64.
-func GenerateDomainXML(vm *v1alpha1.VirtualMachine, hostArch string) (string, error) {
+func GenerateDomainXMLWithLogDir(vm *v1alpha1.VirtualMachine, hostArch, logDir string) (string, error) {
 	domainType := vm.GetDomainType(hostArch)
 	cpuMode := vm.CPUModeFor(domainType)
 
@@ -289,11 +304,22 @@ func GenerateDomainXML(vm *v1alpha1.VirtualMachine, hostArch string) (string, er
 		domain.Devices.Interfaces = append(domain.Devices.Interfaces, netIface)
 	}
 
-	// Add serial console
+	// Add serial console. The pty stays the interactive console (virsh
+	// console); libvirt also has everything the console carries written to a
+	// file, appended across boots, so what the guest printed can be read
+	// later (foundry logs) (https://libvirt.org/formatdomain.html#logging).
+	// With virtlogd as QEMU's stdio handler (qemu.conf stdio_handler, "logd"
+	// by default) virtlogd writes the file and rotates it at its max_size.
+	// The console below is the same device (port 0), so it needs no log of
+	// its own.
 	domain.Devices.Serials = []libvirtxml.DomainSerial{
 		{
 			Source: &libvirtxml.DomainChardevSource{
 				Pty: &libvirtxml.DomainChardevSourcePty{},
+			},
+			Log: &libvirtxml.DomainChardevLog{
+				File:   path.Join(logDir, naming.SerialLogName(vm.Name)),
+				Append: "on",
 			},
 			Target: &libvirtxml.DomainSerialTarget{
 				Port: func() *uint { p := uint(0); return &p }(),

@@ -119,7 +119,7 @@ information for each pool including volume counts and usage percentage.`,
 
 			// Mark default pools
 			name := pool.Name
-			if pool.Name == storage.DefaultImagesPool || pool.Name == storage.DefaultVMsPool {
+			if storage.IsDefaultPool(pool.Name) {
 				name = pool.Name + " *"
 			}
 
