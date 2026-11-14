@@ -1,6 +1,6 @@
 module github.com/jbweber/foundry
 
-go 1.27.0
+go 1.27.4
 
 retract [v0.1.0, v0.6.1] // destroy can delete disks of running or paused guests and of other VMs; the VM spec is lost at the first stop; fixed in v0.7.0
 

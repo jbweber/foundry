@@ -490,10 +490,16 @@ Bring the dependencies up to date and check them first, in a commit of its
 own:
 
 ```bash
-go get -u ./... && go mod tidy
+go get -u ./... && go get -u tool && go mod tidy
+go mod edit -go=1.27.N   # the newest Go 1.27 patch release; Dependabot does not move this line
 make vuln     # govulncheck: fails when a known vulnerability is reachable
 make check
 ```
+
+The `go` line is the minimum toolchain for building foundry, so raising it to
+the newest patch release makes every build from source use a standard library
+with that release's security fixes (with `GOTOOLCHAIN=auto`, the default, an
+older Go downloads that release).
 
 Fix what `make vuln` finds before anything else. That commit supersedes any
 Dependabot pull requests still waiting; close them.
