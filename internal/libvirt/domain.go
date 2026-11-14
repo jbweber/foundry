@@ -41,6 +41,12 @@ func GetCloudInitVolumeName(vm *v1alpha1.VirtualMachine) string {
 	return naming.VolumeNameCloudInit(vm.Name)
 }
 
+// GetInputVolumeName returns the volume name of the input disk labelled label.
+// Format: <vm-name>_input-<label in lower case>.iso
+func GetInputVolumeName(vm *v1alpha1.VirtualMachine, label string) string {
+	return naming.VolumeNameInput(vm.Name, label)
+}
+
 // GenerateDomainXML generates libvirt domain XML from VM configuration.
 //
 // hostArch is the architecture of the machine libvirt runs on, in libvirt's
@@ -204,28 +210,18 @@ func GenerateDomainXML(vm *v1alpha1.VirtualMachine, hostArch string) (string, er
 	}
 	addFwCfg(domain, vm.Spec.FwCfg)
 
-	// Add cloud-init ISO if configured (volume-based)
+	// Add the cloud-init ISO (sda) and the input disks (sdb, sdc, ...) as
+	// read-only CD-ROMs (volume-based). The input disks keep their targets
+	// without cloud-init, so a disk's device does not depend on whether the
+	// VM has cloud-init.
+	var cdroms []libvirtxml.DomainDisk
 	if vm.Spec.CloudInit != nil {
-		cdrom := libvirtxml.DomainDisk{
-			Device: "cdrom",
-			Driver: &libvirtxml.DomainDiskDriver{
-				Name: "qemu",
-				Type: "raw",
-			},
-			Source: &libvirtxml.DomainDiskSource{
-				Volume: &libvirtxml.DomainDiskSourceVolume{
-					Pool:   GetStoragePool(vm),
-					Volume: GetCloudInitVolumeName(vm),
-				},
-			},
-			Target: &libvirtxml.DomainDiskTarget{
-				Dev: "sda",
-				Bus: "sata",
-			},
-			ReadOnly: &libvirtxml.DomainDiskReadOnly{},
-		}
-		addCdrom(domain, cdrom)
+		cdroms = append(cdroms, cdrom(GetStoragePool(vm), GetCloudInitVolumeName(vm), "sda"))
 	}
+	for i, in := range vm.Spec.InputDisks {
+		cdroms = append(cdroms, cdrom(GetStoragePool(vm), GetInputVolumeName(vm, in.Label), naming.InputDiskTarget(i)))
+	}
+	addCdroms(domain, cdroms...)
 
 	// Add network interfaces
 	for _, iface := range vm.Spec.NetworkInterfaces {
@@ -308,21 +304,50 @@ func GenerateDomainXML(vm *v1alpha1.VirtualMachine, hostArch string) (string, er
 	return xml, nil
 }
 
-// addCdrom adds a CD-ROM to a domain, on the bus its machine has: SATA on
+// cdrom returns a read-only raw CD-ROM on a pool volume, on SATA (addCdroms
+// moves it to SCSI for aarch64).
+func cdrom(pool, volume, target string) libvirtxml.DomainDisk {
+	return libvirtxml.DomainDisk{
+		Device: "cdrom",
+		Driver: &libvirtxml.DomainDiskDriver{
+			Name: "qemu",
+			Type: "raw",
+		},
+		Source: &libvirtxml.DomainDiskSource{
+			Volume: &libvirtxml.DomainDiskSourceVolume{
+				Pool:   pool,
+				Volume: volume,
+			},
+		},
+		Target: &libvirtxml.DomainDiskTarget{
+			Dev: target,
+			Bus: "sata",
+		},
+		ReadOnly: &libvirtxml.DomainDiskReadOnly{},
+	}
+}
+
+// addCdroms adds CD-ROMs to a domain, on the bus its machine has: SATA on
 // x86_64 (q35). The aarch64 virt machine has no AHCI controller, so SATA is
-// unavailable there; it gets a SCSI cdrom on a virtio-scsi controller, as
-// virt-install does for every non-x86 guest that supports virtio-scsi:
+// unavailable there; it gets SCSI cdroms on one virtio-scsi controller
+// (libvirt refuses two controllers with the same index), as virt-install
+// does for every non-x86 guest that supports virtio-scsi:
 // https://github.com/virt-manager/virt-manager/blob/main/virtinst/devices/disk.py (_default_bus)
-func addCdrom(domain *libvirtxml.Domain, cdrom libvirtxml.DomainDisk) {
+func addCdroms(domain *libvirtxml.Domain, cdroms ...libvirtxml.DomainDisk) {
+	if len(cdroms) == 0 {
+		return
+	}
 	if domain.OS.Type.Arch == v1alpha1.ArchAarch64 {
-		cdrom.Target.Bus = "scsi"
+		for i := range cdroms {
+			cdroms[i].Target.Bus = "scsi"
+		}
 		domain.Devices.Controllers = append(domain.Devices.Controllers, libvirtxml.DomainController{
 			Type:  "scsi",
 			Index: func() *uint { i := uint(0); return &i }(),
 			Model: "virtio-scsi",
 		})
 	}
-	domain.Devices.Disks = append(domain.Devices.Disks, cdrom)
+	domain.Devices.Disks = append(domain.Devices.Disks, cdroms...)
 }
 
 // applyFirmware replaces UEFI auto-selection (firmware='efi') with an explicit

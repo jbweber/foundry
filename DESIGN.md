@@ -176,6 +176,15 @@ spec:
   autostart: true             # Auto-start VM on host boot (default: true)
   storagePool: foundry-vms    # Storage pool to use (default: foundry-vms)
 
+  # Optional: small read-only ISO-9660 disks with files for the guest (see Input Disks)
+  inputDisks:
+    - label: NODECFG          # Volume label; the guest mounts LABEL=NODECFG
+      files:
+        - name: node.yaml
+          file: inputs/node.yaml  # Read by foundry; relative to this YAML file's directory
+        - name: install-config
+          string: "disk=/dev/vda"  # Or the content inline
+
 # Status (populated automatically by foundry)
 status:
   phase: Running              # Pending, Creating, Running, Stopped, Failed, Destroying
@@ -205,6 +214,7 @@ status:
 **Normalization (automatic):**
 - `metadata.name` → lowercase
 - `spec.cloudInit.fqdn` → lowercase (hostname derived from this)
+- `spec.inputDisks[].files[].file` → absolute, a relative path taken from the YAML file's directory
 
 **Validation checks (enforced by `loader.validateSpec`):**
 - `metadata.name` is non-empty
@@ -228,6 +238,12 @@ status:
 - `spec.fwCfg[].name` starts with `opt/`, is at most 55 characters (QEMU's
   limit), is not under `opt/ovmf/` or `opt/org.qemu/`, and is unique; each entry has exactly one of `file` or
   `string` (see [SMBIOS and fw_cfg](#smbios-and-fw_cfg))
+- `spec.inputDisks`: at most 25; `label` is 1 to 32 characters from `A-Z 0-9 _`, unique, and `CIDATA`
+  only without `spec.cloudInit`; at least one file per disk; file `name`s are unique per disk, at most
+  28 characters of `a-z 0-9 _ -` with an optional extension of a dot and 1 to 8 of the same; each file
+  sets exactly one of `file` or `string`; inline `string`s total at most 1 MiB; no data disk
+  `device` is an input disk's target (see
+  [Input Disks](#input-disks))
 
 **Not yet enforced** (documented intent, no implementation):
 - `metadata.name` format: `^[a-z0-9][a-z0-9_-]*[a-z0-9]$` (after normalization)
@@ -239,6 +255,8 @@ status:
 
 **Runtime validation (during VM creation):**
 - VM name doesn't conflict with existing domain
+- No input disk volume exists yet; each `inputDisks` `file` is a regular file, and the files of
+  one disk hold at most 16 MiB
 - Boot disk image exists (unless empty: true)
 - Bridge exists on hypervisor (future: fuzzy match)
 
@@ -266,11 +284,13 @@ status:
    - Generate network-config YAML
    - Create ISO using iso9660 library
    - Upload ISO to libvirt storage
+5b. Build and upload the input disks (spec.inputDisks); their files are read
+   and their volumes checked before any storage is created (see Input Disks)
 6. Generate libvirt domain XML
    - CPU, memory, boot order
    - Disk devices (virtio)
    - Network interfaces (bridge, virtio)
-   - Cloud-init CDROM
+   - Cloud-init CDROM, input disk CDROMs
    - Serial console
 7. Define domain in libvirt
 8. Set autostart flag
@@ -291,6 +311,7 @@ status:
    - Boot disk
    - Data disks
    - Cloud-init ISO
+   - Input disks
 6. Remove VM directory
 ```
 
@@ -588,6 +609,90 @@ directly booted kernel under Secure Boot.
 </sysinfo>
 ```
 
+### Input Disks
+
+`spec.inputDisks` gives the guest a few small files on read-only disks: an
+installer's config, a document describing the node, anything the guest's first
+boot reads before it has a network. Each entry is one disk, an ISO-9660 image
+with a volume label and its files in the root directory. The guest finds a disk
+by its label (`/dev/disk/by-label/<label>`), not by device name, and mounts it
+read-only (`mount -o ro LABEL=...`).
+
+foundry builds each image in memory with the same ISO-9660 writer as the
+cloud-init seed ([kdomanski/iso9660](https://github.com/kdomanski/iso9660)),
+creates a raw volume of exactly its size in the VM's pool
+(`<vm>_input-<label in lower case>.iso`, StorageVolCreateXML) and uploads it in
+one stream (StorageVolUpload). The domain gets one read-only CD-ROM per disk on
+that volume, after the cloud-init ISO's `sda`: `sdb`, `sdc`, ... `sdz`, on SATA
+(x86_64; the first controller has six ports and libvirt adds another for more)
+or on the same virtio-scsi controller as the cloud-init ISO (aarch64). The
+input disks keep these targets without `spec.cloudInit`. Everything goes
+through the libvirt API: foundry writes no file on the hypervisor.
+
+```xml
+<disk type='volume' device='cdrom'>
+  <driver name='qemu' type='raw'/>
+  <source pool='foundry-vms' volume='my-vm_input-nodecfg.iso'/>
+  <target dev='sdb' bus='sata'/>
+  <readonly/>
+</disk>
+```
+
+| Field | What |
+|---|---|
+| `label` | ISO-9660 volume identifier: 1-32 of `A-Z 0-9 _` (d-characters, [ECMA-119](https://ecma-international.org/publications-and-standards/standards/ecma-119/) 7.4.1) |
+| `files[].name` | File name: a base of `a-z 0-9 _ -`, optional `.` + 1-8 of the same, at most 28 characters |
+| `files[].file` | A regular file foundry reads on the machine it runs on (relative: from the YAML file's directory) |
+| `files[].string` | OR the content inline |
+
+- **Opt-in.** A spec without `inputDisks` renders exactly the domain it did
+  before; the CD-ROM code is shared with the cloud-init seed, which keeps its
+  target and bus.
+- **Names reach the guest unchanged.** The image is plain ISO-9660, without
+  Rock Ridge or Joliet: the writer lower-cases names, replaces characters
+  outside the ISO-9660 set and extra dots with `_`, and cuts long names; a
+  Linux guest then shows the names in lower case without the `;1` version
+  suffix. Validation admits only names that pass through all of that
+  unchanged, so the guest sees exactly the names in the file. An ISO-9660 file
+  identifier holds 30 characters including `;1`, hence 28.
+- **Limits that fail early.** 25 disks fill `sdb` to `sdz`, and a data disk
+  whose `device` is one of those targets is refused (libvirt would refuse the
+  duplicate target at define). The files of one
+  disk may hold 16 MiB, since the image is built in memory and these disks are
+  for small inputs, not payloads (those belong in an image). Inline `string`
+  content may total 1 MiB: the spec, inline content included, is stored in
+  the domain's metadata, and libvirt takes at most 4 MiB in one string over
+  its RPC protocol, so a larger spec would start the VM and then fail to store
+  its metadata.
+- **What a `file` can name.** foundry reads it with the permissions of the
+  user running foundry and hands its content to the guest, so only run specs
+  from people who may read that file as that user. It must be a regular file:
+  a device such as `/dev/zero` would never end, and a FIFO would block the
+  create. foundry opens it without blocking, checks its type, and reads at
+  most the disk's remaining 16 MiB plus one byte. The volume, like the
+  cloud-init seed, is a file in the pool's directory on the hypervisor, so
+  its content is visible to whoever can read that directory.
+- **CIDATA.** `CIDATA` is the cloud-init seed's label, so it is refused next to
+  `spec.cloudInit` (two seeds); without `spec.cloudInit`, an input disk
+  labelled `CIDATA` is a hand-made NoCloud seed.
+- **Failure and recreate.** Files are read, the images built and the input
+  volumes checked before any storage is created, so a missing file or a
+  volume left over from an earlier VM of the same name fails the create
+  without cleanup; foundry neither reuses nor deletes a leftover volume. After
+  that check, every input volume of the spec that exists is one this create
+  made, so a later failure deletes them by name with the VM's other volumes.
+  `foundry destroy` deletes them with the rest (the `<vm>_` prefix in the
+  default pools, as for the boot disk), and the
+  spec stores the paths, not the content, so creating the VM again reads the
+  files again.
+
+Left out, because foundry has no counterpart to them: a server-side policy on
+which paths a remote request may name (foundry has no server; it runs as the
+user who calls it), and rebuilding input disks in place on a reinstall, with a
+second set of volumes so a failed reinstall leaves the running VM's disks
+alone (foundry has no reinstall or install phase; destroy and create is the
+way to change a VM, and it rebuilds the disks).
+
 ### Default Route
 
 `defaultRoute` controls whether the generated cloud-init network-config gets a
@@ -620,6 +725,7 @@ interface sets it, but does not require that any interface does.
 - Boot disk: `{vm-name}_boot`
 - Data disks: `{vm-name}_data-{device}` (e.g., `web-server_data-vdb`)
 - Cloud-init ISO: `{vm-name}_cloudinit`
+- Input disks: `{vm-name}_input-{label in lower case}.iso` (e.g., `web-server_input-nodecfg.iso`)
 - Base images: `{os-name}-{version}` (e.g., `fedora-43`, `ubuntu-24.04`)
 
 **Storage structure:**
@@ -1136,6 +1242,9 @@ When storing VM metadata using `yaml.Marshal()` and `xml.Marshal()`:
 - **Nil values**: `yaml.Marshal(nil)` returns `"null\n"` without error
 - **Empty structs**: Both marshalers handle empty structs gracefully
 - **Marshal errors**: Practically impossible to trigger for well-formed Go structs
+- **Special characters**: the YAML is the metadata element's XML text (`xml:",chardata"`),
+  escaped on store and unescaped on load, so a spec string holding `<` or `&` (a shell
+  script in `rawUserData`, an inline input file) stores valid XML and reads back unchanged
 - **Test coverage**: Don't worry about covering marshal error paths for standard types
 
 This is why the `metadata.Store()` function achieves only 81.8% coverage - the error paths for YAML/XML marshaling failures (lines 51, 63 in storage.go) are unreachable in practice with valid struct types.
@@ -1231,6 +1340,8 @@ Infrastructure-level resource naming lives in `internal/naming/`:
 - **`VolumeNameBoot(vmName)`** - Boot disk volume name (`{vmName}_boot`)
 - **`VolumeNameData(vmName, device)`** - Data disk volume name (`{vmName}_data-vdb`)
 - **`VolumeNameCloudInit(vmName)`** - Cloud-init ISO name (`{vmName}_cloudinit`)
+- **`VolumeNameInput(vmName, label)`** - Input disk volume name (`{vmName}_input-{label in lower case}.iso`)
+- **`InputDiskTarget(i)`** - Target of the i-th input disk's CD-ROM (`sdb` ... `sdz`, `MaxInputDisks` = 25)
 
 **Why `internal/naming/`?**
 - Infrastructure concerns (encoding rules, not business logic)
@@ -1248,7 +1359,7 @@ Infrastructure-level resource naming lives in `internal/naming/`:
 | `internal/storage/` | Storage management + consumer-side interface | `Manager`, `LibvirtClient` interface - pool/volume CRUD, image import |
 | `internal/metadata/` | VM spec persistence + consumer-side interface | `Client`, `LibvirtClient` interface - persist specs in libvirt metadata |
 | `internal/naming/` | Resource naming conventions | MAC/interface/volume naming functions |
-| `internal/cloudinit/` | Cloud-init generation | `GenerateUserData()`, `GenerateNetworkConfig()`, `GenerateISO()` |
+| `internal/cloudinit/` | Cloud-init generation, ISO-9660 images | `GenerateUserData()`, `GenerateNetworkConfig()`, `GenerateISO()`, `BuildISO()` |
 | `internal/libvirtxml/` | Libvirt domain XML generation | `GenerateDomainXML()` - creates libvirt XML from VirtualMachine spec |
 | `internal/status/` | Status/condition management | `SetCondition()`, `SetPhase()` - K8s-style status updates |
 | `internal/output/` | Output formatters | `TableFormatter`, `YAMLFormatter`, `JSONFormatter` |

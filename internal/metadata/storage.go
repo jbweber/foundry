@@ -77,8 +77,12 @@ const (
 type FoundryMetadata struct {
 	XMLName xml.Name `xml:"metadata"`
 	Xmlns   string   `xml:"xmlns,attr"`
-	// SpecYAML contains the VirtualMachine spec serialized as YAML
-	SpecYAML string `xml:",innerxml"`
+	// SpecYAML contains the VirtualMachine spec serialized as YAML, stored as
+	// XML text: escaped on Store and unescaped on Load, so a spec whose
+	// strings hold "<" or "&" (a shell script, an inline file) makes valid
+	// metadata, and the text libvirt hands back, which it re-serializes with
+	// its own escaping, reads back unchanged.
+	SpecYAML string `xml:",chardata"`
 }
 
 // Store saves the VirtualMachine spec to libvirt domain metadata.

@@ -161,6 +161,9 @@ func TestVirtualMachineSpec_DeepCopy(t *testing.T) {
 			FQDN: "test.example.com",
 		},
 		Autostart: &autostart,
+		InputDisks: []InputDiskSpec{
+			{Label: "NODECFG", Files: []InputFileSpec{{Name: "node.yaml", String: "a"}}},
+		},
 	}
 
 	copy := spec.DeepCopy()
@@ -188,6 +191,11 @@ func TestVirtualMachineSpec_DeepCopy(t *testing.T) {
 	*copy.Autostart = false
 	if *spec.Autostart == false {
 		t.Error("Modifying copy.Autostart affected original")
+	}
+
+	copy.InputDisks[0].Files[0].String = "modified"
+	if spec.InputDisks[0].Files[0].String == "modified" {
+		t.Error("Modifying copy.InputDisks affected original")
 	}
 }
 

@@ -83,7 +83,7 @@ func parseImageReference(bootDisk v1alpha1.BootDiskSpec) (string, string, bool, 
 //  1. Load and validate configuration
 //  2. Connect to libvirt
 //  3. Pre-flight checks (VM exists, disk space, etc.)
-//  4. Create storage (directories, disks, cloud-init ISO)
+//  4. Create storage (disks, cloud-init ISO, input disks)
 //  5. Define domain in libvirt
 //  6. Set autostart and start VM
 //
@@ -176,6 +176,17 @@ func createFromConfigWithDeps(ctx context.Context, vm *v1alpha1.VirtualMachine, 
 	var domainVM *v1alpha1.VirtualMachine
 	domainVM, createErr = resolveKeyProfile(ctx, vm, sm)
 	if createErr != nil {
+		return createErr
+	}
+
+	// Step 2c: Read the input disks' files and build their images, and check
+	// that none of their volumes exists, also before any storage is created
+	var inputImages []inputImage
+	inputImages, createErr = buildInputImages(vm)
+	if createErr != nil {
+		return createErr
+	}
+	if createErr = checkInputVolumes(ctx, vm, sm, inputImages); createErr != nil {
 		return createErr
 	}
 
@@ -276,6 +287,11 @@ func createFromConfigWithDeps(ctx context.Context, vm *v1alpha1.VirtualMachine, 
 		}
 	} else {
 		log.Printf("Skipping cloud-init (not configured)")
+	}
+
+	// Step 7: Create the input disk volumes and upload their images
+	if createErr = createInputVolumes(ctx, vm, sm, inputImages); createErr != nil {
+		return createErr
 	}
 
 	// Step 9: Generate domain XML. A spec with spec.arch runs under KVM or
@@ -419,6 +435,14 @@ func cleanupWithDeps(ctx context.Context, vm *v1alpha1.VirtualMachine, sm storag
 		if vm.Spec.CloudInit != nil {
 			if err := sm.DeleteVolume(ctx, getStoragePool(vm), getCloudInitVolumeName(vm)); err != nil {
 				log.Printf("Warning: failed to delete cloud-init volume: %v", err)
+			}
+		}
+
+		// Delete input disk volumes. create checked that none existed
+		// before it, so these are its own.
+		for _, in := range vm.Spec.InputDisks {
+			if err := sm.DeleteVolume(ctx, getStoragePool(vm), foundrylibvirt.GetInputVolumeName(vm, in.Label)); err != nil {
+				log.Printf("Warning: failed to delete input volume %s: %v", in.Label, err)
 			}
 		}
 

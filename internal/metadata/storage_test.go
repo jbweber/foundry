@@ -740,3 +740,37 @@ func TestMetadataConstants(t *testing.T) {
 		t.Errorf("MetadataKey changed: expected %q, got %q", expectedKey, MetadataKey)
 	}
 }
+
+// The spec is stored as XML text, so content with XML's special characters
+// (a shell script's "&&" or "<", an inline input file holding XML) makes valid
+// metadata and comes back unchanged.
+func TestStoreLoad_SpecialCharacters(t *testing.T) {
+	mock := &mockLibvirtClient{}
+	vm := newCompleteTestVM("special-vm")
+	const script = "#!/bin/sh\ntest -d /a && echo '<ok>' > /tmp/x & wait\n"
+	vm.Spec.CloudInit = &v1alpha1.CloudInitSpec{RawUserData: script}
+	vm.Spec.InputDisks = []v1alpha1.InputDiskSpec{
+		{Label: "CFG", Files: []v1alpha1.InputFileSpec{{Name: "a.xml", String: `<a b="c">&amp;</a>`}}},
+	}
+
+	client := NewClient(mock)
+	if err := client.Store(libvirt.Domain{}, vm); err != nil {
+		t.Fatalf("Store() failed: %v", err)
+	}
+	var metadata FoundryMetadata
+	if err := xml.Unmarshal([]byte(mock.lastSetMetadata), &metadata); err != nil {
+		t.Fatalf("stored metadata is not valid XML: %v\n%s", err, mock.lastSetMetadata)
+	}
+
+	mock.getMetadataValue = mock.lastSetMetadata
+	got, err := client.Load(libvirt.Domain{})
+	if err != nil {
+		t.Fatalf("Load() failed: %v", err)
+	}
+	if got.Spec.CloudInit.RawUserData != script {
+		t.Errorf("rawUserData = %q, want %q", got.Spec.CloudInit.RawUserData, script)
+	}
+	if s := got.Spec.InputDisks[0].Files[0].String; s != `<a b="c">&amp;</a>` {
+		t.Errorf("input file = %q", s)
+	}
+}
