@@ -123,7 +123,7 @@ spec:
   bootDisk:
     sizeGB: 50                # Disk size in GB
     image: fedora-43.qcow2    # Image reference (see formats below)
-    imagePool: foundry-images # Optional: pool containing base image (default: foundry-images)
+    imagePool: foundry-images # Optional: only foundry-images, the default, is accepted
     imageSHA256: 8582f6...    # Optional: sha256 of the image; checked before anything is made
     # OR for empty boot disk:
     # empty: true             # Create empty disk instead of snapshot
@@ -206,9 +206,17 @@ status:
 ```
 
 **Image Reference Formats:**
-- Volume name: `fedora-43.qcow2` (uses `imagePool` or defaults to `foundry-images`)
-- Full reference: `foundry-images:fedora-43.qcow2` (explicit pool:volume format)
-- File path: `/path/to/image.qcow2` (direct filesystem path, not recommended)
+- Volume name: `fedora-43.qcow2`, in `foundry-images`
+- Full reference: `foundry-images:fedora-43.qcow2` (pool:volume format; the pool must be
+  `foundry-images`)
+- `imagePool` may only be `foundry-images` (its default). Images are imported, checked and
+  listed there and create takes them from there, so the loader refuses any other pool, in
+  `imagePool` or in the pool:volume form
+- File path: `/path/to/image.qcow2` (direct filesystem path, not recommended). Checked as an
+  import checks an image, before anything is made: a regular file, a qcow2 or bootable raw image
+  by its content, and a qcow2 without a backing or external data file. Its format is taken from
+  its content, never from its name, and named as the overlay's backing format. foundry reads the
+  file on the machine it runs on, the hypervisor unless libvirt is reached over `--socket`
 
 **Image digest** (`spec.bootDisk.imageSHA256`, optional): the sha256 of the
 image volume's bytes, 64 lower-case hex digits as `sha256sum` prints them for
@@ -222,9 +230,6 @@ pool's directory. It costs reading the whole image once per create.
 
 - Only for an image volume: a file path is not a volume and an empty disk has
   no image, so the loader refuses the field with either.
-- Only for `foundry-images`: create takes the image from that pool whatever
-  pool the reference names, so a digest for another pool would be checked
-  against a volume other than the one booted. The loader refuses it.
 - The stored volume hashes as the file did because an import uploads the file
   byte for byte, and a raw image's volume is exactly the file's size. A qcow2
   image smaller than the empty qcow2 file libvirt creates for the volume
@@ -925,6 +930,15 @@ and the input disks) carry none: a guest finds those by their volume label.
 - Users can add pools for specific storage needs (SSD, bulk, network storage)
 - Support for different backends: dir, LVM, ZFS, NFS, Ceph
 - CLI commands for pool management
+
+**Modes and ownership:** foundry sets no owner or group on a pool or volume; libvirt
+gives a disk to QEMU's user (and its SELinux label) while a domain uses it, and back
+after. A VM's own volumes (boot, data, cloud-init, input) are 0600: they hold its data
+and secrets such as the password hash. Base images and Secure Boot key profiles are 0644:
+shared backing files and varstore templates (certificates, no private keys). The
+foundry-vms directory is 0711, so QEMU can open a volume by path but other users can't
+list the VMs' disks; other pools, foundry-images included, are 0755. libvirt applies a
+mode only when it makes the volume or builds the pool, so older ones keep theirs.
 
 **Volume Naming Convention** (flat namespace within pools):
 - Boot disk: `{vm-name}_boot`

@@ -159,3 +159,39 @@ func checkQCOW2Header(head []byte) error {
 		off += 8 + (extLen+7)&^7
 	}
 }
+
+// CheckBootImageFile checks a boot image given as a host path rather than an
+// imported image, as import checks an image: it must be a regular file whose
+// content is a qcow2 or a bootable raw image, and a qcow2 must not make qemu
+// read another file (see checkQCOW2Header). It returns the format detected
+// from the content, never from the file's name, for the overlay to name as
+// its backing format. The path is read on the machine foundry runs on, which
+// is the hypervisor unless libvirt is reached over --socket.
+func CheckBootImageFile(path string) (VolumeFormat, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("failed to open boot image: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil {
+		return "", fmt.Errorf("failed to stat boot image: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("boot image %s is not a regular file", path)
+	}
+	format, err := detectImageFormat(f)
+	if err != nil {
+		return "", fmt.Errorf("boot image %s: %w", path, err)
+	}
+	if format == VolumeFormatQCOW2 {
+		head := make([]byte, min(info.Size(), qcow2HeadBytes))
+		if _, err := f.ReadAt(head, 0); err != nil {
+			return "", fmt.Errorf("failed to read the qcow2 header of boot image %s: %w", path, err)
+		}
+		if err := checkQCOW2Header(head); err != nil {
+			return "", fmt.Errorf("boot image %s: %w", path, err)
+		}
+	}
+	return format, nil
+}

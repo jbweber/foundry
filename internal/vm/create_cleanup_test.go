@@ -2,7 +2,10 @@ package vm
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -243,4 +246,57 @@ func TestCreateFromConfigWithDeps_CleanupReportsDomainLeftDefined(t *testing.T) 
 	if !hasCall(sm.deleteVolumeCalls, "foundry-vms/test-vm_boot.qcow2") {
 		t.Errorf("boot volume not deleted: %v", sm.deleteVolumeCalls)
 	}
+}
+
+// TestCreateFromConfigWithDeps_PathImageChecked: a boot image given as a host
+// path is checked as an import is, before anything is made, and its format
+// comes from its content: a raw file named "disk.bin" backs the overlay as
+// raw, and a qcow2 with an external data file is refused.
+func TestCreateFromConfigWithDeps_PathImageChecked(t *testing.T) {
+	dir := t.TempDir()
+	raw := make([]byte, 1024)
+	raw[510], raw[511] = 0x55, 0xaa
+	rawPath := filepath.Join(dir, "disk.bin")
+	if err := os.WriteFile(rawPath, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	q := make([]byte, 4096)
+	copy(q, []byte{0x51, 0x46, 0x49, 0xfb})
+	binary.BigEndian.PutUint32(q[4:], 3)   // version
+	binary.BigEndian.PutUint32(q[20:], 16) // cluster_bits
+	binary.BigEndian.PutUint64(q[72:], 1<<2)
+	binary.BigEndian.PutUint32(q[100:], 104) // header_length
+	dataFilePath := filepath.Join(dir, "disk.qcow2")
+	if err := os.WriteFile(dataFilePath, q, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("raw without an extension", func(t *testing.T) {
+		vm := testVMConfig()
+		vm.Spec.BootDisk.Empty = false
+		vm.Spec.BootDisk.Image = rawPath
+		lv := newMockLibvirtClient()
+		sm := newMockStorageManager()
+		if err := createFromConfigWithDeps(context.Background(), vm, lv, sm, newMockMetadataClient(lv)); err != nil {
+			t.Fatalf("create: %v", err)
+		}
+		if len(sm.createVolumeCalls) == 0 || sm.createVolumeCalls[0].BackingFormat != storage.VolumeFormatRaw ||
+			sm.createVolumeCalls[0].BackingVolume != rawPath {
+			t.Errorf("boot volume spec %+v, want backing %s as raw", sm.createVolumeCalls, rawPath)
+		}
+	})
+	t.Run("qcow2 with an external data file", func(t *testing.T) {
+		vm := testVMConfig()
+		vm.Spec.BootDisk.Empty = false
+		vm.Spec.BootDisk.Image = dataFilePath
+		lv := newMockLibvirtClient()
+		sm := newMockStorageManager()
+		err := createFromConfigWithDeps(context.Background(), vm, lv, sm, newMockMetadataClient(lv))
+		if err == nil || !strings.Contains(err.Error(), "external data file") {
+			t.Fatalf("got %v, want an external data file error", err)
+		}
+		if len(sm.createVolumeCalls) != 0 || len(lv.domainDefineXMLCalls) != 0 {
+			t.Errorf("made %v, defined %d before refusing the image", sm.createVolumeCalls, len(lv.domainDefineXMLCalls))
+		}
+	})
 }

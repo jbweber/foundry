@@ -181,9 +181,6 @@ func generateVolumeXML(_ string, spec VolumeSpec, _ *Manager) (string, error) {
 		capacityBytes = spec.CapacityBytes
 	}
 
-	// Get the QEMU user/group IDs for this system
-	uid, gid, _ := GetQEMUUserGroup()
-
 	vol := &libvirtxml.StorageVolume{
 		Type: "file",
 		Name: spec.Name,
@@ -195,10 +192,12 @@ func generateVolumeXML(_ string, spec VolumeSpec, _ *Manager) (string, error) {
 			Format: &libvirtxml.StorageVolumeTargetFormat{
 				Type: string(spec.Format),
 			},
+			// No owner or group: libvirt gives a disk to QEMU's user (and its
+			// SELinux label) itself when a domain using it starts, and back
+			// when it stops (https://libvirt.org/drvqemu.html#posix-users-groups),
+			// so QEMU reads a 0600 volume. See VolumeMode.
 			Permissions: &libvirtxml.StorageVolumeTargetPermissions{
-				Owner: uid,
-				Group: gid,
-				Mode:  "0644",
+				Mode: VolumeMode(spec.Type),
 			},
 		},
 	}
@@ -218,6 +217,11 @@ func generateVolumeXML(_ string, spec VolumeSpec, _ *Manager) (string, error) {
 		ext := filepath.Ext(spec.BackingVolume)
 		if ext == ".raw" || ext == ".img" {
 			backingFormat = "raw"
+		}
+		// A format detected from the content wins over the extension: a
+		// boot image given as a host path is named freely
+		if spec.BackingFormat != "" {
+			backingFormat = string(spec.BackingFormat)
 		}
 
 		vol.BackingStore = &libvirtxml.StorageVolumeBackingStore{
@@ -239,4 +243,21 @@ func generateVolumeXML(_ string, spec VolumeSpec, _ *Manager) (string, error) {
 	xml = strings.TrimSpace(xml)
 
 	return xml, nil
+}
+
+// VolumeMode is the file mode a volume of type t is created with. A VM's
+// own volumes (boot and data disks, cloud-init and input disk ISOs) hold
+// its data and secrets (a password hash, user data, node configuration),
+// so only their owner may read them: 0600. libvirt makes QEMU's user the
+// owner while the VM runs, and root again after it stops. Base images and
+// Secure Boot key profiles are shared and not secret (backing files of
+// many VMs; varstore templates holding certificates, no private keys, that
+// libvirt copies), so they stay 0644. libvirt has no call to change a
+// volume's mode: volumes made before keep theirs.
+func VolumeMode(t VolumeType) string {
+	switch t {
+	case VolumeTypeBaseImage, VolumeTypeVarstore:
+		return "0644"
+	}
+	return "0600"
 }

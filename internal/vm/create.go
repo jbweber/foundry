@@ -224,6 +224,7 @@ func createFromConfigWithDeps(ctx context.Context, vm *v1alpha1.VirtualMachine, 
 
 	// Step 3: Parse image reference and get backing image path (if specified)
 	var backingVolume string
+	var backingFormat storage.VolumeFormat
 	if vm.Spec.BootDisk.Image != "" && !vm.Spec.BootDisk.Empty {
 		imagePool, imageName, isFilePath, parseErr := parseImageReference(vm.Spec.BootDisk)
 		if parseErr != nil {
@@ -231,10 +232,23 @@ func createFromConfigWithDeps(ctx context.Context, vm *v1alpha1.VirtualMachine, 
 			return fmt.Errorf("failed to parse image reference: %w", createErr)
 		}
 
+		// Images come from foundry-images only, where create looks them up;
+		// the loader refuses another pool, and so does this, for a spec
+		// that did not come through the loader
+		if !isFilePath && imagePool != storage.DefaultImagesPool {
+			createErr = fmt.Errorf("spec.bootDisk names image pool %q; images come from %s only", imagePool, storage.DefaultImagesPool)
+			return createErr
+		}
+
 		if isFilePath {
-			// File path - use as-is for backward compatibility
+			// File path - checked as import checks an image, its format
+			// taken from its content, before anything is made
 			backingVolume = vm.Spec.BootDisk.Image
-			log.Printf("Using backing image (file): %s", backingVolume)
+			backingFormat, createErr = storage.CheckBootImageFile(backingVolume)
+			if createErr != nil {
+				return createErr
+			}
+			log.Printf("Using backing image (file, %s): %s", backingFormat, backingVolume)
 		} else {
 			// Pool-based image - verify it exists and get path
 			log.Printf("Checking if backing image exists: %s:%s", imagePool, imageName)
@@ -272,6 +286,7 @@ func createFromConfigWithDeps(ctx context.Context, vm *v1alpha1.VirtualMachine, 
 		Format:        storage.VolumeFormatQCOW2,
 		CapacityGB:    uint64(vm.Spec.BootDisk.SizeGB),
 		BackingVolume: backingVolume,
+		BackingFormat: backingFormat,
 	}
 	if createErr = sm.CreateVolume(ctx, getStoragePool(vm), bootSpec); createErr != nil {
 		return fmt.Errorf("failed to create boot volume: %w", createErr)
