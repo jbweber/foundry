@@ -11,6 +11,10 @@ git history.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-14
+
+A guest network filter (libvirt's traffic filtering per VM interface) is planned for a later version.
+
 ### Added
 
 - Serial console log: every VM's serial console is written, appended across boots, to `<vm>-serial.log` in a new
@@ -246,5 +250,6 @@ earlier versions.
   instance-id is the VM name, and SSH keys go to the image's default user, not root; CLOUDINIT.md's validation
   list and example spec match the loader.
 
-[Unreleased]: https://github.com/jbweber/foundry/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/jbweber/foundry/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/jbweber/foundry/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/jbweber/foundry/compare/v0.6.1...v0.7.0
