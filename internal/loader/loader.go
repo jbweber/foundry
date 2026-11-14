@@ -4,6 +4,7 @@ package loader
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -261,6 +262,12 @@ func validateSpec(vm *v1alpha1.VirtualMachine) error {
 		return err
 	}
 
+	// cloud-init hands the password hash to chpasswd as one "user:hash"
+	// line; a line break would add lines of its own
+	if ci := vm.Spec.CloudInit; ci != nil && strings.ContainsAny(ci.PasswordHash, "\r\n") {
+		return fmt.Errorf("spec.cloudInit.passwordHash must be a single line")
+	}
+
 	// Validate network interfaces
 	if len(vm.Spec.NetworkInterfaces) == 0 {
 		return fmt.Errorf("spec.networkInterfaces must have at least one interface")
@@ -283,10 +290,21 @@ func validateSpec(vm *v1alpha1.VirtualMachine) error {
 		if iface.Bridge == "" {
 			return fmt.Errorf("spec.networkInterfaces[%d].bridge is required", i)
 		}
-		if ipsSeen[iface.IP] {
-			return fmt.Errorf("spec.networkInterfaces[%d].ip %q is duplicated", i, iface.IP)
+		// The MAC and the host-side device name are derived from the
+		// IPv4 address, so it must parse as one, with its prefix length
+		addr, _, err := net.ParseCIDR(iface.IP)
+		if err != nil || addr.To4() == nil {
+			return fmt.Errorf("spec.networkInterfaces[%d].ip %q must be an IPv4 address with a prefix length, such as 10.0.0.5/24", i, iface.IP)
 		}
-		ipsSeen[iface.IP] = true
+		if net.ParseIP(iface.Gateway) == nil {
+			return fmt.Errorf("spec.networkInterfaces[%d].gateway %q is not an IP address", i, iface.Gateway)
+		}
+		// Compared as addresses: 10.0.0.5/24 and 10.0.0.5/16 are the same
+		// address and would get the same MAC
+		if ipsSeen[addr.String()] {
+			return fmt.Errorf("spec.networkInterfaces[%d].ip %q is duplicated (the address %s is used by another interface)", i, iface.IP, addr)
+		}
+		ipsSeen[addr.String()] = true
 
 		// 802.1Q reserves 0 (priority-tagged frames) and 4095, leaving 1-4094 usable.
 		if iface.Vlan != nil && (*iface.Vlan == 0 || *iface.Vlan > MaxVlanID) {
@@ -554,6 +572,10 @@ const fwCfgMaxName = 55
 // larger content belongs in a file entry.
 const fwCfgMaxString = 128<<10 - 128
 
+// fwCfgNameRE is the form of a fw_cfg name: "opt/" and then characters
+// that need no escaping in the QEMU option libvirt builds from it.
+var fwCfgNameRE = regexp.MustCompile(`^opt/[A-Za-z0-9._/-]+$`)
+
 // fwCfgStringComma explains why a comma in a fw_cfg string is refused.
 // libvirt (seen with 11.3) builds the QEMU argument
 // "name=<name>,string=<value>" without escaping commas in the value, and QEMU
@@ -572,6 +594,9 @@ func validateFwCfg(field string, entries []v1alpha1.FwCfgEntrySpec) error {
 	for i, e := range entries {
 		if !strings.HasPrefix(e.Name, "opt/") {
 			return fmt.Errorf("%s[%d].name %q must start with \"opt/\"", field, i, e.Name)
+		}
+		if !fwCfgNameRE.MatchString(e.Name) {
+			return fmt.Errorf("%s[%d].name %q may hold only A-Z a-z 0-9 . _ / - after \"opt/\" (libvirt passes it to QEMU unescaped, and QEMU splits its options on commas)", field, i, e.Name)
 		}
 		if len(e.Name) > fwCfgMaxName {
 			return fmt.Errorf("%s[%d].name %q is %d characters; QEMU allows at most %d", field, i, e.Name, len(e.Name), fwCfgMaxName)

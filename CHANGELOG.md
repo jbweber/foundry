@@ -150,5 +150,9 @@ git history.
   detected from its content and named as the boot overlay's backing format; it was guessed from the file
   name, so a raw image named `.qcow2`, or one named without `.raw` or `.img`, was opened as the wrong
   format.
+- The loader checks addresses and a few strings it took as given: `ip` must be an IPv4 address with a prefix
+  length and `gateway` an IP address (a bad one failed only after volumes were made), duplicate addresses are
+  found whatever their prefix length (`10.0.0.5/24` and `10.0.0.5/16` got the same MAC), fw_cfg names take only
+  `A-Z a-z 0-9 . _ / -` after `opt/` (a comma kept the VM from starting), and `passwordHash` must be one line.
 
 [Unreleased]: https://github.com/jbweber/foundry/compare/v0.6.1...HEAD
