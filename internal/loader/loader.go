@@ -350,6 +350,24 @@ func validateSMBIOS(vm *v1alpha1.VirtualMachine) error {
 // A longer name passes libvirt's define and fails when QEMU starts.
 const fwCfgMaxName = 55
 
+// fwCfgMaxString is the longest fw_cfg string entry. libvirt hands it to QEMU
+// as one command-line argument, "name=<name>,string=<value>"
+// (https://libvirt.org/formatdomain.html#smbios-system-information), and
+// exec refuses an argument of MAX_ARG_STRLEN (32 pages, 128 KiB with 4 KiB
+// pages, its NUL included) or longer with E2BIG
+// (https://man7.org/linux/man-pages/man2/execve.2.html, "Limits on size of
+// arguments and environment"), so a longer string passes the define and
+// fails when the VM starts. 128 bytes are left for the rest of the argument;
+// larger content belongs in a file entry.
+const fwCfgMaxString = 128<<10 - 128
+
+// fwCfgStringComma explains why a comma in a fw_cfg string is refused.
+// libvirt (seen with 11.3) builds the QEMU argument
+// "name=<name>,string=<value>" without escaping commas in the value, and QEMU
+// splits its options on commas, so a value with a comma passes the define and
+// fails when the VM starts. libvirt passes a file entry by path instead.
+const fwCfgStringComma = "contains a comma, which libvirt passes to QEMU unescaped, so the VM would fail to start; put the content in a file entry instead"
+
 // validateFwCfg checks a list of fw_cfg entries.
 //
 // libvirt only accepts names under "opt/" and reserves "opt/ovmf/" and
@@ -370,6 +388,12 @@ func validateFwCfg(field string, entries []v1alpha1.FwCfgEntrySpec) error {
 		}
 		if (e.File == "") == (e.String == "") {
 			return fmt.Errorf("%s[%d] requires exactly one of file or string", field, i)
+		}
+		if len(e.String) > fwCfgMaxString {
+			return fmt.Errorf("%s[%d].string is %d bytes; at most %d fit in the QEMU argument libvirt passes it in, put larger content in a file", field, i, len(e.String), fwCfgMaxString)
+		}
+		if strings.Contains(e.String, ",") {
+			return fmt.Errorf("%s[%d].string %s", field, i, fwCfgStringComma)
 		}
 		if seen[e.Name] {
 			return fmt.Errorf("%s[%d].name %q is duplicated", field, i, e.Name)

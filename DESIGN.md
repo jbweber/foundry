@@ -237,7 +237,9 @@ status:
   or trailing space; `spec.smbios.uuid` is a UUID (lower-cased on load)
 - `spec.fwCfg[].name` starts with `opt/`, is at most 55 characters (QEMU's
   limit), is not under `opt/ovmf/` or `opt/org.qemu/`, and is unique; each entry has exactly one of `file` or
-  `string` (see [SMBIOS and fw_cfg](#smbios-and-fw_cfg))
+  `string`, a `string` at most 128 KiB less 128 bytes (libvirt passes it to QEMU as one command-line argument,
+  and exec refuses one of 128 KiB or more) and without a comma (libvirt doesn't escape it)
+  (see [SMBIOS and fw_cfg](#smbios-and-fw_cfg))
 - `spec.inputDisks`: at most 25; `label` is 1 to 32 characters from `A-Z 0-9 _`, unique, and `CIDATA`
   only without `spec.cloudInit`; at least one file per disk; file `name`s are unique per disk, at most
   28 characters of `a-z 0-9 _ -` with an optional extension of a dot and 1 to 8 of the same; each file
@@ -600,7 +602,12 @@ run specs written by someone who may already read that file as root. libvirt acc
 `opt/` and reserves `opt/ovmf/` and `opt/org.qemu/`; validation checks this
 at load time rather than at define time. For example,
 `opt/org.tianocore/EnableLegacyLoader` set to `no` makes OVMF verify a
-directly booted kernel under Secure Boot.
+directly booted kernel under Secure Boot. A `string` can't hold a comma:
+libvirt (seen with 11.3) passes it to QEMU as one argument,
+`name=<name>,string=<value>`, without escaping commas in the value, and QEMU
+splits its options on commas, so the define succeeds and the start fails.
+foundry refuses the comma at load time rather than escaping it; content with
+commas goes in a `file` entry, which libvirt passes by path.
 
 ```xml
 <sysinfo type='fwcfg'>
