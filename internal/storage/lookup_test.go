@@ -1,8 +1,10 @@
 package storage
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"strings"
 	"testing"
 
@@ -147,5 +149,39 @@ func TestManager_DeletePool_ForceReportsFailures(t *testing.T) {
 	}
 	if _, ok := client.pools["scratch"]; !ok {
 		t.Error("pool undefined although a volume could not be deleted")
+	}
+}
+
+// failingUpload is the mock with the next upload failing.
+type failingUpload struct {
+	*mockLibvirtClient
+	fail *int // uploads still to fail
+}
+
+func (f failingUpload) StorageVolUpload(vol libvirt.StorageVol, r io.Reader, offset, length uint64, flags libvirt.StorageVolUploadFlags) error {
+	if *f.fail > 0 {
+		*f.fail--
+		return errors.New("stream aborted")
+	}
+	return f.mockLibvirtClient.StorageVolUpload(vol, r, offset, length, flags)
+}
+
+// TestManager_ImportVarstore_ReplaceKeepsOldOnFailure: a replace whose
+// upload fails puts the old profile back, rather than leaving none.
+func TestManager_ImportVarstore_ReplaceKeepsOldOnFailure(t *testing.T) {
+	ctx := context.Background()
+	mgr, client := newVarstoreTestManager(t)
+	old := testVarstore(8192)
+	if err := mgr.ImportVarstore(ctx, "my-keys", "x86_64", old, false); err != nil {
+		t.Fatal(err)
+	}
+	fail := 1
+	err := NewManager(failingUpload{client, &fail}).ImportVarstore(ctx, "my-keys", "x86_64", testVarstore(4096), true)
+	if err == nil || !strings.Contains(err.Error(), "old varstore was put back") {
+		t.Fatalf("got %v, want an upload error with the old varstore put back", err)
+	}
+	vol := client.volumes[DefaultImagesPool]["varstore_my-keys_x86_64.fd"]
+	if vol == nil || !bytes.Equal(vol.data, old) {
+		t.Error("the old varstore is not in place after the failed replace")
 	}
 }

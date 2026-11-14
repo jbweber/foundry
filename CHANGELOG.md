@@ -169,5 +169,8 @@ git history.
   those). It deleted both.
 - `foundry pool delete --force` that cannot delete a volume says which and keeps the pool; it reported success
   and left the files behind with no pool.
+- `foundry varstore import --replace` keeps the old profile when the new one cannot be written: it reads the
+  old one back before deleting it and puts it back on failure. It deleted the old one first, so a failed upload
+  lost it.
 
 [Unreleased]: https://github.com/jbweber/foundry/compare/v0.6.1...HEAD
