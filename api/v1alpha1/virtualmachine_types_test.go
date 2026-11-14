@@ -267,8 +267,11 @@ func TestNetworkInterfaceSpec_DeepCopy(t *testing.T) {
 		Gateway:      "10.0.0.254",
 		Bridge:       "br0",
 		DNSServers:   []string{"8.8.8.8", "1.1.1.1"},
+		VlanTrunk:    []uint{101, 102},
 		DefaultRoute: true,
 	}
+	vlan := uint(100)
+	iface.Vlan = &vlan
 
 	copy := iface.DeepCopy()
 
@@ -280,6 +283,14 @@ func TestNetworkInterfaceSpec_DeepCopy(t *testing.T) {
 	copy.DNSServers[0] = "modified"
 	if iface.DNSServers[0] == "modified" {
 		t.Error("Modifying copy.DNSServers affected original")
+	}
+	*copy.Vlan = 200
+	if *iface.Vlan == 200 {
+		t.Error("Modifying copy.Vlan affected original")
+	}
+	copy.VlanTrunk[0] = 999
+	if iface.VlanTrunk[0] == 999 {
+		t.Error("Modifying copy.VlanTrunk affected original")
 	}
 
 	copy.Bridge = "modified"

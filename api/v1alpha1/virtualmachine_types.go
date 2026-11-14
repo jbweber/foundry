@@ -291,6 +291,13 @@ type BootDiskSpec struct {
 	// Mutually exclusive with Image.
 	// +optional
 	Empty bool `json:"empty,omitempty" yaml:"empty,omitempty"`
+
+	// Serial is the disk serial number the guest sees (libvirt <serial>),
+	// e.g. in /dev/disk/by-id. 1-20 characters from A-Z a-z 0-9 - _ .;
+	// unique among the VM's disks.
+	// +optional
+	// +kubebuilder:validation:Pattern=`^[A-Za-z0-9._-]{1,20}$`
+	Serial string `json:"serial,omitempty" yaml:"serial,omitempty"`
 }
 
 // DataDiskSpec defines an additional data disk configuration.
@@ -304,6 +311,15 @@ type DataDiskSpec struct {
 	// SizeGB is the size of the data disk in gigabytes.
 	// +kubebuilder:validation:Minimum=1
 	SizeGB int `json:"sizeGB" yaml:"sizeGB"`
+
+	// Serial is the disk serial number the guest sees (libvirt <serial>),
+	// so the guest can find the disk by a stable name in /dev/disk/by-id
+	// rather than by probe order. 1-20 characters from A-Z a-z 0-9 - _ .
+	// (a virtio-blk serial holds at most 20 bytes; QEMU cuts longer ones);
+	// unique among the VM's disks.
+	// +optional
+	// +kubebuilder:validation:Pattern=`^[A-Za-z0-9._-]{1,20}$`
+	Serial string `json:"serial,omitempty" yaml:"serial,omitempty"`
 }
 
 // NetworkInterfaceSpec defines a network interface configuration.
@@ -329,6 +345,16 @@ type NetworkInterfaceSpec struct {
 	// +optional
 	Vlan *uint `json:"vlan,omitempty" yaml:"vlan,omitempty"`
 
+	// VlanTrunk makes this interface a VLAN trunk: libvirt applies every
+	// listed 802.1Q ID to the bridge port as a tagged VLAN, so the guest sees
+	// the tags and picks the frames apart itself (a guest that switches or
+	// routes per VLAN). Each ID is 1-4094, listed once, at most 256 IDs.
+	// The bridge must be VLAN-aware and trunk the IDs. Exclusive with Vlan,
+	// and with PXEBoot: a trunk has no native VLAN for untagged frames.
+	// +kubebuilder:validation:MaxItems=256
+	// +optional
+	VlanTrunk []uint `json:"vlanTrunk,omitempty" yaml:"vlanTrunk,omitempty"`
+
 	// DNSServers is the list of DNS server IP addresses.
 	// +optional
 	DNSServers []string `json:"dnsServers,omitempty" yaml:"dnsServers,omitempty"`
@@ -338,6 +364,23 @@ type NetworkInterfaceSpec struct {
 	// Defaults to false.
 	// +optional
 	DefaultRoute bool `json:"defaultRoute,omitempty" yaml:"defaultRoute,omitempty"`
+
+	// HostDevice fixes the name of the interface's host-side device (the tap
+	// device libvirt creates and plugs into the bridge; libvirt's
+	// <interface><target dev=.../>, https://libvirt.org/formatdomain.html#overriding-the-target-element),
+	// for a caller that finds the VM's port on the host by name. Without it
+	// the name is derived from the IP ("vm" and its four octets in hex, e.g.
+	// vm0a371616). A Linux interface name: 1 to 15 characters, not "." or
+	// "..", printable ASCII without "/", ":", "%" (the kernel's template for a
+	// numbered name) or white space, and not starting with "vnet",
+	// "vif", "macvtap" or "macvlan": libvirt reserves those prefixes for the
+	// names it generates and drops such a name from the persistent
+	// definition, so the device would get a generated name that changes
+	// from one start to the next. Unique among the VM's interfaces; that no
+	// other VM uses it is the caller's concern (the VM then fails to start).
+	// +optional
+	// +kubebuilder:validation:MaxLength=15
+	HostDevice string `json:"hostDevice,omitempty" yaml:"hostDevice,omitempty"`
 
 	// PXEBoot enables network boot (PXE) on this interface.
 	// When true, this interface will be configured as the primary boot device
@@ -576,10 +619,22 @@ func (in *NetworkInterfaceSpec) DeepCopy() *NetworkInterfaceSpec {
 	out := new(NetworkInterfaceSpec)
 	*out = *in
 
+	// Deep copy Vlan pointer
+	if in.Vlan != nil {
+		vlan := *in.Vlan
+		out.Vlan = &vlan
+	}
+
 	// Deep copy DNSServers slice
 	if in.DNSServers != nil {
 		out.DNSServers = make([]string, len(in.DNSServers))
 		copy(out.DNSServers, in.DNSServers)
+	}
+
+	// Deep copy VlanTrunk slice
+	if in.VlanTrunk != nil {
+		out.VlanTrunk = make([]uint, len(in.VlanTrunk))
+		copy(out.VlanTrunk, in.VlanTrunk)
 	}
 
 	return out

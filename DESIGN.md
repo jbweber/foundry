@@ -123,11 +123,13 @@ spec:
     imagePool: foundry-images # Optional: pool containing base image (default: foundry-images)
     # OR for empty boot disk:
     # empty: true             # Create empty disk instead of snapshot
+    # serial: root            # Optional: disk serial (/dev/disk/by-id/virtio-root)
 
   # Optional: Additional data disks
   dataDisks:
     - device: vdb             # Device name (vdb, vdc, etc.)
       sizeGB: 100
+      serial: data-0          # Optional: disk serial (/dev/disk/by-id/virtio-data-0)
     - device: vdc
       sizeGB: 200
 
@@ -149,6 +151,8 @@ spec:
       bridge: br1
       defaultRoute: false
       vlan: 100               # Optional: 802.1Q VLAN ID (1-4094) to tag on the bridge
+      hostDevice: port-b1     # Optional: host-side device name (default: derived from the IP)
+      # vlanTrunk: [101, 102]  # Optional, instead of vlan: carry these VLANs tagged into the guest
       pxeBoot: false          # Optional: network boot from this interface (default: false)
 
   # Optional: Cloud-init configuration
@@ -221,13 +225,21 @@ status:
 - VCPUs > 0, memoryGiB > 0, disk sizes > 0
 - `spec.bootDisk` specifies exactly one of `image` or `empty: true`
 - Data disks have a device name, and no duplicate device names
+- `serial` (boot disk and data disks) is 1-20 characters from `A-Z a-z 0-9 - _ .`, unique
+  among the VM's disks (see [Disk Serials](#disk-serials))
 - At least one network interface, each with `ip`, `gateway`, `bridge`
 - No duplicate IP addresses in network interfaces
+- `networkInterfaces[].hostDevice`, when set, is a Linux interface name of 1-15 characters
+  (not `.` or `..`, printable ASCII without `/`, `:`, `%` or space), not starting with `vnet`, `vif`,
+  `macvtap` or `macvlan`; no two interfaces share a host-side name, set or derived (see
+  [Network Interface Naming](#network-interface-naming))
 - `networkInterfaces[].vlan` within 1-4094 when set (see [VLAN Tagging](#vlan-tagging))
+- `networkInterfaces[].vlanTrunk`, when set: not beside `vlan` or `pxeBoot`, 1-256 IDs, each 1-4094 and listed once (see [VLAN Trunks](#vlan-trunks))
 - At most one interface sets `defaultRoute`, and at most one sets `pxeBoot`
 - `spec.arch`, when set, is `x86_64` or `aarch64` (see [Guest Architecture](#guest-architecture))
 - `spec.cpuMode` is not `host-model` for an `aarch64` guest
-- `spec.firmware`, when set, has a `loader`; `secureBoot` only for x86_64;
+- `spec.firmware`, when set, has a `loader`; `secureBoot` (the varstore lock, not Secure Boot
+  checking) only for x86_64;
   `keys` and `nvramTemplate` not both; `keys` is 1-63 lowercase letters,
   digits and dashes, starting and ending with a letter or digit (see
   [UEFI Firmware and Secure Boot](#uefi-firmware-and-secure-boot))
@@ -385,6 +397,29 @@ IP: 192.168.1.100    → Interface: vmc0a80164
 
 This is acceptable for the current use case where IPs are expected to be unique.
 
+**A name of the caller's choosing (`hostDevice`)**: a caller that finds a VM's port on the host by its
+name (a network controller keyed on port names) sets `spec.networkInterfaces[].hostDevice`, and foundry
+puts that name in `<target dev=.../>` instead of the derived one. Either way the name is foundry's choice,
+so libvirt keeps it in the persistent definition and the device has it at every start; without a
+`<target>`, libvirt would hand out `vnetN` afresh at each start. The MAC still comes from the IP.
+Checked by the loader:
+- 1 to 15 characters (IFNAMSIZ is 16 with the terminating NUL), not `.` or `..`, no `/`, `:` or white
+  space: the kernel's rule (`dev_valid_name` in
+  [net/core/dev.c](https://github.com/torvalds/linux/blob/master/net/core/dev.c)). Printable ASCII only.
+- No `%`: the kernel takes a name with one as a template (`port%d`) and gives the device the first
+  free number (`dev_alloc_name` in the same file), so it would not have the name the caller set.
+- Not starting with `vnet`, `vif`, `macvtap` or `macvlan`. libvirt: "the name should not start with either
+  'vnet', 'vif', 'macvtap', or 'macvlan', which are prefixes reserved by libvirt and certain hypervisors.
+  Manually specified targets using these prefixes may be ignored"
+  ([formatdomain: Overriding the target element](https://libvirt.org/formatdomain.html#overriding-the-target-element)).
+  In code, the parser drops such a name from a persistent definition ("An auto-generated target name,
+  blank it out", `virDomainNetDefParseXML` in
+  [src/conf/domain_conf.c](https://gitlab.com/libvirt/libvirt/-/blob/v11.10.0/src/conf/domain_conf.c), with
+  the prefixes `vnet`, `macvtap` and `macvlan` from `src/util/virnetdev.h`, plus the driver's own, `vif` for
+  Xen), so the port would get a generated name after all.
+- Unique among the VM's interfaces, counting the derived names of the others. Unique across VMs and
+  host devices is the caller's concern: a VM whose name is taken fails to start.
+
 **Future Enhancement**:
 When a database/state store is available, consider migrating to a better naming scheme such as:
 - VM name-based hashing (e.g., `vm-webserver-4a2b`)
@@ -421,16 +456,56 @@ This emits a `<vlan>` element on the interface:
   untagged traffic on a normal virtio NIC.
 - Generated cloud-init network-config is unaffected — no VLAN sub-interface is
   configured in the guest, and the IP is assigned to the NIC directly.
-- Only a single tag is supported (access-port semantics). Trunking multiple
-  VLANs into one guest interface is not exposed.
+- A single tag (access-port semantics). For several VLANs into one guest
+  interface, see [VLAN Trunks](#vlan-trunks).
 - Omitting `vlan` leaves the interface untagged, matching prior behavior.
 
 **Requirements**:
 - The host bridge must be VLAN-aware and trunk the requested ID. Foundry does
   not create or configure the VLAN on the host.
 
-**Limitations**:
-⚠️ The VLAN ID range is currently declared via kubebuilder markers but **not enforced at load time**. Reserved IDs (`0`, `4095`) and out-of-range values are passed straight through to libvirt, so the failure surfaces at define time as a libvirt error rather than as a config validation error.
+**Validation**: the loader refuses reserved IDs (`0`, `4095`) and out-of-range
+values, so they fail as a config error rather than at define time in libvirt.
+
+### VLAN Trunks
+
+An interface may instead be a trunk: `vlanTrunk` lists the 802.1Q IDs the bridge
+port carries tagged into the guest. It is for a guest that takes the VLANs apart
+itself, such as a virtual switch or router that works per VLAN.
+
+```yaml
+networkInterfaces:
+  - ip: 192.168.251.2/24
+    gateway: 192.168.251.1
+    bridge: br-trunk
+    vlanTrunk: [101, 102, 103, 104, 105, 106, 107, 108, 109, 110]
+```
+
+This emits `<vlan trunk='yes'>` with one `<tag>` per ID:
+
+```xml
+<vlan trunk='yes'>
+  <tag id='101'/>
+  <tag id='102'/>
+  ...
+</vlan>
+```
+
+libvirt supports trunking several tags on Open vSwitch and, since 11.0.0, on
+standard Linux bridges, and `trunk='yes'` keeps a one-ID list a trunk rather
+than an access port ([formatdomain: Setting VLAN tag](https://libvirt.org/formatdomain.html#setting-vlan-tag-on-supported-network-types-only)).
+
+**Rules**: exclusive with `vlan`; 1 to 256 IDs, each 1-4094, none twice. There
+is no native (untagged) VLAN: untagged frames from the guest are not given one.
+So a trunk can't network boot (the firmware's DHCP is untagged), and `pxeBoot`
+is refused on it.
+The host bridge must be VLAN-aware and carry the IDs; foundry does not configure
+the host.
+
+**Limitations**: the interface still needs `ip` and `gateway`, because its MAC
+and tap name come from the IP and cloud-init configures that address on the
+NIC. On a trunk the address is inert unless something carries untagged frames;
+an interface with no IP is a possible follow-up.
 
 ### PXE Boot
 
@@ -470,7 +545,8 @@ or `--host-arch`.
 | Firmware | UEFI, auto-selected (OVMF) unless `spec.firmware` pins it | UEFI, auto-selected (AAVMF) unless `spec.firmware` pins it |
 | `<bios useserial>` | yes | no (libvirt refuses it off x86) |
 | Clock timers | rtc, pit, hpet | none (architected generic timer) |
-| Secure Boot (`spec.firmware.secureBoot`) | yes, with SMM | no (no SMM) |
+| Secure Boot checking (pinned loader and key profile) | yes | yes |
+| Varstore lock (`spec.firmware.secureBoot`) | yes, with emulated SMM | no (QEMU's `virt` machine has no SMM) |
 | Cloud-init CD-ROM | SATA (`sda`) | SCSI (`sda`) on a virtio-scsi controller; `virt` has no AHCI |
 | Serial console | isa-serial, guest `ttyS0` | system-serial (pl011), guest `ttyAMA0` |
 
@@ -519,13 +595,25 @@ firmware:
   varstore (`/var/lib/libvirt/qemu/nvram/<name>_VARS.fd`) on first start.
   Without it libvirt uses the template it pairs with the loader. `destroy`
   undefines with the NVRAM flag, so the VM's own varstore goes with it.
-- `secureBoot` marks the loader secure: only SMM code may write the varstore,
-  so the guest OS cannot change the enrolled keys. libvirt refuses
-  `secure='yes'` without `<smm state='on'/>`
+- `secureBoot` is libvirt's `secure='yes'` on the loader: the firmware locks
+  its varstore so that only firmware code, running in the VM's System
+  Management Mode (SMM), can change the enrolled keys, and the guest OS cannot,
+  even as root. libvirt refuses `secure='yes'` without `<smm state='on'/>`
   ([hypervisor features](https://libvirt.org/formatdomain.html#hypervisor-features)),
-  so foundry turns SMM on with it. SMM is x86-only, so validation refuses
-  `secureBoot` for aarch64; an aarch64 guest can still pin its loader and a
-  key profile.
+  so foundry turns SMM on with it. SMM here is virtual hardware that QEMU
+  emulates for x86 guests; QEMU's Arm `virt` machine has none, so libvirt can't
+  express the lock for an aarch64 guest and validation refuses `secureBoot`
+  there. See [Secure Boot on aarch64](#secure-boot-on-aarch64).
+
+**Secure Boot on aarch64**: the `secureBoot` field is the lock on the enrolled
+keys, not Secure Boot itself. An aarch64 guest with a pinned `loader` and a
+`keys` profile does Secure Boot checking: the keys are enrolled and the
+firmware enforces them on every boot. What it lacks is protection of those keys
+against a guest OS running as root, which can write the varstore through the
+firmware's runtime services. The way this is solved is a varstore kept by
+the host rather than by the guest's firmware: QEMU's `uefi-vars` device
+([QEMU: UEFI variable service](https://www.qemu.org/docs/master/devel/uefi-vars.html))
+holds the variables in QEMU and works without SMM. foundry does not use it.
 - `keys` names a **Secure Boot key profile**: a varstore with a PK, KEK, db
   and dbx enrolled, stored as the volume `varstore_<profile>_<arch>.fd` of the
   `foundry-images` pool. The architecture comes from `spec.arch` (x86_64 when
@@ -709,6 +797,26 @@ way to change a VM, and it rebuilds the disks).
 where no interface sets `defaultRoute: true` produces a guest with addresses and
 a gateway configured but no default route. Validation enforces that at most one
 interface sets it, but does not require that any interface does.
+
+### Disk Serials
+
+`bootDisk.serial` and `dataDisks[].serial` set the disk's serial number,
+rendered as libvirt's `<serial>` element in that `<disk>`
+([libvirt: hard drives, floppy disks, CDROMs](https://libvirt.org/formatdomain.html#hard-drives-floppy-disks-cdroms)).
+A Linux guest lists a virtio disk with a serial as
+`/dev/disk/by-id/virtio-<serial>`, so it can find a data disk by a name the VM
+file chose instead of by device probe order (`vdb`, `vdc`, ...), which a guest
+is not bound to keep.
+
+Validation: 1-20 characters from `A-Z a-z 0-9 - _ .`, unique among the VM's
+disks. A virtio-blk serial holds at most 20 bytes and QEMU truncates a longer
+one without error, so two longer serials could reach the guest as the same
+name; the character set passes unchanged through libvirt, QEMU and udev's
+by-id names. No serial (the default) renders no element, as before.
+
+The disk serial is not the SMBIOS system serial (`spec.serial`, see
+[SMBIOS and fw_cfg](#smbios-and-fw_cfg)), and the CD-ROMs (the cloud-init seed
+and the input disks) carry none: a guest finds those by their volume label.
 
 ### Storage Management
 

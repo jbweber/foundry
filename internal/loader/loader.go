@@ -20,6 +20,11 @@ import (
 // so the usable range is 1-4094.
 const MaxVlanID = 4094
 
+// MaxVlanTrunk is the most IDs one trunk interface may list. libvirt adds each
+// ID to the bridge port one at a time, so a short list keeps a start quick;
+// raise it when a caller needs more.
+const MaxVlanTrunk = 256
+
 // LoadFromFile loads a VirtualMachine resource from a YAML file.
 // The file must be in the foundry.cofront.xyz/v1alpha1 format.
 func LoadFromFile(path string) (*v1alpha1.VirtualMachine, error) {
@@ -221,9 +226,18 @@ func validateSpec(vm *v1alpha1.VirtualMachine) error {
 		devicesSeen[disk.Device] = true
 	}
 
+	// Validate disk serials (boot disk and data disks share one namespace)
+	if err := validateDiskSerials(vm); err != nil {
+		return err
+	}
+
 	// Validate network interfaces
 	if len(vm.Spec.NetworkInterfaces) == 0 {
 		return fmt.Errorf("spec.networkInterfaces must have at least one interface")
+	}
+
+	if err := validateHostDevices(vm); err != nil {
+		return err
 	}
 
 	ipsSeen := make(map[string]bool)
@@ -248,6 +262,14 @@ func validateSpec(vm *v1alpha1.VirtualMachine) error {
 		if iface.Vlan != nil && (*iface.Vlan == 0 || *iface.Vlan > MaxVlanID) {
 			return fmt.Errorf("spec.networkInterfaces[%d].vlan %d must be between 1 and %d", i, *iface.Vlan, MaxVlanID)
 		}
+		if err := validateVlanTrunk(i, iface); err != nil {
+			return err
+		}
+		// A trunk has no native VLAN, so the firmware's untagged DHCP and
+		// TFTP frames go nowhere and a network boot cannot work.
+		if iface.PXEBoot && len(iface.VlanTrunk) > 0 {
+			return fmt.Errorf("spec.networkInterfaces[%d] cannot set both pxeBoot and vlanTrunk: a trunk carries no untagged frames", i)
+		}
 
 		// Boot order and the default route are both domain-wide, so only one
 		// interface may claim either.
@@ -265,6 +287,147 @@ func validateSpec(vm *v1alpha1.VirtualMachine) error {
 		}
 	}
 
+	return nil
+}
+
+// validateVlanTrunk checks a trunk interface's IDs: not beside vlan, not
+// empty when given, each 1-4094 and listed once, at most MaxVlanTrunk.
+func validateVlanTrunk(i int, iface v1alpha1.NetworkInterfaceSpec) error {
+	if iface.VlanTrunk == nil {
+		return nil
+	}
+	if iface.Vlan != nil {
+		return fmt.Errorf("spec.networkInterfaces[%d] cannot set both vlan and vlanTrunk", i)
+	}
+	if len(iface.VlanTrunk) == 0 {
+		return fmt.Errorf("spec.networkInterfaces[%d].vlanTrunk is empty: list the VLAN IDs, or omit it", i)
+	}
+	if len(iface.VlanTrunk) > MaxVlanTrunk {
+		return fmt.Errorf("spec.networkInterfaces[%d].vlanTrunk lists %d IDs, at most %d", i, len(iface.VlanTrunk), MaxVlanTrunk)
+	}
+	seen := make(map[uint]bool, len(iface.VlanTrunk))
+	for _, id := range iface.VlanTrunk {
+		if id == 0 || id > MaxVlanID {
+			return fmt.Errorf("spec.networkInterfaces[%d].vlanTrunk ID %d must be between 1 and %d", i, id, MaxVlanID)
+		}
+		if seen[id] {
+			return fmt.Errorf("spec.networkInterfaces[%d].vlanTrunk lists %d twice", i, id)
+		}
+		seen[id] = true
+	}
+	return nil
+}
+
+// reservedHostDevicePrefixes are the interface name prefixes libvirt keeps
+// for the names it generates: "If no target is specified, certain
+// hypervisors will automatically generate a name ... the name should not
+// start with either 'vnet', 'vif', 'macvtap', or 'macvlan', which are
+// prefixes reserved by libvirt and certain hypervisors. Manually specified
+// targets using these prefixes may be ignored"
+// (https://libvirt.org/formatdomain.html#overriding-the-target-element).
+// The QEMU driver drops such a name when it parses a persistent definition
+// ("An auto-generated target name, blank it out", virDomainNetDefParseXML in
+// https://gitlab.com/libvirt/libvirt/-/blob/v11.10.0/src/conf/domain_conf.c,
+// with VIR_NET_GENERATED_VNET_PREFIX "vnet", ..._MACVTAP_PREFIX "macvtap"
+// and ..._MACVLAN_PREFIX "macvlan" in src/util/virnetdev.h; "vif" is the Xen
+// driver's own prefix), so the device would get a new generated name at
+// every start.
+var reservedHostDevicePrefixes = []string{"vnet", "vif", "macvtap", "macvlan"}
+
+// maxHostDeviceLen is the longest Linux interface name: IFNAMSIZ (16)
+// including the terminating NUL (dev_valid_name in
+// https://github.com/torvalds/linux/blob/master/net/core/dev.c).
+const maxHostDeviceLen = 15
+
+// ValidateHostDevice checks a host-side interface name (spec.networkInterfaces[].hostDevice).
+func ValidateHostDevice(name string) error {
+	if name == "" || len(name) > maxHostDeviceLen {
+		return fmt.Errorf("must be 1 to %d characters", maxHostDeviceLen)
+	}
+	// The kernel refuses ".", "..", "/", ":" and white space in a name
+	// (dev_valid_name); foundry also keeps to printable ASCII. It also
+	// refuses "%": the kernel takes a name with one as a template ("port%d")
+	// and hands out the first free number (dev_alloc_name), so the device
+	// would not have the name the caller looks for.
+	if name == "." || name == ".." {
+		return fmt.Errorf("cannot be %q", name)
+	}
+	for _, r := range name {
+		if r <= ' ' || r >= 0x7f || r == '/' || r == ':' || r == '%' {
+			return fmt.Errorf("may not contain %q (printable ASCII without '/', ':', '%%' or space)", r)
+		}
+	}
+	for _, p := range reservedHostDevicePrefixes {
+		if strings.HasPrefix(name, p) {
+			return fmt.Errorf("starts with %q, a prefix libvirt reserves for the names it generates", p)
+		}
+	}
+	return nil
+}
+
+// validateHostDevices checks spec.networkInterfaces[].hostDevice, and that
+// no two interfaces end up with the same host-side name (a set one, or the
+// one derived from the IP).
+func validateHostDevices(vm *v1alpha1.VirtualMachine) error {
+	seen := make(map[string]int)
+	for i, iface := range vm.Spec.NetworkInterfaces {
+		name := iface.HostDevice
+		if name != "" {
+			if err := ValidateHostDevice(name); err != nil {
+				return fmt.Errorf("spec.networkInterfaces[%d].hostDevice %q %w", i, name, err)
+			}
+		} else if derived, err := naming.InterfaceNameFromIP(iface.IP); err == nil {
+			name = derived
+		} else {
+			continue // a bad IP is reported by the interface checks
+		}
+		if other, ok := seen[name]; ok {
+			return fmt.Errorf("spec.networkInterfaces[%d] has the host device name %q of spec.networkInterfaces[%d]", i, name, other)
+		}
+		seen[name] = i
+	}
+	return nil
+}
+
+// maxDiskSerialLen is the longest disk serial accepted: a virtio-blk serial
+// holds at most 20 bytes, and QEMU silently truncates a longer one, which
+// would let two distinct serials reach the guest as the same name.
+const maxDiskSerialLen = 20
+
+// diskSerialRE is the character set accepted in a disk serial: letters,
+// digits, '-', '_' and '.', which pass unchanged through libvirt, QEMU and
+// the guest's /dev/disk/by-id names.
+var diskSerialRE = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+
+// validateDiskSerials checks spec.bootDisk.serial and spec.dataDisks[].serial:
+// each set serial is 1-20 characters from A-Z a-z 0-9 - _ . and no two disks
+// of the VM share one.
+func validateDiskSerials(vm *v1alpha1.VirtualMachine) error {
+	seen := make(map[string]string)
+	check := func(field, serial string) error {
+		if serial == "" {
+			return nil
+		}
+		if len(serial) > maxDiskSerialLen {
+			return fmt.Errorf("%s %q is longer than %d characters", field, serial, maxDiskSerialLen)
+		}
+		if !diskSerialRE.MatchString(serial) {
+			return fmt.Errorf("%s %q may only contain the characters [A-Za-z0-9._-]", field, serial)
+		}
+		if other, ok := seen[serial]; ok {
+			return fmt.Errorf("%s %q is already used by %s", field, serial, other)
+		}
+		seen[serial] = field
+		return nil
+	}
+	if err := check("spec.bootDisk.serial", vm.Spec.BootDisk.Serial); err != nil {
+		return err
+	}
+	for i, disk := range vm.Spec.DataDisks {
+		if err := check(fmt.Sprintf("spec.dataDisks[%d].serial", i), disk.Serial); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

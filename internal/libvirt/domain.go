@@ -173,6 +173,7 @@ func GenerateDomainXML(vm *v1alpha1.VirtualMachine, hostArch string) (string, er
 		Boot: &libvirtxml.DomainDeviceBoot{
 			Order: diskBootOrder,
 		},
+		Serial: vm.Spec.BootDisk.Serial,
 	}
 	domain.Devices.Disks = append(domain.Devices.Disks, bootDisk)
 
@@ -195,6 +196,7 @@ func GenerateDomainXML(vm *v1alpha1.VirtualMachine, hostArch string) (string, er
 				Dev: dataDisk.Device,
 				Bus: "virtio",
 			},
+			Serial: dataDisk.Serial,
 		}
 		domain.Devices.Disks = append(domain.Devices.Disks, disk)
 	}
@@ -231,10 +233,16 @@ func GenerateDomainXML(vm *v1alpha1.VirtualMachine, hostArch string) (string, er
 			return "", fmt.Errorf("failed to calculate MAC address for %s: %w", iface.IP, err)
 		}
 
-		// Calculate interface name from IP
-		ifaceName, err := naming.InterfaceNameFromIP(iface.IP)
-		if err != nil {
-			return "", fmt.Errorf("failed to calculate interface name for %s: %w", iface.IP, err)
+		// The host-side device name: the one the spec fixes, or one derived
+		// from the IP. Either way a name of foundry's choosing, so libvirt
+		// keeps it in the persistent definition and the device has it at
+		// every start (generated vnetN names are handed out afresh per start).
+		ifaceName := iface.HostDevice
+		if ifaceName == "" {
+			ifaceName, err = naming.InterfaceNameFromIP(iface.IP)
+			if err != nil {
+				return "", fmt.Errorf("failed to calculate interface name for %s: %w", iface.IP, err)
+			}
 		}
 
 		netIface := libvirtxml.DomainInterface{
@@ -260,6 +268,15 @@ func GenerateDomainXML(vm *v1alpha1.VirtualMachine, hostArch string) (string, er
 					{ID: *iface.Vlan},
 				},
 			}
+		}
+		if len(iface.VlanTrunk) > 0 {
+			// trunk='yes' keeps a one-ID trunk tagged; with several tags libvirt
+			// trunks anyway (formatdomain, "Setting VLAN tag").
+			tags := make([]libvirtxml.DomainInterfaceVLanTag, 0, len(iface.VlanTrunk))
+			for _, id := range iface.VlanTrunk {
+				tags = append(tags, libvirtxml.DomainInterfaceVLanTag{ID: id})
+			}
+			netIface.VLan = &libvirtxml.DomainInterfaceVLan{Trunk: "yes", Tags: tags}
 		}
 
 		// Add boot order if PXE boot is enabled for this interface

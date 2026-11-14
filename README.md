@@ -22,9 +22,11 @@ This project isn't suggested for general purpose use, and really exists because 
 - **Pure Go Implementation**: No CGo dependencies, easy to install and deploy
 - **Cloud-init Support**: Automatic SSH key injection and network configuration
 - **Bridge Networking**: Support for multiple network interfaces with bridge connectivity
-- **VLAN Tagging**: Optional 802.1Q tag applied per interface on the bridge port
+- **VLAN Tagging**: Optional 802.1Q tag applied per interface on the bridge port, or a trunk of several tags into the guest
+- **Host-side Device Names**: Optional fixed name for an interface's tap device on the host
 - **PXE Boot**: Optionally network boot an interface ahead of the boot disk
 - **Storage Management**: QCOW2 boot disks with backing images, plus additional data disks
+- **Disk Serials**: Optional serial per disk, so the guest finds it in `/dev/disk/by-id`
 - **Pool Management**: Create, list, and manage libvirt storage pools
 - **Image Management**: Import, list, and manage base OS images
 - **UEFI Boot**: Modern UEFI firmware support, with pinned firmware files and Secure Boot key profiles
@@ -96,7 +98,7 @@ foundry render examples/vm.yaml
 
 The config is loaded, defaulted, and validated exactly as `create` does, so the
 output matches what would be handed to libvirt — useful for checking boot order,
-VLAN tags, and disk targets while iterating on a config. Referenced pools,
+VLAN tags and trunks, and disk targets while iterating on a config. Referenced pools,
 volumes, and base images are not checked for existence.
 
 A config with `spec.arch` renders for the machine `render` runs on; use
@@ -120,7 +122,7 @@ architecture, as before. `spec.firmware` pins it instead:
 spec:
   firmware:
     loader: /usr/share/edk2/ovmf/OVMF_CODE.secboot.fd  # firmware code on the hypervisor
-    secureBoot: true        # secure loader and SMM; x86_64 only
+    secureBoot: true        # lock the enrolled keys (secure loader + SMM); x86_64 only
     keys: my-keys           # a Secure Boot key profile, or:
     # nvramTemplate: /usr/share/edk2/ovmf/OVMF_VARS.secboot.fd
 ```
@@ -136,6 +138,14 @@ foundry varstore import - my-keys --arch aarch64 < arm.fd   # from stdin
 foundry varstore list
 foundry varstore delete my-keys --arch aarch64
 ```
+
+`secureBoot` is not Secure Boot itself but a lock on the enrolled keys: the
+guest OS, even as root, can't change them, because only firmware code in the
+VM's emulated System Management Mode may write the varstore. QEMU emulates SMM
+for x86 guests only, so `secureBoot` is refused for aarch64. An aarch64 guest
+with a pinned `loader` and a key profile still does Secure Boot checking with
+your keys enrolled and enforced; it just can't keep root in the guest from
+changing them. See [DESIGN.md](DESIGN.md#secure-boot-on-aarch64).
 
 `create` looks up the profile's varstore for `spec.arch` and fails before
 making anything if it is missing. libvirt copies the template into each VM's
@@ -209,6 +219,68 @@ read that file as that user. `CIDATA` is the label of the cloud-init seed, so it
 is refused next to `spec.cloudInit`; without `spec.cloudInit`, an input disk
 labelled `CIDATA` is a hand-made NoCloud seed. A spec without `inputDisks`
 gets no input disks, as before. `foundry destroy` deletes them with the VM.
+
+### VLAN Trunks
+
+`vlan` tags an interface's bridge port with one VLAN, and the guest sees plain
+traffic. `vlanTrunk` instead carries several VLANs, still tagged, into the
+guest, for a guest that splits them itself (a virtual switch or router):
+
+```yaml
+spec:
+  networkInterfaces:
+    - ip: 192.168.251.2/24
+      gateway: 192.168.251.1
+      bridge: br-trunk
+      vlanTrunk: [101, 102, 110]  # 1-256 IDs of 1-4094; not beside vlan
+```
+
+The host bridge must be VLAN-aware (Open vSwitch, or a Linux bridge with
+libvirt 11.0.0 or later) and carry the IDs; foundry does not configure the host.
+There is no native VLAN, so a trunk can't set `pxeBoot`. The interface still needs `ip` and `gateway`, as its MAC
+and device name come from the IP.
+
+### Host-side Device Names
+
+Each interface's tap device on the host gets a name derived from its IP
+(`vm0a141e28` for 10.20.30.40). When something on the host finds the VM's
+port by a name of its own, set it:
+
+```yaml
+spec:
+  networkInterfaces:
+    - ip: 10.20.30.40/24
+      gateway: 10.20.30.1
+      bridge: br0
+      hostDevice: port-a1         # 1-15 characters, a Linux interface name without %
+```
+
+The name stays the same at every start. libvirt reserves names starting with
+`vnet`, `vif`, `macvtap` and `macvlan` for its own, so foundry refuses them.
+Two interfaces of one VM can't share a name; a name another VM or the host
+already uses makes the VM fail to start.
+
+### Disk Serials
+
+A guest is not bound to probe its disks in the same order at every boot, so
+`vdb` may not stay the same disk. A `serial` on the boot disk or a data disk
+gives the guest a stable name for it:
+
+```yaml
+spec:
+  dataDisks:
+    - device: vdb
+      sizeGB: 100
+      serial: data-0              # 1-20 of A-Z a-z 0-9 - _ ., unique per VM
+```
+
+```sh
+# In the guest
+mkfs.xfs /dev/disk/by-id/virtio-data-0
+```
+
+The limit is 20 characters because a virtio disk's serial holds 20 bytes and
+QEMU cuts a longer one without a word.
 
 ### List VMs
 
