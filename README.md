@@ -502,9 +502,11 @@ foundry/
 │   └── vm/             # VM lifecycle operations (create, destroy, list, get)
 ├── examples/           # Example configurations
 ├── tools/              # Scripts for make targets (the integration lane)
+├── CHANGELOG.md        # Notable changes per release
 └── DESIGN.md          # Detailed design document
 ```
 
 ## Documentation
 
 - [DESIGN.md](DESIGN.md) - Complete design specification
+- [CHANGELOG.md](CHANGELOG.md) - Notable changes per release

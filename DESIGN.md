@@ -88,6 +88,7 @@ foundry/
 │   └── vm.yaml              # Annotated config covering every supported field
 ├── tools/
 │   └── test-integration.sh  # The integration lane (make test-integration)
+├── CHANGELOG.md             # Notable changes per release
 ├── go.mod
 ├── go.sum
 ├── DESIGN.md                # This file
