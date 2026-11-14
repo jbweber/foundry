@@ -54,8 +54,10 @@ func TestLoadFromYAML_AddressFields(t *testing.T) {
 // TestLoadFromYAML_DuplicateAddressOtherPrefix: 10.0.0.5/24 and 10.0.0.5/16
 // are the same address, which would give two interfaces the same MAC.
 func TestLoadFromYAML_DuplicateAddressOtherPrefix(t *testing.T) {
+	// A hostDevice on the first interface, so the derived device names do
+	// not clash and only the address check can catch it
 	spec := strings.NewReplacer("IP", "10.0.0.5/24", "GW", "10.0.0.1").Replace(fieldsBase) +
-		"    - ip: 10.0.0.5/16\n      gateway: 10.0.0.1\n      bridge: br1\n"
+		"      hostDevice: port-a\n    - ip: 10.0.0.5/16\n      gateway: 10.0.0.1\n      bridge: br1\n"
 	_, err := LoadFromYAML([]byte(spec))
 	if err == nil || !strings.Contains(err.Error(), "is duplicated") {
 		t.Fatalf("got %v, want a duplicated-address error", err)
