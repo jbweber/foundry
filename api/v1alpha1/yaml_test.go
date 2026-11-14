@@ -20,25 +20,33 @@ func TestEncodeYAML_RoundTrip(t *testing.T) {
 		"#!/bin/sh\ncat <<-E\n\tx\nE\n",
 		"plain",
 		"\xbe\n\tx",
+		"\n#",
+		"\n\n x",
 	} {
 		autostart := false
+		vlan := uint(30)
 		vm := &VirtualMachine{
 			TypeMeta:   TypeMeta{APIVersion: GroupName + "/" + Version, Kind: VirtualMachineKind},
 			ObjectMeta: ObjectMeta{Name: "a", Labels: map[string]string{"k": "true"}, Annotations: map[string]string{"\tkey\n": s}},
 			Spec: VirtualMachineSpec{
-				VCPUs:             2,
-				MemoryGiB:         1,
-				Autostart:         &autostart,
-				BootDisk:          BootDiskSpec{SizeGB: 1, Empty: true},
-				NetworkInterfaces: []NetworkInterfaceSpec{{IP: "10.0.0.2/24", Bridge: "br0", VlanTrunk: []uint{10, 20}}},
-				CloudInit:         &CloudInitSpec{RawUserData: s},
+				VCPUs:     2,
+				MemoryGiB: 1,
+				Autostart: &autostart,
+				BootDisk:  BootDiskSpec{SizeGB: 1, Empty: true},
+				NetworkInterfaces: []NetworkInterfaceSpec{
+					{IP: "10.0.0.2/24", Bridge: "br0", VlanTrunk: []uint{10, 20}},
+					{IP: "10.0.1.2/24", Bridge: "br0", Vlan: &vlan},
+				},
+				CloudInit:  &CloudInitSpec{RawUserData: s},
+				FwCfg:      []FwCfgEntrySpec{{Name: "opt/x", String: s}},
+				InputDisks: []InputDiskSpec{{Label: "CFG", Files: []InputFileSpec{{Name: "a", String: s}}}},
 			},
 		}
 		out, err := EncodeYAML(vm)
 		if err != nil {
 			t.Fatalf("EncodeYAML(%q): %v", s, err)
 		}
-		if vm.Spec.CloudInit.RawUserData != s || vm.Annotations["\tkey\n"] != s {
+		if vm.Spec.CloudInit.RawUserData != s || vm.Annotations["\tkey\n"] != s || vm.Spec.FwCfg[0].String != s {
 			t.Errorf("EncodeYAML(%q) changed the spec", s)
 		}
 		var got VirtualMachine

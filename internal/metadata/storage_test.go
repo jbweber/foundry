@@ -774,3 +774,43 @@ func TestStoreLoad_SpecialCharacters(t *testing.T) {
 		t.Errorf("input file = %q", s)
 	}
 }
+
+// TestRoundTrip_MultiLineStringsMarshalLoses: strings of several lines that
+// yaml.Marshal writes in a form go-yaml does not read back, in user data, an
+// input file or a fw_cfg string. One whose first line starts with a tab (a
+// Makefile, a heredoc body, a tab-indented config) becomes a literal block
+// that go-yaml refuses to read; one whose first line is empty, in an input
+// file, parses but reads back as another string. The stored spec must not
+// come from yaml.Marshal alone.
+func TestRoundTrip_MultiLineStringsMarshalLoses(t *testing.T) {
+	for _, s := range []string{"\tb\nc", "\t\n0", "\tall:\n\tmake -C x\n", "\xbe\n\tx", "\n#"} {
+		vm := newTestVM("multiline-vm")
+		vm.Annotations = map[string]string{"note": s}
+		vm.Spec.CloudInit = &v1alpha1.CloudInitSpec{RawUserData: s}
+		vm.Spec.InputDisks = []v1alpha1.InputDiskSpec{{Label: "CFG", Files: []v1alpha1.InputFileSpec{{Name: "makefile", String: s}}}}
+		vm.Spec.FwCfg = []v1alpha1.FwCfgEntrySpec{{Name: "opt/x", String: s}}
+
+		mock := &mockLibvirtClient{}
+		client := NewClient(mock)
+		if err := client.Store(libvirt.Domain{}, vm); err != nil {
+			t.Fatalf("Store(%q): %v", s, err)
+		}
+		mock.getMetadataValue = mock.lastSetMetadata
+		got, err := client.Load(libvirt.Domain{})
+		if err != nil {
+			t.Fatalf("%q: Load: %v\n%s", s, err, mock.lastSetMetadata)
+		}
+		if got.Spec.CloudInit == nil || got.Spec.CloudInit.RawUserData != s {
+			t.Errorf("%q: rawUserData = %+v", s, got.Spec.CloudInit)
+		}
+		if len(got.Spec.InputDisks) != 1 || len(got.Spec.InputDisks[0].Files) != 1 || got.Spec.InputDisks[0].Files[0].String != s {
+			t.Errorf("%q: inputDisks = %+v", s, got.Spec.InputDisks)
+		}
+		if len(got.Spec.FwCfg) != 1 || got.Spec.FwCfg[0].String != s {
+			t.Errorf("%q: fwCfg = %+v", s, got.Spec.FwCfg)
+		}
+		if got.Annotations["note"] != s {
+			t.Errorf("%q: annotation reads back as %q", s, got.Annotations["note"])
+		}
+	}
+}

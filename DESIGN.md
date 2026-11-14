@@ -1317,10 +1317,10 @@ there and skip otherwise; `make test-unit` (`-short`) skips them always.
 ### Fuzz Tests
 Inputs foundry did not write have fuzz targets: the spec loader (`FuzzLoadFromYAML`, `internal/loader`: no
 panic, and an accepted spec survives a YAML round trip), the spec stored in the domain's metadata
-(`FuzzStoreLoad`, `internal/metadata`: any user data and annotation read back unchanged) and the qcow2 header
-check of an image import (`FuzzCheckQCOW2Header`, `internal/storage`: no panic, no loop). Their seed corpora
-run with the unit tests; `make fuzz` fuzzes each for `FUZZTIME` (default 20s)
-([Go fuzzing](https://go.dev/doc/security/fuzz/)). A failing input lands in the package's `testdata/fuzz/`;
+(`FuzzStoreLoad`, `internal/metadata`: any user data, input file, fw_cfg string and annotation read back
+unchanged) and the qcow2 header check of an image import (`FuzzCheckQCOW2Header`, `internal/storage`: no
+panic, no loop). Their seed corpora run with the unit tests; `make fuzz` fuzzes each for `FUZZTIME` (default
+20s) ([Go fuzzing](https://go.dev/doc/security/fuzz/)). A failing input lands in the package's `testdata/fuzz/`;
 commit it with the fix, so it stays a regression test.
 
 ### Manual Testing
