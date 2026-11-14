@@ -123,7 +123,7 @@ spec:
   bootDisk:
     sizeGB: 50                # Disk size in GB
     image: fedora-43.qcow2    # Image reference (see formats below)
-    imagePool: foundry-images # Optional: pool containing base image (default: foundry-images)
+    imagePool: foundry-images # Optional: only foundry-images, the default, is accepted
     imageSHA256: 8582f6...    # Optional: sha256 of the image; checked before anything is made
     # OR for empty boot disk:
     # empty: true             # Create empty disk instead of snapshot
@@ -206,8 +206,12 @@ status:
 ```
 
 **Image Reference Formats:**
-- Volume name: `fedora-43.qcow2` (uses `imagePool` or defaults to `foundry-images`)
-- Full reference: `foundry-images:fedora-43.qcow2` (explicit pool:volume format)
+- Volume name: `fedora-43.qcow2`, in `foundry-images`
+- Full reference: `foundry-images:fedora-43.qcow2` (pool:volume format; the pool must be
+  `foundry-images`)
+- `imagePool` may only be `foundry-images` (its default). Images are imported, checked and
+  listed there and create takes them from there, so the loader refuses any other pool, in
+  `imagePool` or in the pool:volume form
 - File path: `/path/to/image.qcow2` (direct filesystem path, not recommended). Checked as an
   import checks an image, before anything is made: a regular file, a qcow2 or bootable raw image
   by its content, and a qcow2 without a backing or external data file. Its format is taken from
@@ -226,9 +230,6 @@ pool's directory. It costs reading the whole image once per create.
 
 - Only for an image volume: a file path is not a volume and an empty disk has
   no image, so the loader refuses the field with either.
-- Only for `foundry-images`: create takes the image from that pool whatever
-  pool the reference names, so a digest for another pool would be checked
-  against a volume other than the one booted. The loader refuses it.
 - The stored volume hashes as the file did because an import uploads the file
   byte for byte, and a raw image's volume is exactly the file's size. A qcow2
   image smaller than the empty qcow2 file libvirt creates for the volume

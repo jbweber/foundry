@@ -435,8 +435,7 @@ spec:
 
   bootDisk:
     sizeGB: 50
-    image: fedora-43.qcow2
-    imagePool: foundry-images
+    image: fedora-43.qcow2    # an image imported into foundry-images
 
   networkInterfaces:
     - ip: 10.20.30.40/24

@@ -231,6 +231,9 @@ func validateSpec(vm *v1alpha1.VirtualMachine) error {
 	if vm.Spec.BootDisk.Image != "" && vm.Spec.BootDisk.Empty {
 		return fmt.Errorf("spec.bootDisk cannot specify both 'image' and 'empty: true'")
 	}
+	if err := validateImagePool(vm.Spec.BootDisk); err != nil {
+		return err
+	}
 	if err := validateImageSHA256(vm.Spec.BootDisk); err != nil {
 		return err
 	}
@@ -668,12 +671,28 @@ func validateInputDisks(vm *v1alpha1.VirtualMachine) error {
 	return nil
 }
 
+// validateImagePool refuses a boot image in any pool but foundry-images,
+// named by spec.bootDisk.imagePool or the "pool:volume" form: images are
+// imported, checked and listed there, and create takes the image from there.
+// A boot image given as a host path is not a pool reference.
+func validateImagePool(disk v1alpha1.BootDiskSpec) error {
+	if p := strings.TrimSpace(disk.ImagePool); p != "" && p != imagesPool {
+		return fmt.Errorf("spec.bootDisk.imagePool names pool %q; images come from %s only (import the image there with 'foundry image import')", p, imagesPool)
+	}
+	img := disk.Image
+	if strings.HasPrefix(img, ".") || strings.Contains(img, "/") {
+		return nil
+	}
+	if p, _, ok := strings.Cut(img, ":"); ok && strings.TrimSpace(p) != imagesPool {
+		return fmt.Errorf("spec.bootDisk.image names pool %q; images come from %s only (import the image there with 'foundry image import')", strings.TrimSpace(p), imagesPool)
+	}
+	return nil
+}
+
 // validateImageSHA256 checks spec.bootDisk.imageSHA256: 64 lower-case hex
-// digits, as sha256sum prints them, and only for an image volume in
-// foundry-images. Create checks the digest by reading that volume back
-// through libvirt; a file path is not a volume, and create takes the image
-// from foundry-images whatever pool the spec names, so a digest for another
-// pool would be checked against a volume other than the one booted.
+// digits, as sha256sum prints them, and only for an image volume (in
+// foundry-images, see validateImagePool). Create checks the digest by
+// reading that volume back through libvirt; a file path is not a volume.
 func validateImageSHA256(disk v1alpha1.BootDiskSpec) error {
 	d := disk.ImageSHA256
 	if d == "" {
@@ -685,13 +704,6 @@ func validateImageSHA256(disk v1alpha1.BootDiskSpec) error {
 	}
 	if !isSHA256(d) {
 		return fmt.Errorf("spec.bootDisk.imageSHA256 %q: must be 64 lower-case hex digits", d)
-	}
-	pool := disk.ImagePool
-	if p, _, ok := strings.Cut(img, ":"); ok {
-		pool = p
-	}
-	if pool = strings.TrimSpace(pool); pool != "" && pool != imagesPool {
-		return fmt.Errorf("spec.bootDisk.imageSHA256: the image is in pool %q; digests are checked for images in %s", pool, imagesPool)
 	}
 	return nil
 }

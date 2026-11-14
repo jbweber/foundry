@@ -71,6 +71,9 @@ git history.
 - Volumes and pools are created without an owner or group, which libvirt sets itself while a domain uses a
   volume; foundry no longer reads the QEMU user from `/etc/libvirt/qemu.conf`, so a remote libvirt over
   `--socket` no longer needs matching QEMU UIDs.
+- `spec.bootDisk.imagePool` and the `pool:volume` image form accept only `foundry-images`; any other pool is
+  refused when the spec is loaded. Create always took the image from foundry-images, whatever pool the spec
+  named, so a VM could boot another image than the one meant.
 
 ### Fixed
 

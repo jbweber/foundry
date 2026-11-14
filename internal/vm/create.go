@@ -232,6 +232,14 @@ func createFromConfigWithDeps(ctx context.Context, vm *v1alpha1.VirtualMachine, 
 			return fmt.Errorf("failed to parse image reference: %w", createErr)
 		}
 
+		// Images come from foundry-images only, where create looks them up;
+		// the loader refuses another pool, and so does this, for a spec
+		// that did not come through the loader
+		if !isFilePath && imagePool != storage.DefaultImagesPool {
+			createErr = fmt.Errorf("spec.bootDisk names image pool %q; images come from %s only", imagePool, storage.DefaultImagesPool)
+			return createErr
+		}
+
 		if isFilePath {
 			// File path - checked as import checks an image, its format
 			// taken from its content, before anything is made
