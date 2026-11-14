@@ -321,7 +321,6 @@ pool's directory. It costs reading the whole image once per create.
   virtual size (the volume's capacity in `foundry-images`; for a path image, a qcow2's header
   size or a raw file's length)
 - Boot disk image volume has the sha256 `spec.bootDisk.imageSHA256` states, when it states one
-- Bridge exists on hypervisor (future: fuzzy match)
 
 ## Core Workflows
 
@@ -948,26 +947,28 @@ list the VMs' disks; other pools, foundry-images included, are 0755. libvirt app
 mode only when it makes the volume or builds the pool, so older ones keep theirs.
 
 **Volume Naming Convention** (flat namespace within pools):
-- Boot disk: `{vm-name}_boot`
-- Data disks: `{vm-name}_data-{device}` (e.g., `web-server_data-vdb`)
-- Cloud-init ISO: `{vm-name}_cloudinit`
+- Boot disk: `{vm-name}_boot.qcow2`
+- Data disks: `{vm-name}_data-{device}.qcow2` (e.g., `web-server_data-vdb.qcow2`)
+- Cloud-init ISO: `{vm-name}_cloudinit.iso`
 - Input disks: `{vm-name}_input-{label in lower case}.iso` (e.g., `web-server_input-nodecfg.iso`)
-- Base images: `{os-name}-{version}` (e.g., `fedora-43`, `ubuntu-24.04`)
+- Base images: the name given at import, ending in `.qcow2` or `.raw` to match the content
+  (e.g., `fedora-43.qcow2`)
+- Key profiles: `varstore_{profile}_{arch}.fd`
 
 **Storage structure:**
 ```
 /var/lib/libvirt/images/foundry/
 ├── images/                    # foundry-images pool
-│   ├── fedora-43              # Base image volume
-│   ├── ubuntu-24.04           # Base image volume
-│   └── debian-12              # Base image volume
-└── vms/                       # foundry-vms pool
-    ├── my-vm_boot             # Boot disk volume (qcow2 with backing: fedora-43)
-    ├── my-vm_data-vdb         # Data disk volume
-    ├── my-vm_data-vdc         # Data disk volume
-    ├── my-vm_cloudinit        # Cloud-init ISO volume
-    ├── prod-web01_boot        # Another VM's boot disk
-    └── prod-web01_cloudinit   # Another VM's cloud-init
+│   ├── fedora-43.qcow2               # Base image volume
+│   ├── ubuntu-24.04.qcow2            # Base image volume
+│   └── varstore_corp_x86_64.fd       # Secure Boot key profile
+└── vms/                              # foundry-vms pool
+    ├── my-vm_boot.qcow2              # Boot disk volume (qcow2 with backing: fedora-43.qcow2)
+    ├── my-vm_data-vdb.qcow2          # Data disk volume
+    ├── my-vm_data-vdc.qcow2          # Data disk volume
+    ├── my-vm_cloudinit.iso           # Cloud-init ISO volume
+    ├── prod-web01_boot.qcow2         # Another VM's boot disk
+    └── prod-web01_cloudinit.iso      # Another VM's cloud-init
 ```
 
 **Benefits:**
@@ -978,11 +979,9 @@ mode only when it makes the volume or builds the pool, so older ones keep theirs
 - ✅ Flexible storage (users can choose fast/slow/network per VM)
 - ✅ Future-proof (snapshots, cloning, migration supported)
 
-**Configuration Layers** (priority order):
-1. **CLI flags** (highest priority): `foundry create --pool foundry-ssd`
-2. **Environment variables**: `FOUNDRY_VM_POOL=my-pool`
-3. **Config file** (`~/.config/foundry/config.yaml` or `/etc/foundry/config.yaml`)
-4. **Hard-coded defaults** (lowest priority): `foundry-vms`, `foundry-images`
+**Pool selection:** a VM's disks go in `spec.storagePool` (default `foundry-vms`); images
+come from `foundry-images`. There is no CLI flag, environment variable or config file for
+either.
 
 **Image Format Validation** (added v0.2.0):
 
@@ -1066,20 +1065,19 @@ This prevents common issues like:
 #cloud-config
 hostname: my-vm
 fqdn: my-vm.example.com
-users:
-  - name: root
-    ssh_authorized_keys:
-      - ssh-ed25519 AAAA...
+ssh_authorized_keys:          # top level: the image's default user (fedora, ubuntu, cloud-user...), not root
+  - ssh-ed25519 AAAA...
 chpasswd:
-  list: |
-    root:$6$...
+  list: root:$6$...           # passwordHash is root's password
   expire: false
 ssh_pwauth: false
+output:
+  all: '| tee -a /var/log/cloud-init-output.log'
 ```
 
 2. **meta-data** (instance metadata):
 ```yaml
-instance-id: my-vm-1730534400
+instance-id: my-vm            # the VM name
 local-hostname: my-vm
 ```
 
@@ -1092,17 +1090,17 @@ ethernets:
       macaddress: "be:ef:0a:37:16:16"
     addresses:
       - 10.55.22.22/24
-    routes:
-      - to: default
+    routes:                   # only on the interface with defaultRoute: true
+      - to: 0.0.0.0/0
         via: 10.55.22.1
-    nameservers:
+    nameservers:              # only when the interface lists dnsServers
       addresses: [8.8.8.8, 1.1.1.1]
 ```
 
 **ISO creation:**
 - Use `iso9660` library to create in-memory ISO
 - Volume ID: "cidata" (required by cloud-init)
-- Joliet + Rock Ridge extensions
+- Plain ISO-9660, without Rock Ridge or Joliet (cloud-init reads the three names as they are)
 - Upload directly to libvirt storage
 
 ### Libvirt Domain XML
@@ -1177,7 +1175,6 @@ foundry --socket /tmp/libvirt.sock list
 # Create VM from config
 foundry create <config.yaml>
 foundry create examples/vm.yaml
-foundry create vm.yaml --pool foundry-ssd  # Use custom pool
 
 # Render the domain XML without creating anything (no libvirt connection)
 foundry render <config.yaml>
@@ -1187,12 +1184,14 @@ foundry render examples/vm.yaml
 foundry destroy <vm-name>
 foundry destroy my-vm
 
-# List all VMs
+# List all VMs, running or not (-o yaml|json, --no-headers)
 foundry list
-foundry list --all  # Include stopped VMs
 
-# Show VM details
-foundry vm info <vm-name>
+# Show one VM, its stored spec and status (-o table|yaml|json)
+foundry get <vm-name>
+
+# Check the libvirt connection
+foundry test-conn
 ```
 
 **Storage Pool Management:**
@@ -1256,40 +1255,31 @@ foundry storage status
 ### Exit Codes
 
 - 0: Success
-- 1: Configuration error
-- 2: Validation error
-- 3: Libvirt connection error
-- 4: VM operation error
-- 5: Storage error
+- 1: Any error; the message on standard error says what failed
 
 ### Output Format
 
+Create and destroy print one line on standard output when they start and one
+when they succeed; each step is logged on standard error as it happens
+(timestamped log lines), and a failure ends with `Error: ...` there.
+
 **Create:**
 ```
-Creating VM 'my-vm'...
-✓ Configuration validated
-✓ Storage created (50 GB boot + 300 GB data)
-✓ Cloud-init ISO generated
-✓ Domain defined
-✓ VM started
-Successfully created VM 'my-vm'
+Creating VM from config: vm.yaml
+✓ VM created successfully!
 ```
 
 **Destroy:**
 ```
-Destroying VM 'my-vm'...
-✓ VM stopped
-✓ Domain undefined
-✓ Storage removed
-Successfully destroyed VM 'my-vm'
+Destroying VM: my-vm
+✓ VM destroyed successfully!
 ```
 
-**List:**
+**List** (table; `-o yaml` or `-o json` give the VirtualMachine objects):
 ```
-NAME       STATE     VCPUS  MEMORY  IP ADDRESS
-my-vm      running   4      8 GiB   10.20.30.40
-test-vm    running   2      4 GiB   10.20.30.41
-old-vm     shut off  4      8 GiB   -
+NAME     PHASE     IP             VCPUs   MEMORY   AGE
+my-vm    Running   10.20.30.40    4       8 GiB    3d
+old-vm   Stopped   10.20.30.42    4       8 GiB    12d
 ```
 
 ## Phase 1 Scope (MVP)
@@ -1408,7 +1398,7 @@ commit it with the fix, so it stays a regression test.
 - Show progress during long operations
 - Explain why validation failed
 - Suggest fixes for common errors
-- Show libvirt error details only with --verbose
+- Show libvirt's error text in the message (there is no separate verbose mode)
 
 ## Future Enhancements (Phase 2+)
 
@@ -1473,7 +1463,8 @@ commit it with the fix, so it stays a regression test.
 - Config format inspired by Ansible but simplified
 - MAC calculation algorithm matches exactly
 - Storage layout compatible
-- Can manage VMs created by Ansible
+- VMs created by Ansible have no foundry spec: `foundry destroy` refuses them unless `--force`
+  (which searches foundry-vms only), and `list`/`get` show them without a spec
 
 ### Migration Path
 1. Install foundry on hypervisor

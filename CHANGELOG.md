@@ -177,5 +177,10 @@ git history.
 - `foundry varstore import --replace` keeps the old profile when the new one cannot be written: it reads the
   old one back before deleting it and puts it back on failure. It deleted the old one first, so a failed upload
   lost it.
+- DESIGN.md, README and CLOUDINIT.md describe the code as it is: every error exits 1; no `create --pool`,
+  `FOUNDRY_VM_POOL`, config file, `list --all`, `vm info` or `--verbose`; the real create, destroy and list
+  output; volume names with their extensions; no bridge check; the cloud-init seed is plain ISO-9660, its
+  instance-id is the VM name, and SSH keys go to the image's default user, not root; CLOUDINIT.md's validation
+  list and example spec match the loader.
 
 [Unreleased]: https://github.com/jbweber/foundry/compare/v0.6.1...HEAD
