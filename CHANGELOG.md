@@ -22,6 +22,9 @@ git history.
   on aarch64".
 - Expected domain XML for x86_64 and aarch64 VMs (`internal/libvirt/testdata/domains/`), compared byte for byte
   by the unit tests, so the aarch64 output is checked in CI without Arm hardware (DESIGN.md, Rendered Domain XML).
+- DESIGN.md, "Test VMs on a Host Without a Guest Network": test VMs take the ordinary bridge interface, a tap and
+  an address each, reached with no port forwards on x86_64 and aarch64 alike; how a host with no spare bridge gives
+  them a private one in a network namespace, and which kernel modules that loads.
 
 ### Changed
 

@@ -633,6 +633,38 @@ networkInterfaces:
 - Intended for bare-metal-style provisioning flows (Metal³/Ironic) where an
   external service serves the network boot chain.
 
+### Test VMs on a Host Without a Guest Network
+
+Test VMs take the ordinary bridge interface: each VM gets its own tap device on the bridge and the fixed
+address its spec states, with a MAC derived from that address ([MAC Address Calculation](#mac-address-calculation)),
+so a test reaches every VM at its own address with no port forwards. This works the same on x86_64 and aarch64;
+nothing in the spec or the domain XML depends on the architecture.
+
+User-mode networking (such as passt) is not a substitute. It copies the host's addresses into every guest, so
+each guest sees itself at the same address, and reaching one takes a port forward per VM on the host
+([passt(1)](https://passt.top/builds/latest/web/passt.1.html)). foundry has no user-mode interface.
+
+A host with no bridge to spare for test VMs, such as a machine whose network belongs to something else, can give
+them a private one: a network namespace of its own holding a bridge with an address, and libvirtd started inside
+that namespace, so the taps libvirt makes are created there and the host's own interfaces never see them. foundry
+reaches libvirtd over its Unix socket as usual; only a test that reaches the VMs runs in the namespace. The host's
+own network is untouched, but its kernel is not: the first bridge and the first tap load the `bridge` (with `stp`
+and `llc`) and, when QEMU opens `/dev/vhost-net`, the `vhost_net` modules (with `vhost`, `vhost_iotlb` and `tap`)
+if they are not loaded already, and `tun` must be available. On a host where loading a module is itself a change to
+control, load them beforehand or unload them afterwards. A sketch, run as root on the hypervisor:
+
+```sh
+ip netns add testvms
+ip netns exec testvms ip link set lo up
+ip netns exec testvms ip link add vmbr0 type bridge
+ip netns exec testvms ip addr add 10.0.3.1/24 dev vmbr0
+ip netns exec testvms ip link set vmbr0 up
+ip netns exec testvms libvirtd -d          # or virtqemud; its taps are made in this namespace
+```
+
+A VM there states `bridge: vmbr0` and an address in `10.0.3.0/24` with `gateway: 10.0.3.1`; a test reaches it
+with `ip netns exec testvms ssh ...`.
+
 ### Guest Architecture
 
 `spec.arch` is the guest CPU architecture, in libvirt's names: `x86_64` (the
