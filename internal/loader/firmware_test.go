@@ -21,7 +21,7 @@ func TestValidateSpec_Firmware(t *testing.T) {
 		{name: "secure boot with keys", fw: &v1alpha1.FirmwareSpec{Loader: loader, SecureBoot: true, Keys: "my-keys"}},
 		{name: "aarch64 keys without secure boot", arch: v1alpha1.ArchAarch64, fw: &v1alpha1.FirmwareSpec{Loader: "/usr/share/edk2/aarch64/QEMU_EFI-silent-pflash.raw", Keys: "k1"}},
 		{name: "missing loader", fw: &v1alpha1.FirmwareSpec{SecureBoot: true}, wantErr: "spec.firmware.loader is required"},
-		{name: "aarch64 secure boot", arch: v1alpha1.ArchAarch64, fw: &v1alpha1.FirmwareSpec{Loader: loader, SecureBoot: true}, wantErr: "only supported for x86_64"},
+		{name: "aarch64 secure boot with an OVMF build", arch: v1alpha1.ArchAarch64, fw: &v1alpha1.FirmwareSpec{Loader: loader, SecureBoot: true}, wantErr: "uefi-vars device"},
 		{name: "keys and template", fw: &v1alpha1.FirmwareSpec{Loader: loader, Keys: "k", NVRAMTemplate: "/srv/VARS.fd"}, wantErr: "mutually exclusive"},
 		{name: "keys with underscore", fw: &v1alpha1.FirmwareSpec{Loader: loader, Keys: "my_keys"}, wantErr: "spec.firmware.keys"},
 		{name: "keys with slash", fw: &v1alpha1.FirmwareSpec{Loader: loader, Keys: "../keys"}, wantErr: "spec.firmware.keys"},

@@ -253,3 +253,16 @@ func TestSerialLogCopy(t *testing.T) {
 		}
 	}
 }
+
+func TestVolumeNameVarstoreJSON(t *testing.T) {
+	name := VolumeNameVarstoreJSON("corp-keys", "aarch64")
+	if name != "varstore_corp-keys_aarch64.json" {
+		t.Errorf("VolumeNameVarstoreJSON() = %q", name)
+	}
+	if p, a, ok := ParseVolumeNameVarstore(name); !ok || p != "corp-keys" || a != "aarch64" {
+		t.Errorf("ParseVolumeNameVarstore(%s) = %q %q %v", name, p, a, ok)
+	}
+	if _, _, ok := ParseVolumeNameVarstore("varstore_corp-keys.json"); ok {
+		t.Error("ParseVolumeNameVarstore accepted a JSON name without an architecture")
+	}
+}

@@ -123,15 +123,26 @@ func VolumeNameVarstore(profile, arch string) string {
 	return fmt.Sprintf("%s%s_%s.fd", VarstorePrefix, profile, arch)
 }
 
-// ParseVolumeNameVarstore splits a varstore volume name into its profile and
-// architecture; ok is false for any other volume name. Profile names have no
-// "_" (an architecture may: "x86_64"), so the first "_" ends the profile.
+// VolumeNameVarstoreJSON returns the volume name of a key profile's varstore
+// in the JSON form of QEMU's uefi-vars device (an aarch64 Secure Boot VM's).
+// Format: varstore_{profile}_{arch}.json (e.g., "varstore_my-keys_aarch64.json")
+func VolumeNameVarstoreJSON(profile, arch string) string {
+	return fmt.Sprintf("%s%s_%s.json", VarstorePrefix, profile, arch)
+}
+
+// ParseVolumeNameVarstore splits a varstore volume name of either form into
+// its profile and architecture; ok is false for any other volume name.
+// Profile names have no "_" (an architecture may: "x86_64"), so the first "_"
+// ends the profile.
 func ParseVolumeNameVarstore(volume string) (profile, arch string, ok bool) {
 	rest, found := strings.CutPrefix(volume, VarstorePrefix)
 	if !found {
 		return "", "", false
 	}
 	rest, found = strings.CutSuffix(rest, ".fd")
+	if !found {
+		rest, found = strings.CutSuffix(rest, ".json")
+	}
 	if !found {
 		return "", "", false
 	}

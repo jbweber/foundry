@@ -1,0 +1,17 @@
+# Secure Boot on aarch64 with the firmware's own enrolled keys: libvirt picks
+# the template from the firmware's descriptor, asked for Secure Boot and
+# enrolled keys, so ACPI stays.
+apiVersion: foundry.cofront.xyz/v1alpha1
+kind: VirtualMachine
+metadata:
+  name: sb-arm-stock
+spec:
+  arch: aarch64
+  vcpus: 2
+  memoryGiB: 2
+  bootDisk: {sizeGB: 20, image: base.qcow2}
+  networkInterfaces:
+    - {ip: 10.0.0.8/24, gateway: 10.0.0.1, bridge: br0}
+  firmware:
+    loader: /usr/share/edk2/aarch64/QEMU_EFI.qemuvars.fd
+    secureBoot: true

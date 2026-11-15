@@ -488,9 +488,14 @@ func validateFirmware(vm *v1alpha1.VirtualMachine) error {
 	if fw.Loader == "" {
 		return fmt.Errorf("spec.firmware.loader is required")
 	}
-	// Secure Boot needs SMM to protect the varstore, which only x86 has.
-	if fw.SecureBoot && vm.GetArch() != v1alpha1.ArchX86_64 {
-		return fmt.Errorf("spec.firmware.secureBoot is only supported for %s", v1alpha1.ArchX86_64)
+	if fw.UsesUEFIVars(vm.GetArch()) {
+		if !isUEFIVarsLoader(fw.Loader) {
+			return fmt.Errorf("spec.firmware.loader %q: Secure Boot on %s needs a firmware build for QEMU's uefi-vars device, such as %s (a flash build boots with Secure Boot off)",
+				fw.Loader, v1alpha1.ArchAarch64, uefiVarsLoaderExample)
+		}
+		if fw.NVRAMTemplate != "" && !strings.HasSuffix(fw.NVRAMTemplate, ".json") {
+			return fmt.Errorf("spec.firmware.nvramTemplate %q: Secure Boot on %s needs a uefi-vars JSON store, named *.json", fw.NVRAMTemplate, v1alpha1.ArchAarch64)
+		}
 	}
 	if fw.Keys != "" {
 		if fw.NVRAMTemplate != "" {
@@ -501,6 +506,23 @@ func validateFirmware(vm *v1alpha1.VirtualMachine) error {
 		}
 	}
 	return nil
+}
+
+// uefiVarsLoaderExample is the firmware edk2-aarch64 ships for the uefi-vars
+// device, Secure Boot built in. Its flash builds, and the non-flash
+// QEMU_EFI.fd, have neither.
+const uefiVarsLoaderExample = "/usr/share/edk2/aarch64/QEMU_EFI.qemuvars.fd"
+
+// isUEFIVarsLoader reports whether a firmware image is named as a ROM build
+// for the uefi-vars device. A VM with a key profile leaves libvirt no firmware
+// descriptor to check the image against, and firmware without Secure Boot
+// starts just the same, silently not enforcing it, so the name is all that
+// stands in the way. (The same name's -pflash variants are for flash, and a
+// firmware image of any other name is refused: a build of one's own needs
+// "qemuvars" in its name.)
+func isUEFIVarsLoader(path string) bool {
+	base := filepath.Base(path)
+	return strings.Contains(base, "qemuvars") && !strings.Contains(base, "pflash")
 }
 
 // keyProfileName is the form of a Secure Boot key profile name. It becomes

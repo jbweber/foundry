@@ -86,6 +86,10 @@ type LibvirtClient interface {
 
 	// ConnectGetCapabilities returns the host capabilities XML (for the host architecture)
 	ConnectGetCapabilities() (string, error)
+
+	// ConnectGetDomainCapabilities returns what the host can run for an
+	// emulator, architecture, machine and domain type, firmware included
+	ConnectGetDomainCapabilities(emulatorbin libvirt.OptString, arch libvirt.OptString, machine libvirt.OptString, virttype libvirt.OptString, flags libvirt.ConnectGetDomainCapabilitiesFlags) (string, error)
 }
 
 // storageManager defines the storage operations needed for VM management.
