@@ -656,6 +656,19 @@ or `--host-arch`.
 | Cloud-init CD-ROM | SATA (`sda`) | SCSI (`sda`) on a virtio-scsi controller; `virt` has no AHCI |
 | Serial console | isa-serial, guest `ttyS0` | system-serial (pl011), guest `ttyAMA0` |
 
+The rows that shape the domain (machine, features, `<bios useserial>`, timers, CPU model fallback, CD-ROM bus)
+are one entry per architecture in `internal/libvirt/arch.go`, and the domain is built from the guest's entry,
+not from an x86_64 definition adjusted afterwards. An architecture with no entry is refused, never given
+another's settings. The rendered XML of both architectures is checked by the unit tests
+([Rendered Domain XML](#rendered-domain-xml)).
+
+**Why a spec without `spec.arch` stays x86_64 rather than the hypervisor's architecture:** the spec names a
+boot image, and an image is built for one architecture. A file written before `spec.arch` existed was written
+for an x86_64 image; on an aarch64 hypervisor it should still boot that image, emulated, rather than boot it
+as an aarch64 guest that cannot run it. A spec for an aarch64 guest says so. For the same reason `foundry
+varstore import` and `delete` keep `--arch x86_64` as their default: a profile is looked up by the VM's
+`spec.arch`, so both defaults must agree.
+
 The serial target type is left to libvirt, which picks the right one per
 machine ([serial devices](https://libvirt.org/formatdomain.html#consoles-serial-parallel-channel-devices)).
 The SCSI CD-ROM follows virt-install's default bus for non-x86 guests

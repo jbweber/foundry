@@ -11,6 +11,13 @@ git history.
 
 ## [Unreleased]
 
+### Changed
+
+- What differs between guest architectures (machine type, features, timers, BIOS serial, CPU model fallback,
+  CD-ROM bus) is one table entry per architecture, and the domain is built from the guest's entry rather than
+  from an x86_64 definition adjusted for aarch64. The XML for both is unchanged. An architecture with no entry is
+  an error where it would have been given q35.
+
 ### Added
 
 - Expected domain XML for x86_64 and aarch64 VMs (`internal/libvirt/testdata/domains/`), compared byte for byte
