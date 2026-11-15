@@ -1,0 +1,19 @@
+# A Secure Boot aarch64 VM with the lock: the firmware as a ROM, the variables
+# in QEMU's uefi-vars device on the host, the key profile a JSON store. No ACPI:
+# the guest boots from the device tree.
+apiVersion: foundry.cofront.xyz/v1alpha1
+kind: VirtualMachine
+metadata:
+  name: sb-arm
+spec:
+  arch: aarch64
+  vcpus: 4
+  memoryGiB: 4
+  serial: NODE-0003
+  bootDisk: {sizeGB: 40, image: base.qcow2, serial: os-disk}
+  networkInterfaces:
+    - {ip: 10.0.0.7/24, gateway: 10.0.0.1, bridge: br0, defaultRoute: true}
+  firmware:
+    loader: /usr/share/edk2/aarch64/QEMU_EFI.qemuvars.fd
+    secureBoot: true
+    keys: test-keys

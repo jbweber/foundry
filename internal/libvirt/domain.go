@@ -394,8 +394,12 @@ func addCdroms(domain *libvirtxml.Domain, settings archSettings, cdroms ...libvi
 // Secure Boot's keys out of the guest OS's reach; libvirt refuses
 // secure='yes' without <smm state='on'/>
 // (https://libvirt.org/formatdomain.html#hypervisor-features). SMM exists
-// only on x86, so the loader validates secureBoot as x86_64 only.
+// only on x86; an aarch64 Secure Boot VM takes another path, applyUEFIVars.
 func applyFirmware(domain *libvirtxml.Domain, fw *v1alpha1.FirmwareSpec, arch string) {
+	if fw.UsesUEFIVars(arch) {
+		applyUEFIVars(domain, fw, arch)
+		return
+	}
 	domain.OS.Firmware = ""
 	domain.OS.Loader = &libvirtxml.DomainLoader{
 		Path:     fw.Loader,
@@ -411,6 +415,47 @@ func applyFirmware(domain *libvirtxml.Domain, fw *v1alpha1.FirmwareSpec, arch st
 	}
 }
 
+// applyUEFIVars sets up Secure Boot on aarch64: firmware loaded as a ROM, whose
+// UEFI variables QEMU's uefi-vars device keeps on the host in a JSON file, out
+// of the guest's reach. The flash varstore of x86 can't do this: there SMM is
+// what stops the guest OS writing the flash directly, Arm has no such mode
+// under KVM, and libvirt refuses secure='yes' outside q35. <varstore> is "the
+// only way to get Secure Boot working" on aarch64
+// (https://libvirt.org/formatdomain.html#bios-bootloader,
+// https://gitlab.com/qemu-project/qemu/-/blob/v11.1.0/docs/devel/uefi-vars.rst).
+// libvirt copies the template to the VM's own file (<varstore_dir>/<name>.json)
+// on first start and removes it on undefine with VIR_DOMAIN_UNDEFINE_NVRAM, as
+// with nvram.
+//
+// Without a template, libvirt finds the firmware from its descriptors, asked
+// for one with Secure Boot and enrolled keys; that also fails, rather than
+// booting with Secure Boot off, if the loader is not such a build.
+//
+// With a template (a key profile), no descriptor matches, as they name only
+// their own templates, so firmware='efi' can't be used: libvirt would refuse
+// it ("Unable to find 'efi' firmware", qemuFirmwareFillDomain in
+// https://gitlab.com/libvirt/libvirt/-/blob/v12.8.0/src/qemu/qemu_firmware.c).
+// libvirt then takes the paths as given, but refuses ACPI on aarch64 for a ROM
+// loader without firmware='efi' ("ACPI requires UEFI on this architecture",
+// qemuValidateDomainDef in
+// https://gitlab.com/libvirt/libvirt/-/blob/v12.8.0/src/qemu/qemu_validate.c).
+// So such a guest has no ACPI and gets the machine's device tree instead.
+func applyUEFIVars(domain *libvirtxml.Domain, fw *v1alpha1.FirmwareSpec, arch string) {
+	domain.OS.Loader = &libvirtxml.DomainLoader{Path: fw.Loader, Type: "rom"}
+	template := nvramTemplate(fw, arch)
+	domain.OS.VarStore = &libvirtxml.DomainVarStore{Template: template}
+	if template != "" {
+		domain.OS.Firmware = ""
+		domain.Features.ACPI = nil
+		return
+	}
+	domain.OS.Firmware = "efi"
+	domain.OS.FirmwareInfo = &libvirtxml.DomainOSFirmwareInfo{Features: []libvirtxml.DomainOSFirmwareFeature{
+		{Enabled: "yes", Name: "enrolled-keys"},
+		{Enabled: "yes", Name: "secure-boot"},
+	}}
+}
+
 // nvramTemplate returns the varstore template for a firmware spec: the
 // nvramTemplate path, or for a key profile (spec.firmware.keys) the path its
 // varstore volume has in the default foundry-images pool. create does not
@@ -423,6 +468,9 @@ func applyFirmware(domain *libvirtxml.Domain, fw *v1alpha1.FirmwareSpec, arch st
 func nvramTemplate(fw *v1alpha1.FirmwareSpec, arch string) string {
 	if fw.NVRAMTemplate != "" || fw.Keys == "" {
 		return fw.NVRAMTemplate
+	}
+	if fw.UsesUEFIVars(arch) {
+		return storage.DefaultImagesPath + "/" + naming.VolumeNameVarstoreJSON(fw.Keys, arch)
 	}
 	return storage.DefaultImagesPath + "/" + naming.VolumeNameVarstore(fw.Keys, arch)
 }

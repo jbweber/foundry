@@ -33,7 +33,8 @@ profile's varstore for the VM's architecture (spec.arch) and uses it as the
 template of the VM's own varstore. Build the varstore with a standard tool,
 e.g. virt-fw-vars from the virt-firmware project
 (https://gitlab.com/kraxel/virt-firmware), enrolling into the stock OVMF
-(x86_64) or AAVMF (aarch64) template.`,
+(x86_64) or AAVMF (aarch64) template. A Secure Boot VM on aarch64 uses a JSON
+store for QEMU's uefi-vars device instead (virt-fw-vars --output-json).`,
 }
 
 func init() {
@@ -102,6 +103,11 @@ The file must be an edk2 variable store firmware volume ("_FVH" signature,
 variable store GUID), a whole number of 4 KiB blocks and at most 64 MiB. It is
 uploaded through libvirt as a raw volume of exactly its size, named
 varstore_<profile>_<arch>.fd.
+
+For aarch64 it may instead be a JSON store for QEMU's uefi-vars device, which
+is what a Secure Boot VM there needs: version 2, with a PK and SecureBootEnable
+set, kept as varstore_<profile>_aarch64.json. A profile has one or the other;
+--replace swaps one for the other.
 
 Replacing a profile (--replace) does not change existing VMs: libvirt copied
 the template into each VM's own varstore on its first start.

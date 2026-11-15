@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/digitalocean/go-libvirt"
+	"libvirt.org/go/libvirtxml"
 
 	"github.com/jbweber/foundry/api/v1alpha1"
 	"github.com/jbweber/foundry/internal/cloudinit"
@@ -235,7 +236,11 @@ func createFromConfigWithDeps(ctx context.Context, vm *v1alpha1.VirtualMachine, 
 	}
 
 	// Step 2b: Find the Secure Boot key profile's varstore, before any
-	// storage is created, so a missing profile fails without cleanup
+	// storage is created, so a missing profile fails without cleanup; an
+	// aarch64 Secure Boot VM also needs the host to offer the uefi-vars device
+	if createErr = checkUEFIVarsSupport(vm, lv); createErr != nil {
+		return createErr
+	}
 	var domainVM *v1alpha1.VirtualMachine
 	domainVM, createErr = resolveKeyProfile(ctx, vm, sm)
 	if createErr != nil {
@@ -487,10 +492,17 @@ func resolveKeyProfile(ctx context.Context, vm *v1alpha1.VirtualMachine, sm stor
 	}
 	arch := vm.GetArch()
 	name := naming.VolumeNameVarstore(fw.Keys, arch)
+	if fw.UsesUEFIVars(arch) {
+		name = naming.VolumeNameVarstoreJSON(fw.Keys, arch)
+	}
 	log.Printf("Looking up Secure Boot key profile %q (%s:%s)...", fw.Keys, storage.DefaultImagesPool, name)
 	exists, err := sm.VolumeExists(ctx, storage.DefaultImagesPool, name)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check key profile varstore: %w", err)
+	}
+	if !exists && fw.UsesUEFIVars(arch) {
+		return nil, fmt.Errorf("key profile %q has no %s uefi-vars JSON varstore in %s, which Secure Boot needs here (import it with 'foundry varstore import <file.json> %s --arch %s')",
+			fw.Keys, arch, storage.DefaultImagesPool, fw.Keys, arch)
 	}
 	if !exists {
 		return nil, fmt.Errorf("key profile %q has no %s varstore in %s (import it with 'foundry varstore import <file> %s --arch %s')",
@@ -508,6 +520,41 @@ func resolveKeyProfile(ctx context.Context, vm *v1alpha1.VirtualMachine, sm stor
 	resolvedFW.Keys = ""
 	resolved.Spec.Firmware = &resolvedFW
 	return &resolved, nil
+}
+
+// checkUEFIVarsSupport refuses a VM that needs QEMU's uefi-vars device
+// (aarch64 Secure Boot) on a host that lacks it, by what libvirt reports
+// (<os><varstore supported>, virQEMUCapsFillDomainVarstoreCaps in
+// https://gitlab.com/libvirt/libvirt/-/blob/v12.8.0/src/qemu/qemu_capabilities.c):
+// yes only with a firmware descriptor for it and a QEMU with the device. A
+// libvirt older than 12.1.0 does not report it, and would ignore <varstore>
+// rather than refuse it. Other VMs need no check, and make no call.
+func checkUEFIVarsSupport(vm *v1alpha1.VirtualMachine, lv LibvirtClient) error {
+	arch := vm.GetArch()
+	if !vm.Spec.Firmware.UsesUEFIVars(arch) {
+		return nil
+	}
+	hostArch, err := foundrylibvirt.HostArch(lv)
+	if err != nil {
+		return fmt.Errorf("failed to determine hypervisor architecture: %w", err)
+	}
+	machine, err := foundrylibvirt.MachineType(arch)
+	if err != nil {
+		return err
+	}
+	domainType := vm.GetDomainType(hostArch)
+	xml, err := lv.ConnectGetDomainCapabilities(nil, libvirt.OptString{arch}, libvirt.OptString{machine}, libvirt.OptString{domainType}, 0)
+	if err != nil {
+		return fmt.Errorf("failed to read domain capabilities for %s/%s: %w", arch, domainType, err)
+	}
+	var caps libvirtxml.DomainCaps
+	if err := caps.Unmarshal(xml); err != nil {
+		return fmt.Errorf("failed to parse domain capabilities: %w", err)
+	}
+	if caps.OS == nil || caps.OS.VarStore == nil || caps.OS.VarStore.Supported != "yes" {
+		return fmt.Errorf("spec.firmware.secureBoot on %s needs QEMU's uefi-vars device, which this host's libvirt does not offer: it takes libvirt 12.1 or later, QEMU 10.0 or later, and firmware with a descriptor for it (edk2-aarch64)", arch)
+	}
+	return nil
 }
 
 // cleanupWithDeps removes the VM resources a failed create made: the

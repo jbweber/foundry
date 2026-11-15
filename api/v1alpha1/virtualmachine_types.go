@@ -223,7 +223,8 @@ type FwCfgEntrySpec struct {
 	String string `json:"string,omitempty" yaml:"string,omitempty"`
 }
 
-// FirmwareSpec defines an explicit UEFI firmware (pflash) configuration.
+// FirmwareSpec defines an explicit UEFI firmware configuration: pflash, or for
+// aarch64 Secure Boot a ROM with QEMU's uefi-vars device.
 //
 // +k8s:deepcopy-gen=true
 type FirmwareSpec struct {
@@ -233,15 +234,20 @@ type FirmwareSpec struct {
 	// aarch64).
 	Loader string `json:"loader" yaml:"loader"`
 
-	// SecureBoot marks the loader as secure (only the guest's SMM code may
-	// write the varstore) and turns SMM on, as Secure Boot requires.
-	// x86_64 only. Defaults to false.
+	// SecureBoot asks for Secure Boot with the variable store locked against
+	// the guest OS. On x86_64 it marks the loader as secure (only the guest's
+	// SMM code may write the varstore) and turns SMM on. On aarch64 the UEFI
+	// variables are kept out of the guest's reach by QEMU's uefi-vars device:
+	// Loader must be a build for it (with edk2-aarch64,
+	// /usr/share/edk2/aarch64/QEMU_EFI.qemuvars.fd). Defaults to false.
 	// +optional
 	SecureBoot bool `json:"secureBoot,omitempty" yaml:"secureBoot,omitempty"`
 
 	// NVRAMTemplate is the varstore file on the hypervisor copied to the
 	// VM's own varstore on first start (e.g. one with a custom Secure Boot
 	// db enrolled). Defaults to the template libvirt pairs with the loader.
+	// For an aarch64 Secure Boot VM it is a uefi-vars JSON store, and a set
+	// one means the guest has no ACPI (see DESIGN.md, Secure Boot on aarch64).
 	// Mutually exclusive with Keys.
 	// +optional
 	NVRAMTemplate string `json:"nvramTemplate,omitempty" yaml:"nvramTemplate,omitempty"`
@@ -250,7 +256,9 @@ type FirmwareSpec struct {
 	// db and dbx entries enrolled, imported once with 'foundry varstore
 	// import' and kept as a volume of the foundry-images pool. foundry looks
 	// the volume up for the guest architecture (spec.arch) and uses it as
-	// the VM's varstore template. Lowercase letters, digits and dashes, at
+	// the VM's varstore template. For an aarch64 Secure Boot VM the profile is
+	// a uefi-vars JSON store, and the guest has no ACPI (see DESIGN.md, Secure
+	// Boot on aarch64). Lowercase letters, digits and dashes, at
 	// most 63 characters. Mutually exclusive with NVRAMTemplate.
 	// +optional
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`

@@ -32,6 +32,8 @@ type mockLibvirtClient struct {
 	domainSetMetadataFunc      func(dom libvirt.Domain, typ int32, metadata libvirt.OptString, key libvirt.OptString, uri libvirt.OptString, flags libvirt.DomainModificationImpact) error
 	domainGetMetadataFunc      func(dom libvirt.Domain, typ int32, uri libvirt.OptString, flags libvirt.DomainModificationImpact) (string, error)
 	connectGetCapabilitiesFunc func() (string, error)
+	domainCapabilitiesFunc     func(arch, machine, virttype string) (string, error)
+	domainCapabilitiesCalls    []string
 
 	// Call tracking
 	connectListAllDomainsCalls  int
@@ -57,6 +59,9 @@ func newMockLibvirtClient() *mockLibvirtClient {
 
 	m.connectGetCapabilitiesFunc = func() (string, error) {
 		return `<capabilities><host><cpu><arch>x86_64</arch></cpu></host></capabilities>`, nil
+	}
+	m.domainCapabilitiesFunc = func(arch, machine, virttype string) (string, error) {
+		return `<domainCapabilities><arch>` + arch + `</arch><os supported='yes'><varstore supported='yes'/></os></domainCapabilities>`, nil
 	}
 
 	// Default: no domains
@@ -440,4 +445,17 @@ func (m *mockLibvirtClient) ConnectGetCapabilities() (string, error) {
 	defer m.mu.Unlock()
 	m.connectGetCapabilitiesCalls++
 	return m.connectGetCapabilitiesFunc()
+}
+
+func (m *mockLibvirtClient) ConnectGetDomainCapabilities(_ libvirt.OptString, arch libvirt.OptString, machine libvirt.OptString, virttype libvirt.OptString, _ libvirt.ConnectGetDomainCapabilitiesFlags) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	first := func(o libvirt.OptString) string {
+		if len(o) == 0 {
+			return ""
+		}
+		return o[0]
+	}
+	m.domainCapabilitiesCalls = append(m.domainCapabilitiesCalls, first(arch)+"/"+first(machine)+"/"+first(virttype))
+	return m.domainCapabilitiesFunc(first(arch), first(machine), first(virttype))
 }

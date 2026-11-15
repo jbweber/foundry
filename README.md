@@ -121,7 +121,7 @@ architecture, as before. `spec.firmware` pins it instead:
 spec:
   firmware:
     loader: /usr/share/edk2/ovmf/OVMF_CODE.secboot.fd  # firmware code on the hypervisor
-    secureBoot: true        # lock the enrolled keys (secure loader + SMM); x86_64 only
+    secureBoot: true        # lock the enrolled keys (x86_64: secure loader + SMM; aarch64: uefi-vars)
     keys: my-keys           # a Secure Boot key profile, or:
     # nvramTemplate: /usr/share/edk2/ovmf/OVMF_VARS.secboot.fd
 ```
@@ -141,10 +141,11 @@ foundry varstore delete my-keys --arch aarch64
 `secureBoot` is not Secure Boot itself but a lock on the enrolled keys: the
 guest OS, even as root, can't change them, because only firmware code in the
 VM's emulated System Management Mode may write the varstore. QEMU emulates SMM
-for x86 guests only, so `secureBoot` is refused for aarch64. An aarch64 guest
-with a pinned `loader` and a key profile still does Secure Boot checking with
-your keys enrolled and enforced; it just can't keep root in the guest from
-changing them. See [DESIGN.md](DESIGN.md#secure-boot-on-aarch64).
+for x86 guests only; on aarch64, `secureBoot` keeps the variables on the host
+in QEMU's `uefi-vars` device instead (libvirt 12.1, QEMU 10.0, a firmware build
+such as `/usr/share/edk2/aarch64/QEMU_EFI.qemuvars.fd`), with the key profile
+as a JSON store (`virt-fw-vars --output-json`). See
+[DESIGN.md](DESIGN.md#secure-boot-on-aarch64).
 
 `create` looks up the profile's varstore for `spec.arch` and fails before
 making anything if it is missing. libvirt copies the template into each VM's

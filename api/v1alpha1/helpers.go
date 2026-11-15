@@ -122,6 +122,13 @@ func (vm *VirtualMachine) GetArch() string {
 	return vm.Spec.Arch
 }
 
+// UsesUEFIVars reports whether a guest of arch with this firmware spec keeps
+// its UEFI variables in QEMU's uefi-vars device rather than a flash varstore:
+// Secure Boot on aarch64, which has no SMM to protect a flash varstore.
+func (fw *FirmwareSpec) UsesUEFIVars(arch string) bool {
+	return fw != nil && fw.SecureBoot && arch == ArchAarch64
+}
+
 // SerialPrefix starts the default SMBIOS system serial: SerialPrefix + metadata.name.
 const SerialPrefix = "foundry-"
 
