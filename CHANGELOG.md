@@ -11,6 +11,11 @@ git history.
 
 ## [Unreleased]
 
+### Added
+
+- Expected domain XML for x86_64 and aarch64 VMs (`internal/libvirt/testdata/domains/`), compared byte for byte
+  by the unit tests, so the aarch64 output is checked in CI without Arm hardware (DESIGN.md, Rendered Domain XML).
+
 ## [0.8.0] - 2026-11-14
 
 A guest network filter (libvirt's traffic filtering per VM interface) is planned for a later version.

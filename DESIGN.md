@@ -1405,6 +1405,17 @@ This keeps tests maintainable while providing confidence in the system.
 - VM creation orchestration (using mocks)
 - Cleanup behavior (error paths and best-effort cleanup)
 
+### Rendered Domain XML
+`internal/libvirt/testdata/domains/` holds VM files and the domain XML foundry must render for each
+(`<case>.xml`). The hypervisor's architecture is the spec's `arch`, or the one a first line
+`# host-arch: <arch>` names (an emulated guest). `TestGoldenDomainXML` renders every case and compares it
+byte for byte, so a change to what foundry asks libvirt for, on either architecture, fails until the expected
+file is rewritten (`go test ./internal/libvirt -run GoldenDomain -update`) and the change is reviewed in the
+diff. Nothing in it connects to libvirt, so aarch64 output is checked on an x86_64 CI runner with no Arm
+hardware. A file no case renders is an error, and `TestGoldenDomainXMLCanFail` checks that a changed attribute
+or a dropped line is reported. It does not prove that libvirt accepts the XML or that the guest boots; that
+takes a libvirt of the same architecture.
+
 ### Integration Tests
 Black-box tests of foundry against a real libvirt and QEMU, in a file with the `integration` build tag
 (`internal/vm/integration_test.go`), so `go test ./...` never builds them; `make vet` and `make lint` build

@@ -1,0 +1,13 @@
+# The same VM on an aarch64 host: the virt machine, a GIC, SCSI CD-ROMs, no x86 timers.
+apiVersion: foundry.cofront.xyz/v1alpha1
+kind: VirtualMachine
+metadata:
+  name: plain-arm
+spec:
+  arch: aarch64
+  vcpus: 2
+  memoryGiB: 4
+  bootDisk: {sizeGB: 20, image: base.qcow2}
+  networkInterfaces:
+    - {ip: 10.0.0.3/24, gateway: 10.0.0.1, bridge: br0, vlan: 42, defaultRoute: true}
+  cloudInit: {fqdn: plain-arm.example.com}

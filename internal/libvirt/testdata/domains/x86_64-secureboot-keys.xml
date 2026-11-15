@@ -1,0 +1,70 @@
+<domain type="kvm">
+  <name>sb-x86</name>
+  <memory unit="GiB">4</memory>
+  <vcpu placement="static">4</vcpu>
+  <sysinfo type="smbios">
+    <system>
+      <entry name="serial">NODE-0001</entry>
+    </system>
+  </sysinfo>
+  <sysinfo type="fwcfg">
+    <entry name="opt/org.tianocore/EnableLegacyLoader">no</entry>
+  </sysinfo>
+  <os>
+    <type arch="x86_64" machine="q35">hvm</type>
+    <loader readonly="yes" secure="yes" type="pflash">/usr/share/edk2/ovmf/OVMF_CODE.secboot.fd</loader>
+    <nvram template="/var/lib/libvirt/images/foundry/images/varstore_test-keys_x86_64.fd"></nvram>
+    <bios useserial="yes"></bios>
+    <smbios mode="sysinfo"></smbios>
+  </os>
+  <features>
+    <pae></pae>
+    <acpi></acpi>
+    <apic></apic>
+    <smm state="on"></smm>
+  </features>
+  <cpu mode="host-model">
+    <model fallback="allow"></model>
+  </cpu>
+  <clock offset="utc">
+    <timer name="rtc" tickpolicy="catchup"></timer>
+    <timer name="pit" tickpolicy="delay"></timer>
+    <timer name="hpet" present="no"></timer>
+  </clock>
+  <on_poweroff>destroy</on_poweroff>
+  <on_reboot>restart</on_reboot>
+  <on_crash>restart</on_crash>
+  <devices>
+    <disk type="volume" device="disk">
+      <driver name="qemu" type="qcow2" cache="none"></driver>
+      <source pool="foundry-vms" volume="sb-x86_boot.qcow2"></source>
+      <target dev="vda" bus="virtio"></target>
+      <serial>os-disk</serial>
+      <boot order="1"></boot>
+    </disk>
+    <disk type="volume" device="disk">
+      <driver name="qemu" type="qcow2" cache="none"></driver>
+      <source pool="foundry-vms" volume="sb-x86_data-vdb.qcow2"></source>
+      <target dev="vdb" bus="virtio"></target>
+      <serial>data-0</serial>
+    </disk>
+    <controller type="pci" index="0" model="pcie-root"></controller>
+    <interface type="bridge">
+      <mac address="be:ef:0a:00:00:05"></mac>
+      <source bridge="br0"></source>
+      <target dev="vm0a000005"></target>
+      <model type="virtio"></model>
+    </interface>
+    <serial type="pty">
+      <target port="0"></target>
+      <log file="/var/log/libvirt/qemu/foundry/sb-x86-serial.log" append="on"></log>
+    </serial>
+    <console type="pty">
+      <target type="serial" port="0"></target>
+    </console>
+    <memballoon model="virtio"></memballoon>
+    <rng model="virtio">
+      <backend model="random">/dev/urandom</backend>
+    </rng>
+  </devices>
+</domain>
