@@ -1,0 +1,60 @@
+<domain type="kvm">
+  <name>plain-x86</name>
+  <memory unit="GiB">4</memory>
+  <vcpu placement="static">2</vcpu>
+  <os firmware="efi">
+    <type arch="x86_64" machine="q35">hvm</type>
+    <bios useserial="yes"></bios>
+  </os>
+  <features>
+    <pae></pae>
+    <acpi></acpi>
+    <apic></apic>
+  </features>
+  <cpu mode="host-model">
+    <model fallback="allow"></model>
+  </cpu>
+  <clock offset="utc">
+    <timer name="rtc" tickpolicy="catchup"></timer>
+    <timer name="pit" tickpolicy="delay"></timer>
+    <timer name="hpet" present="no"></timer>
+  </clock>
+  <on_poweroff>destroy</on_poweroff>
+  <on_reboot>restart</on_reboot>
+  <on_crash>restart</on_crash>
+  <devices>
+    <disk type="volume" device="disk">
+      <driver name="qemu" type="qcow2" cache="none"></driver>
+      <source pool="foundry-vms" volume="plain-x86_boot.qcow2"></source>
+      <target dev="vda" bus="virtio"></target>
+      <boot order="1"></boot>
+    </disk>
+    <disk type="volume" device="cdrom">
+      <driver name="qemu" type="raw"></driver>
+      <source pool="foundry-vms" volume="plain-x86_cloudinit.iso"></source>
+      <target dev="sda" bus="sata"></target>
+      <readonly></readonly>
+    </disk>
+    <controller type="pci" index="0" model="pcie-root"></controller>
+    <interface type="bridge">
+      <mac address="be:ef:0a:00:00:02"></mac>
+      <source bridge="br0"></source>
+      <vlan>
+        <tag id="42"></tag>
+      </vlan>
+      <target dev="vm0a000002"></target>
+      <model type="virtio"></model>
+    </interface>
+    <serial type="pty">
+      <target port="0"></target>
+      <log file="/var/log/libvirt/qemu/foundry/plain-x86-serial.log" append="on"></log>
+    </serial>
+    <console type="pty">
+      <target type="serial" port="0"></target>
+    </console>
+    <memballoon model="virtio"></memballoon>
+    <rng model="virtio">
+      <backend model="random">/dev/urandom</backend>
+    </rng>
+  </devices>
+</domain>

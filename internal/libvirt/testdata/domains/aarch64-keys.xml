@@ -1,0 +1,52 @@
+<domain type="kvm">
+  <name>keys-arm</name>
+  <memory unit="GiB">4</memory>
+  <vcpu placement="static">4</vcpu>
+  <sysinfo type="smbios">
+    <system>
+      <entry name="serial">NODE-0002</entry>
+    </system>
+  </sysinfo>
+  <os>
+    <type arch="aarch64" machine="virt">hvm</type>
+    <loader readonly="yes" type="pflash">/usr/share/edk2/aarch64/QEMU_EFI-silent-pflash.raw</loader>
+    <nvram template="/var/lib/libvirt/images/foundry/images/varstore_test-keys_aarch64.fd"></nvram>
+    <smbios mode="sysinfo"></smbios>
+  </os>
+  <features>
+    <acpi></acpi>
+    <gic version="3"></gic>
+  </features>
+  <cpu mode="host-passthrough"></cpu>
+  <clock offset="utc"></clock>
+  <on_poweroff>destroy</on_poweroff>
+  <on_reboot>restart</on_reboot>
+  <on_crash>restart</on_crash>
+  <devices>
+    <disk type="volume" device="disk">
+      <driver name="qemu" type="qcow2" cache="none"></driver>
+      <source pool="foundry-vms" volume="keys-arm_boot.qcow2"></source>
+      <target dev="vda" bus="virtio"></target>
+      <serial>os-disk</serial>
+      <boot order="1"></boot>
+    </disk>
+    <controller type="pci" index="0" model="pcie-root"></controller>
+    <interface type="bridge">
+      <mac address="be:ef:0a:00:00:06"></mac>
+      <source bridge="br0"></source>
+      <target dev="vm0a000006"></target>
+      <model type="virtio"></model>
+    </interface>
+    <serial type="pty">
+      <target port="0"></target>
+      <log file="/var/log/libvirt/qemu/foundry/keys-arm-serial.log" append="on"></log>
+    </serial>
+    <console type="pty">
+      <target type="serial" port="0"></target>
+    </console>
+    <memballoon model="virtio"></memballoon>
+    <rng model="virtio">
+      <backend model="random">/dev/urandom</backend>
+    </rng>
+  </devices>
+</domain>

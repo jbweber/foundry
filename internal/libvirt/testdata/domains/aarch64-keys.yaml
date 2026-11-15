@@ -1,0 +1,17 @@
+# The same on aarch64 with a flash varstore and no secureBoot: the key profile
+# is enforced, but there is no lock.
+apiVersion: foundry.cofront.xyz/v1alpha1
+kind: VirtualMachine
+metadata:
+  name: keys-arm
+spec:
+  arch: aarch64
+  vcpus: 4
+  memoryGiB: 4
+  serial: NODE-0002
+  bootDisk: {sizeGB: 40, image: base.qcow2, serial: os-disk}
+  networkInterfaces:
+    - {ip: 10.0.0.6/24, gateway: 10.0.0.1, bridge: br0, defaultRoute: true}
+  firmware:
+    loader: /usr/share/edk2/aarch64/QEMU_EFI-silent-pflash.raw
+    keys: test-keys

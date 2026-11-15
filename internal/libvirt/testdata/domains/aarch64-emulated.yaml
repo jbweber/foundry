@@ -1,0 +1,13 @@
+# host-arch: x86_64
+# An aarch64 guest on an x86_64 host: QEMU emulation, CPU mode maximum.
+apiVersion: foundry.cofront.xyz/v1alpha1
+kind: VirtualMachine
+metadata:
+  name: tcg-arm
+spec:
+  arch: aarch64
+  vcpus: 2
+  memoryGiB: 2
+  bootDisk: {sizeGB: 10, empty: true}
+  networkInterfaces:
+    - {ip: 10.0.0.4/24, gateway: 10.0.0.1, bridge: br0}

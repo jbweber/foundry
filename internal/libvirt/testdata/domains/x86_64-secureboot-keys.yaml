@@ -1,0 +1,22 @@
+# A Secure Boot x86_64 VM: OVMF with the SMM lock, a key profile, the legacy
+# loader off, a serial number, a data disk.
+apiVersion: foundry.cofront.xyz/v1alpha1
+kind: VirtualMachine
+metadata:
+  name: sb-x86
+spec:
+  arch: x86_64
+  vcpus: 4
+  memoryGiB: 4
+  serial: NODE-0001
+  bootDisk: {sizeGB: 40, image: base.qcow2, serial: os-disk}
+  dataDisks:
+    - {device: vdb, sizeGB: 10, serial: data-0}
+  networkInterfaces:
+    - {ip: 10.0.0.5/24, gateway: 10.0.0.1, bridge: br0, defaultRoute: true}
+  firmware:
+    loader: /usr/share/edk2/ovmf/OVMF_CODE.secboot.fd
+    secureBoot: true
+    keys: test-keys
+  fwCfg:
+    - {name: opt/org.tianocore/EnableLegacyLoader, string: "no"}

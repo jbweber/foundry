@@ -1,0 +1,13 @@
+# A plain x86_64 VM: an image, cloud-init, one bridged interface on a VLAN.
+apiVersion: foundry.cofront.xyz/v1alpha1
+kind: VirtualMachine
+metadata:
+  name: plain-x86
+spec:
+  arch: x86_64
+  vcpus: 2
+  memoryGiB: 4
+  bootDisk: {sizeGB: 20, image: base.qcow2}
+  networkInterfaces:
+    - {ip: 10.0.0.2/24, gateway: 10.0.0.1, bridge: br0, vlan: 42, defaultRoute: true}
+  cloudInit: {fqdn: plain-x86.example.com}
